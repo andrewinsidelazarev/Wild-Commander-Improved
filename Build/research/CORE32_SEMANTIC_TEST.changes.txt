@@ -1,0 +1,37 @@
+CORE32/KERNEL semantic test
+
+expanded groups: 34
+CORE32 original line 70: .4 LDI
+CORE32 original line 74: .2 LDI
+CORE32 original line 75: .2 DEC L
+CORE32 original line 78: .2 DEC L
+CORE32 original line 79: .2 LDI
+CORE32 original line 128: .2 LDI
+CORE32 original line 130: .2 LDI
+CORE32 original line 132: .4 LDI
+CORE32 original line 135: .2 LDI
+CORE32 original line 136: .2 DEC L
+CORE32 original line 138: .2 DEC L
+CORE32 original line 139: .2 LDI
+CORE32 original line 151: .2 INC L
+CORE32 original line 163: .5 CALL UCH:JR NC,SNMX
+CORE32 original line 164: .3 INC L
+CORE32 original line 165: .6 CALL UCH:JR NC,SNMX
+CORE32 original line 166: .2 INC L
+CORE32 original line 167: .2 CALL UCH:JR NC,SNMX
+CORE32 original line 207: .3 DEC DE:LD A,(DE):CP 32:JR NZ,SNm
+CORE32 original line 258: .11 RRCA:ADD A,(HL):INC L
+CORE32 original line 434: .2 SLA C:RL B
+CORE32 original line 538: .2 CALL NOPING
+CORE32 original line 668: .5 CALL OEM2UC
+CORE32 original line 672: .6 CALL OEM2UC
+CORE32 original line 675: .2 CALL OEM2UC
+CORE32 original line 877: .2 SLA L:RL H
+CORE32 original line 908: .3 LD A,(HL),(HL),C,(DE),A:INC L,E
+CORE32 original line 920: .2 SLA L:RL H
+CORE32 original line 1062: .2 DEC L
+CORE32 original line 1074: .5 CALL ULNP:JR NC,ENTST
+CORE32 original line 1075: .3 INC L
+CORE32 original line 1076: .6 CALL ULNP:JR NC,ENTST
+CORE32 original line 1077: .2 INC L
+CORE32 original line 1078: .2 CALL ULNP:JR NC,ENTST

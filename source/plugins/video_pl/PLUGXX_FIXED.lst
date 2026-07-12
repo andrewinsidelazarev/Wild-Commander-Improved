@@ -1,0 +1,1274 @@
+PLUGXX_FIXED.ASM line 58: Duplicate label: _LD
+PLUGXX_FIXED.ASM line 59: Duplicate label: _LD
+PLUGXX_FIXED.ASM line 60: Duplicate label: _LD
+PLUGXX_FIXED.ASM line 398: Duplicate label: _LD
+PLUGXX_FIXED.ASM line 399: Duplicate label: _LD
+PLUGXX_FIXED.ASM line 425: Duplicate label: _LD
+PLUGXX_FIXED.ASM line 426: Duplicate label: _LD
+PLUGXX_FIXED.ASM line 459: Duplicate label: _LD
+001   0000             ;Video Player v0.71
+002   0000             ;(C) BUDDER/MGN/2024
+003   0000             ;---------------------------------------
+PLUGXX_FIXED.ASM line 4: Unrecognized instruction: SAVEBIN "video_pl.wmf"
+004   0000                     SAVEBIN "video_pl.wmf"
+005   0000             ;-------
+006   0000                     ORG #6000
+PLUGXX_FIXED.ASM line 7: Unrecognized instruction: INCL "PRTGS.ASM"
+007   6000                     INCL "PRTGS.ASM"
+008   6000             ;-------
+009   6000             ABT     EQU #6004
+010   6000             
+011   6000             WLD     EQU #6006
+012   6000             TMN     EQU #6009;Timer
+013   6000             ;-------
+014   6000             Vfm     EQU #15AF
+015   6000             ;---------------------------------------
+016   6000             ;HEADER:
+017   6000 00                  DS 16
+018   6010                     DB "WildCommanderMDL";    Header
+018   6010 57696C64436F6D6D616E6465724D444C
+019   6020 0E                  DB #0E;                  Version
+020   6021 00                  DB 0;                       Type
+021   6022 01                  DB 1; Pages
+022   6023 00                  DB 0; Page to #8000
+023   6024             ;-------
+024   6024 00 08               DB 0,8; CODE
+025   6026             
+PLUGXX_FIXED.ASM line 26: Invalid labelname: 5
+026   6026 00 00       .5      DB 0,0
+027   6028             ;-------
+028   6028 00                  DS 16
+029   6038             ;-------
+030   6038 54 47 56            DB "TGV"
+031   603B 00                  DS 31*3
+032   6098             ;-------
+033   6098 00                  DB 0
+034   6099             ;-------
+035   6099 FF FF FF FF         DW #FFFF,#FFFF; MAX SIZE
+036   609D             ;-------
+037   609D                     DB "Video Player v0.71              "
+037   609D 566964656F20506C617965722076302E37312020202020202020202020202020
+038   60BD             ;-------
+039   60BD 00                  DB 0
+040   60BE             ;---------------------------------------
+PLUGXX_FIXED.ASM line 41: Unexpected: ,#6200
+041   60BE                     ORG #8000,#6200
+042   8000             ;-------
+043   8000             LOBU    EQU #B000
+044   8000             LOB2    EQU LOBU+512
+045   8000             ;---------------------------------------
+PLUGXX_FIXED.ASM line 46: Unexpected: ,(DADE),DE
+046   8000 22 15 83    PLUGIN  LD (DAHL),HL,(DADE),DE
+047   8003             
+048   8003 CD 51 82            CALL GEDPL
+049   8006 AF                  XOR A
+050   8007 32 19 83            LD (SC),A
+051   800A 32 1C 83            LD (ESTAT),A
+052   800D             
+PLUGXX_FIXED.ASM line 53: Label not found: RET
+PLUGXX_FIXED.ASM line 53: Bytes lost
+PLUGXX_FIXED.ASM line 53: Unexpected: Z
+053   800D CD 00 36            CALL DEVCHE:RET Z
+054   8010             
+PLUGXX_FIXED.ASM line 55: Label not found: CALL
+PLUGXX_FIXED.ASM line 55: Bytes lost
+PLUGXX_FIXED.ASM line 55: Unexpected: PRWOW
+055   8010 DD 21 00 5F         LD IX,PLWND:CALL PRWOW
+056   8014             
+PLUGXX_FIXED.ASM line 57: Unrecognized instruction: HL,TXT0,DE,#000B,BC,12:CALL PRSRW
+057   8014             _LD HL,TXT0,DE,#000B,BC,12:CALL PRSRW
+PLUGXX_FIXED.ASM line 58: Unrecognized instruction: A,%11110111:CALL PRIAT
+058   8014             _LD A,%11110111:CALL PRIAT
+PLUGXX_FIXED.ASM line 59: Unrecognized instruction: HL,TXT00,DE,#010A,BC,14:CALL PRSRW
+059   8014             _LD HL,TXT00,DE,#010A,BC,14:CALL PRSRW
+PLUGXX_FIXED.ASM line 60: Unrecognized instruction: A,%01110000:CALL PRIAT
+060   8014             _LD A,%01110000:CALL PRIAT
+061   8014             
+062   8014 CD E9 80            CALL CLEAR
+063   8017 CD 77 80            CALL HEADER
+064   801A             
+065   801A AF                  XOR A
+066   801B 32 04 60            LD (ABT),A
+067   801E 32 60 80            LD (PGV),A
+068   8021 32 1A 83            LD (PGNA),A
+069   8024 32 43 80            LD (I_N_T+1),A
+070   8027             
+PLUGXX_FIXED.ASM line 71: Unexpected: :HALT
+071   8027 FB                  EI:HALT
+PLUGXX_FIXED.ASM line 72: Unexpected: ,A,#FF:CALL INT_PL
+072   8028 21 42 80            LD HL,I_N_T,A,#FF:CALL INT_PL
+073   802B             ;-------
+PLUGXX_FIXED.ASM line 74: Label not found: JR
+PLUGXX_FIXED.ASM line 74: Bytes lost
+PLUGXX_FIXED.ASM line 74: Unexpected: Z,NXFL
+074   802B CD 00 87    MAIN    CALL LSHOW:JR Z,NXFL
+PLUGXX_FIXED.ASM line 75: Unexpected: ,(I_N_T+1),A
+075   802E 3E 01               LD A,1,(I_N_T+1),A
+PLUGXX_FIXED.ASM line 76: Label not found: OR
+PLUGXX_FIXED.ASM line 76: Bytes lost
+PLUGXX_FIXED.ASM line 76: Unexpected: A:JR Z,MAIN
+076   8030 3E 00               LD A,(ABT):OR A:JR Z,MAIN
+077   8032             
+078   8032 CD 51 82    EXIT    CALL GEDPL
+079   8035 CD 9E 81            CALL STOPM
+080   8038             
+PLUGXX_FIXED.ASM line 81: Label not found: CALL
+PLUGXX_FIXED.ASM line 81: Bytes lost
+PLUGXX_FIXED.ASM line 81: Unexpected: RRESB
+081   8038 DD 21 00 5F         LD IX,PLWND:CALL RRESB
+082   803C 3A 1C 83            LD A,(ESTAT)
+083   803F C9                  RET
+084   8040             ;-------
+PLUGXX_FIXED.ASM line 85: Unexpected: ,(ESTAT),A:JR EXIT
+085   8040 3E 02       NXFL    LD A,2,(ESTAT),A:JR EXIT
+086   8042             ;---------------------------------------
+PLUGXX_FIXED.ASM line 87: Label not found: OR
+PLUGXX_FIXED.ASM line 87: Unexpected: A:RET Z
+087   8042 3E 00       I_N_T   LD A,0:OR A:RET Z
+088   8044             
+089   8044 3E 00               LD A,0
+090   8046             ING     EQU $-1
+PLUGXX_FIXED.ASM line 91: Label not found: INC
+PLUGXX_FIXED.ASM line 91: Bytes lost
+PLUGXX_FIXED.ASM line 91: Unexpected: (HL)
+091   8046 21 00 45            LD HL,ING:INC (HL)
+PLUGXX_FIXED.ASM line 92: Label not found: RET
+PLUGXX_FIXED.ASM line 92: Bytes lost
+PLUGXX_FIXED.ASM line 92: Unexpected: C
+092   8049 FE 00               CP 3:RET C
+093   804B             
+094   804B 3A 1A 83            LD A,(PGNA)
+095   804E E6 30               AND %00110000
+PLUGXX_FIXED.ASM line 96: Invalid labelname: 4
+096   8050 CB 3F       .4      SRL A
+097   8052 3C                  INC A
+098   8053 5F                  LD E,A
+099   8054 3A 60 80            LD A,(PGV)
+PLUGXX_FIXED.ASM line 100: Unexpected: :CP 5:JR C,$+4:LD A,1
+100   8057 3C                  INC A:CP 5:JR C,$+4:LD A,1
+PLUGXX_FIXED.ASM line 101: Unexpected: :JR NZ,GOGO
+101   8058 BB                  CP E:JR NZ,GOGO
+PLUGXX_FIXED.ASM line 102: Unexpected: :RET
+102   8059 35                  DEC (HL):RET
+103   805A 32 60 80    GOGO    LD (PGV),A
+104   805D 36 00               LD (HL),0
+105   805F             
+106   805F             ;LD HL,PGV:INC (HL)
+107   805F             ;LD A,(HL)
+108   805F             ;CP 5:JR C,$+4:LD (HL),1
+109   805F             
+110   805F 3E 01               LD A,1
+111   8061             PGV     EQU $-1
+112   8061 F5                  PUSH AF
+113   8062 CD 5F 82            CALL MNGV_PL
+114   8065             
+PLUGXX_FIXED.ASM line 115: Label not found: CALL
+PLUGXX_FIXED.ASM line 115: Bytes lost
+PLUGXX_FIXED.ASM line 115: Unexpected: GVmod
+115   8065 3E 00               LD A,%00000010:CALL GVmod
+116   8067             
+PLUGXX_FIXED.ASM line 117: Unexpected: ,BC,Vfm:OUT A
+117   8067 3E 10               LD A,%00010000,BC,Vfm:OUT A
+118   8069 F1                  POP AF
+119   806A CB 27               SLA A
+PLUGXX_FIXED.ASM line 120: Unexpected: ,L,0
+120   806C 67                  LD H,A,L,0
+121   806D 11 00 00            LD DE,#0000
+122   8070 3E 10               LD A,512/32
+123   8072             JPS
+PLUGXX_FIXED.ASM line 124: Invalid labelname: 32
+124   8072 ED A0       .32     LDI
+PLUGXX_FIXED.ASM line 125: Unexpected: :JR NZ,JPS
+125   8074 3D                  DEC A:JR NZ,JPS
+PLUGXX_FIXED.ASM line 126: Unexpected: :LD BC,Vfm:OUT A
+126   8075 AF                  XOR A:LD BC,Vfm:OUT A
+127   8076 C9                  RET
+128   8077             ;---------------------------------------
+PLUGXX_FIXED.ASM line 129: Unexpected: ,B,1:CALL LOAD512
+129   8077 21 00 B0    HEADER  LD HL,LOBU,B,1:CALL LOAD512
+130   807A             
+131   807A 2A 20 B0            LD HL,(LOBU+32)
+PLUGXX_FIXED.ASM line 132: Unexpected: :RR L
+132   807D CB 3C               SRL H:RR L
+133   807F 22 13 83            LD (LNZ),HL
+134   8082             
+135   8082 2A 10 B0            LD HL,(LOBU+16)
+PLUGXX_FIXED.ASM line 136: Unexpected: :OR L:CALL NZ,LOADMP3
+136   8085 7C                  LD A,H:OR L:CALL NZ,LOADMP3
+137   8086 C9                  RET
+138   8087             ;---------------------------------------
+139   8087 3A 1A 83    LSHOW   LD A,(PGNA)
+140   808A E6 30               AND %00110000
+PLUGXX_FIXED.ASM line 141: Invalid labelname: 4
+141   808C CB 3F       .4      SRL A
+142   808E 3C                  INC A
+PLUGXX_FIXED.ASM line 143: Unexpected: :LD (DELGADO+2),A
+143   808F CB 27               SLA A:LD (DELGADO+2),A
+144   8091 CB 3F               SRL A
+145   8093             
+146   8093 2A 60 80            LD HL,(PGV)
+PLUGXX_FIXED.ASM line 147: Unexpected: :JR Z,YA
+147   8096 BD                  CP L:JR Z,YA
+148   8097             
+PLUGXX_FIXED.ASM line 149: Unexpected: ,(LINES),HL
+149   8097 2A 13 83            LD HL,(LNZ),(LINES),HL
+PLUGXX_FIXED.ASM line 150: Unexpected: ,B,1:CALL LOAD512
+150   809A 21 00 00    DELGADO LD HL,0,B,1:CALL LOAD512
+151   809D             
+152   809D CD B3 80    NAG     CALL BLKZ
+153   80A0 21 00 C0            LD HL,#C000
+PLUGXX_FIXED.ASM line 154: Unexpected: :CALL LOAD256:CP #0F:RET Z
+154   80A3 47                  LD B,A:CALL LOAD256:CP #0F:RET Z
+PLUGXX_FIXED.ASM line 155: Label not found: OR
+PLUGXX_FIXED.ASM line 155: Bytes lost
+PLUGXX_FIXED.ASM line 155: Unexpected: A:JR NZ,NAG
+155   80A4 3E 00               LD A,(LINES):OR A:JR NZ,NAG
+156   80A6             
+157   80A6 3A 1A 83            LD A,(PGNA)
+158   80A9 E6 30               AND %00110000
+PLUGXX_FIXED.ASM line 159: Label not found: CP
+PLUGXX_FIXED.ASM line 159: Bytes lost
+PLUGXX_FIXED.ASM line 159: Unexpected: 64:JR C,$+3:XOR A
+159   80AB C6 00               ADD A,16:CP 64:JR C,$+3:XOR A
+160   80AD 32 1A 83            LD (PGNA),A
+161   80B0             
+PLUGXX_FIXED.ASM line 162: Label not found: OR
+PLUGXX_FIXED.ASM line 162: Bytes lost
+PLUGXX_FIXED.ASM line 162: Unexpected: A
+162   80B0 3E 00       YA      LD A,1:OR A
+163   80B2 C9                  RET
+164   80B3             ;---------------------------------------
+PLUGXX_FIXED.ASM line 165: Label not found: CALL
+PLUGXX_FIXED.ASM line 165: Bytes lost
+PLUGXX_FIXED.ASM line 165: Unexpected: MNGCVPL
+165   80B3 3E 00       BLKZ    LD A,(PGNA):CALL MNGCVPL
+PLUGXX_FIXED.ASM line 166: Label not found: INC
+PLUGXX_FIXED.ASM line 166: Bytes lost
+PLUGXX_FIXED.ASM line 166: Unexpected: (HL)
+166   80B5 21 00 1A            LD HL,PGNA:INC (HL)
+167   80B8             
+168   80B8 3A 11 83            LD A,(LINES)
+PLUGXX_FIXED.ASM line 169: Label not found: JR
+PLUGXX_FIXED.ASM line 169: Bytes lost
+PLUGXX_FIXED.ASM line 169: Unexpected: NC,LKZ
+169   80BB D6 00               SUB 16:JR NC,LKZ
+170   80BD C6 10               ADD A,16
+PLUGXX_FIXED.ASM line 171: Unexpected: ,(LINES),HL
+171   80BF 21 00 00            LD HL,0,(LINES),HL
+172   80C2 C9                  RET
+173   80C3 32 11 83    LKZ     LD (LINES),A
+174   80C6 3E 10               LD A,16
+175   80C8 C9                  RET
+176   80C9             ;---------------------------------------
+PLUGXX_FIXED.ASM line 177: Unexpected: :EI:HALT:DEC A:JR NZ,$-2
+177   80C9 ED 44       HALD    NEG:EI:HALT:DEC A:JR NZ,$-2
+178   80CB C9                  RET
+179   80CC             ;---------------------------------------
+PLUGXX_FIXED.ASM line 180: Unexpected: ,(LINES),HL
+180   80CC 2A 13 83    SKIP    LD HL,(LNZ),(LINES),HL
+181   80CF             ;LD HL,0,(TMN),HL
+182   80CF             
+PLUGXX_FIXED.ASM line 183: Label not found: CALL
+PLUGXX_FIXED.ASM line 183: Bytes lost
+PLUGXX_FIXED.ASM line 183: Unexpected: LOADNON
+183   80CF 06 00               LD B,1:CALL LOADNON
+PLUGXX_FIXED.ASM line 184: Label not found: CALL
+PLUGXX_FIXED.ASM line 184: Bytes lost
+PLUGXX_FIXED.ASM line 184: Unexpected: LOADNON:CP #0F:RET Z
+184   80D1 06 00       GABUS   LD B,1:CALL LOADNON:CP #0F:RET Z
+185   80D3             
+186   80D3 D9                  EXX
+PLUGXX_FIXED.ASM line 187: Label not found: DEC
+PLUGXX_FIXED.ASM line 187: Bytes lost
+PLUGXX_FIXED.ASM line 187: Unexpected: HL
+187   80D4 21 00 11            LD HL,(LINES):DEC HL
+PLUGXX_FIXED.ASM line 188: Unexpected: :OR L:JR Z,EOFS
+188   80D7 7C                  LD A,H:OR L:JR Z,EOFS
+189   80D8 22 11 83            LD (LINES),HL
+190   80DB D9                  EXX
+191   80DC C3 D1 80            JP GABUS
+192   80DF             ;-------
+PLUGXX_FIXED.ASM line 193: Unexpected: :HALT
+193   80DF FB          EOFS    EI:HALT
+PLUGXX_FIXED.ASM line 194: Unexpected: ,A,4:SUB L:JR C,OMG
+194   80E0 2A 09 60            LD HL,(TMN),A,4:SUB L:JR C,OMG
+PLUGXX_FIXED.ASM line 195: Unexpected: ,A,(SC):SUB H:LD (SC),A
+195   80E3 67                  LD H,A,A,(SC):SUB H:LD (SC),A
+196   80E4 C9                  RET
+197   80E5             ;-------
+PLUGXX_FIXED.ASM line 198: Label not found: ADD
+PLUGXX_FIXED.ASM line 198: Bytes lost
+PLUGXX_FIXED.ASM line 198: Unexpected: A,(HL):LD (HL),A
+198   80E5 21 00 19    OMG     LD HL,SC:ADD A,(HL):LD (HL),A
+199   80E8 C9                  RET
+200   80E9             ;---------------------------------------
+201   80E9 F3          CLEAR   DI
+202   80EA ED 73 0F 83         LD (SPBU),SP
+PLUGXX_FIXED.ASM line 203: Unexpected: :LD (PGNA),A
+203   80EE AF                  XOR A:LD (PGNA),A
+204   80EF             
+PLUGXX_FIXED.ASM line 205: Label not found: CALL
+PLUGXX_FIXED.ASM line 205: Bytes lost
+PLUGXX_FIXED.ASM line 205: Unexpected: MNGCVPL
+205   80EF 3E 00       YUHU    LD A,(PGNA):CALL MNGCVPL
+206   80F1             
+207   80F1 21 00 00            LD HL,0
+208   80F4 31 00 00            LD SP,0
+209   80F7             
+210   80F7 06 80               LD B,128
+PLUGXX_FIXED.ASM line 211: Invalid labelname: 64
+211   80F9 E5          .64     PUSH HL
+212   80FA 10 BE               DJNZ $-64
+213   80FC             
+PLUGXX_FIXED.ASM line 214: Label not found: INC
+PLUGXX_FIXED.ASM line 214: Bytes lost
+PLUGXX_FIXED.ASM line 214: Unexpected: (HL)
+214   80FC 21 00 1A            LD HL,PGNA:INC (HL)
+PLUGXX_FIXED.ASM line 215: Unexpected: :CP 64:JR C,YUHU
+215   80FF 7E                  LD A,(HL):CP 64:JR C,YUHU
+216   8100             
+217   8100 ED 7B 0F 83         LD SP,(SPBU)
+218   8104 FB                  EI
+219   8105 C9                  RET
+220   8106             ;***************************************
+PLUGXX_FIXED.ASM line 221: Label not found: INC
+PLUGXX_FIXED.ASM line 221: Bytes lost
+PLUGXX_FIXED.ASM line 221: Unexpected: A:CALL Z,GSFET
+221   8106 3E 00       LOADMP3 LD A,(GSENA):INC A:CALL Z,GSFET
+PLUGXX_FIXED.ASM line 222: Label not found: OR
+PLUGXX_FIXED.ASM line 222: Bytes lost
+PLUGXX_FIXED.ASM line 222: Unexpected: A:JR NZ,NONGS
+222   8108 3E 00               LD A,(GSENA):OR A:JR NZ,NONGS
+223   810A             
+PLUGXX_FIXED.ASM line 224: Unexpected: :CALL PBSHW,MP3HAND
+224   810A E5                  PUSH HL:CALL PBSHW,MP3HAND
+225   810B E1                  POP HL
+226   810C CD 4C 81            CALL ZALIV
+227   810F C9                  RET
+228   8110             ;-------
+PLUGXX_FIXED.ASM line 229: Label not found: CALL
+PLUGXX_FIXED.ASM line 229: Bytes lost
+PLUGXX_FIXED.ASM line 229: Unexpected: Z,PCM_HAND
+229   8110 FE 00       NONGS   CP 2:CALL Z,PCM_HAND
+PLUGXX_FIXED.ASM line 230: Unexpected: ,EZALIV
+230   8112 CD DB 81            CALL PBSHW,EZALIV
+231   8115 C9                  RET
+232   8116             ;---------------------------------------
+233   8116 E5          EZALIV  PUSH HL
+234   8117 CD F0 81            CALL PBPR
+PLUGXX_FIXED.ASM line 235: Unexpected: ,B,1:CALL LOADNON
+235   811A 21 00 B2            LD HL,LOB2,B,1:CALL LOADNON
+PLUGXX_FIXED.ASM line 236: Label not found: CP
+PLUGXX_FIXED.ASM line 236: Bytes lost
+PLUGXX_FIXED.ASM line 236: Unexpected: 2:CALL Z,SENDGS
+236   811D 3E 00               LD A,(GSENA):CP 2:CALL Z,SENDGS
+237   811F E1                  POP HL
+PLUGXX_FIXED.ASM line 238: Unexpected: :LD A,H:OR L:JP NZ,EZALIV
+238   8120 2B                  DEC HL:LD A,H:OR L:JP NZ,EZALIV
+239   8121 C9                  RET
+240   8122             ;---------------------------------------
+241   8122             PCM_HAND
+242   8122 E5                  PUSH HL
+PLUGXX_FIXED.ASM line 243: Unexpected: :OUT (#B3),A:OUT (#BB),A
+243   8123 AF                  XOR A:OUT (#B3),A:OUT (#BB),A
+PLUGXX_FIXED.ASM line 244: Label not found: CALL
+PLUGXX_FIXED.ASM line 244: Bytes lost
+PLUGXX_FIXED.ASM line 244: Unexpected: SENDCOM
+244   8124 3E 00               LD A,#F3:CALL SENDCOM
+PLUGXX_FIXED.ASM line 245: Label not found: OUT
+PLUGXX_FIXED.ASM line 245: Unexpected: (#B3),A
+245   8126 3E 00               LD A,#00:OUT (#B3),A
+PLUGXX_FIXED.ASM line 246: Label not found: CALL
+PLUGXX_FIXED.ASM line 246: Bytes lost
+PLUGXX_FIXED.ASM line 246: Unexpected: SENDCOM,GSWD
+246   8128 3E 00               LD A,#14:CALL SENDCOM,GSWD
+PLUGXX_FIXED.ASM line 247: Label not found: CALL
+PLUGXX_FIXED.ASM line 247: Bytes lost
+PLUGXX_FIXED.ASM line 247: Unexpected: SENDDAT
+247   812A 3E 00               LD A,#04:CALL SENDDAT
+PLUGXX_FIXED.ASM line 248: Label not found: CALL
+PLUGXX_FIXED.ASM line 248: Unexpected: SENDDAT
+248   812C 3E 00               LD A,#00:CALL SENDDAT
+PLUGXX_FIXED.ASM line 249: Label not found: CALL
+PLUGXX_FIXED.ASM line 249: Bytes lost
+PLUGXX_FIXED.ASM line 249: Unexpected: SENDDAT
+249   812E 3E 00               LD A,#40:CALL SENDDAT
+250   8130             
+PLUGXX_FIXED.ASM line 251: Unexpected: ,BC,GSPCM_E-GSPCM
+251   8130 21 3C 41            LD HL,GSPCM,BC,GSPCM_E-GSPCM
+252   8133 C5          WAVP    PUSH BC
+PLUGXX_FIXED.ASM line 253: Unexpected: :CALL SENDDAT:INC HL
+253   8134 7E                  LD A,(HL):CALL SENDDAT:INC HL
+254   8135 C1                  POP BC
+PLUGXX_FIXED.ASM line 255: Unexpected: :LD A,B:OR C:JR NZ,WAVP
+255   8136 0B                  DEC BC:LD A,B:OR C:JR NZ,WAVP
+256   8137             
+PLUGXX_FIXED.ASM line 257: Unexpected: :OUT (#B3)
+257   8137 AF                  XOR A:OUT (#B3)
+PLUGXX_FIXED.ASM line 258: Label not found: CALL
+PLUGXX_FIXED.ASM line 258: Bytes lost
+PLUGXX_FIXED.ASM line 258: Unexpected: SENDCOM,GSWD
+258   8138 3E 00               LD A,#13:CALL SENDCOM,GSWD
+PLUGXX_FIXED.ASM line 259: Label not found: CALL
+PLUGXX_FIXED.ASM line 259: Bytes lost
+PLUGXX_FIXED.ASM line 259: Unexpected: SENDDAT
+259   813A 3E 00               LD A,#40:CALL SENDDAT
+260   813C E1                  POP HL
+261   813D C9                  RET
+262   813E             ;-------
+263   813E 21 00 B2    SENDGS  LD HL,LOB2
+264   8141 06 00               LD B,0
+PLUGXX_FIXED.ASM line 265: Unexpected: :RLCA:JR C,SGS_L
+265   8143 DB BB       SGS_L   IN A,(#BB):RLCA:JR C,SGS_L
+PLUGXX_FIXED.ASM line 266: Unexpected: :OUT (#B3),A:INC HL
+266   8145 7E                  LD A,(HL):OUT (#B3),A:INC HL
+PLUGXX_FIXED.ASM line 267: Unexpected: :RLCA:JR C,$-4
+267   8146 DB BB               IN A,(#BB):RLCA:JR C,$-4
+PLUGXX_FIXED.ASM line 268: Unexpected: :OUT (#B3),A:INC HL
+268   8148 7E                  LD A,(HL):OUT (#B3),A:INC HL
+269   8149 10 F8               DJNZ SGS_L
+270   814B C9                  RET
+271   814C             ;---------------------------------------
+PLUGXX_FIXED.ASM line 272: Unexpected: :CALL GSLOAD,PBPR
+272   814C E5          ZALIV   PUSH HL:CALL GSLOAD,PBPR
+273   814D E1                  POP HL
+PLUGXX_FIXED.ASM line 274: Unexpected: :LD A,H:OR L:JP NZ,ZALIV
+274   814E 2B                  DEC HL:LD A,H:OR L:JP NZ,ZALIV
+275   814F C9                  RET
+276   8150             ;---------------------------------------
+277   8150 22 21 83    MP3HAND LD (MP3TOGS+4),HL
+278   8153             
+279   8153 AF                  XOR A
+280   8154 D3 B3               OUT (#B3),A
+281   8156 D3 BB               OUT (#BB),A
+282   8158 DB BB               IN A,(#BB)
+283   815A             
+PLUGXX_FIXED.ASM line 284: Label not found: CALL
+PLUGXX_FIXED.ASM line 284: Bytes lost
+PLUGXX_FIXED.ASM line 284: Unexpected: SENDCOM
+284   815A 3E 00               LD A,#F3:CALL SENDCOM
+285   815C             
+PLUGXX_FIXED.ASM line 286: Label not found: OUT
+PLUGXX_FIXED.ASM line 286: Unexpected: (#B3),A
+286   815C 3E 00               LD A,#00:OUT (#B3),A
+PLUGXX_FIXED.ASM line 287: Label not found: CALL
+PLUGXX_FIXED.ASM line 287: Bytes lost
+PLUGXX_FIXED.ASM line 287: Unexpected: SENDCOM,GSWD
+287   815E 3E 00               LD A,#14:CALL SENDCOM,GSWD
+PLUGXX_FIXED.ASM line 288: Label not found: CALL
+PLUGXX_FIXED.ASM line 288: Bytes lost
+PLUGXX_FIXED.ASM line 288: Unexpected: SENDDAT
+288   8160 3E 00               LD A,#04:CALL SENDDAT
+289   8162             
+PLUGXX_FIXED.ASM line 290: Label not found: CALL
+PLUGXX_FIXED.ASM line 290: Unexpected: SENDDAT
+290   8162 3E 00               LD A,#00:CALL SENDDAT
+PLUGXX_FIXED.ASM line 291: Label not found: CALL
+PLUGXX_FIXED.ASM line 291: Bytes lost
+PLUGXX_FIXED.ASM line 291: Unexpected: SENDDAT
+291   8164 3E 00               LD A,#40:CALL SENDDAT
+292   8166             
+PLUGXX_FIXED.ASM line 293: Unexpected: ,BC,#0400
+293   8166 21 1D 83            LD HL,MP3TOGS,BC,#0400
+294   8169             
+295   8169 C5          WAV2    PUSH BC
+PLUGXX_FIXED.ASM line 296: Unexpected: :CALL SENDDAT:INC HL
+296   816A 7E                  LD A,(HL):CALL SENDDAT:INC HL
+297   816B C1                  POP BC
+PLUGXX_FIXED.ASM line 298: Unexpected: :LD A,B:OR C:JR NZ,WAV2
+298   816C 0B                  DEC BC:LD A,B:OR C:JR NZ,WAV2
+299   816D             
+PLUGXX_FIXED.ASM line 300: Unexpected: :OUT (#B3)
+300   816D AF                  XOR A:OUT (#B3)
+PLUGXX_FIXED.ASM line 301: Label not found: CALL
+PLUGXX_FIXED.ASM line 301: Bytes lost
+PLUGXX_FIXED.ASM line 301: Unexpected: SENDCOM,GSWD
+301   816E 3E 00               LD A,#13:CALL SENDCOM,GSWD
+PLUGXX_FIXED.ASM line 302: Label not found: CALL
+PLUGXX_FIXED.ASM line 302: Bytes lost
+PLUGXX_FIXED.ASM line 302: Unexpected: SENDDAT
+302   8170 3E 00               LD A,#40:CALL SENDDAT
+303   8172             
+PLUGXX_FIXED.ASM line 304: Unexpected: :OUT (#BB),A
+304   8172 AF                  XOR A:OUT (#BB),A
+305   8173 DB B3               IN A,(#B3)
+306   8175 C9                  RET
+307   8176             ;-------
+PLUGXX_FIXED.ASM line 308: Unexpected: ,B,1:CALL LOAD512
+308   8176 21 00 B2    GSLOAD  LD HL,LOB2,B,1:CALL LOAD512
+309   8179             
+310   8179 21 00 B2            LD HL,LOB2
+311   817C 01 BB 80            LD BC,#80BB
+PLUGXX_FIXED.ASM line 312: Illegal instruction: TE1     IN A:RLCA:JR C,TE1
+312   817F             TE1     IN A:RLCA:JR C,TE1
+PLUGXX_FIXED.ASM line 313: Unexpected: :OUT (#B3),A:INC L
+313   817F 7E          RDA     LD A,(HL):OUT (#B3),A:INC L
+PLUGXX_FIXED.ASM line 314: Illegal instruction: TE2     IN A:RLCA:JR C,TE2
+314   8180             TE2     IN A:RLCA:JR C,TE2
+PLUGXX_FIXED.ASM line 315: Unexpected: :OUT (#B3),A:INC L
+315   8180 7E          RDB     LD A,(HL):OUT (#B3),A:INC L
+PLUGXX_FIXED.ASM line 316: Illegal instruction: TE3     IN A:RLCA:JR C,TE3
+316   8181             TE3     IN A:RLCA:JR C,TE3
+PLUGXX_FIXED.ASM line 317: Unexpected: :OUT (#B3),A:INC L
+317   8181 7E          RDC     LD A,(HL):OUT (#B3),A:INC L
+PLUGXX_FIXED.ASM line 318: Illegal instruction: TE4     IN A:RLCA:JR C,TE4
+318   8182             TE4     IN A:RLCA:JR C,TE4
+PLUGXX_FIXED.ASM line 319: Unexpected: :OUT (#B3),A:INC HL
+319   8182 7E          RDD     LD A,(HL):OUT (#B3),A:INC HL
+320   8183 10 FA               DJNZ TE1
+321   8185 C9                  RET
+322   8186             ;-------
+PLUGXX_FIXED.ASM line 323: Unexpected: :RET
+323   8186 D3 BB       SNDCOM  OUT (#BB),A:RET
+324   8188 D3 BB       SENDCOM OUT (#BB),A
+325   818A DB BB       GSWC    IN A,(#BB)
+326   818C 0F                  RRCA
+327   818D 38 FB               JR C,GSWC
+328   818F C9                  RET
+329   8190 DB BB       GWC     IN A,(#BB)
+330   8192 0F                  RRCA
+331   8193 C9                  RET
+332   8194             ;-------
+333   8194 D3 B3       SENDDAT OUT (#B3),A
+PLUGXX_FIXED.ASM line 334: Unexpected: :RLCA:JR C,GSWD
+334   8196 DB BB       GSWD    IN A,(#BB):RLCA:JR C,GSWD
+335   8198 C9                  RET
+336   8199             ;-------
+PLUGXX_FIXED.ASM line 337: Unexpected: :RLCA:JR NC,GETDAT
+337   8199 DB BB       GETDAT  IN A,(#BB):RLCA:JR NC,GETDAT
+338   819B DB B3               IN A,(#B3)
+339   819D C9                  RET
+340   819E             ;---------------------------------------
+PLUGXX_FIXED.ASM line 341: Label not found: CALL
+PLUGXX_FIXED.ASM line 341: Bytes lost
+PLUGXX_FIXED.ASM line 341: Unexpected: SNDCOM:RET
+341   819E 3E 00       STOPM   LD A,#FE:CALL SNDCOM:RET
+342   81A0             ;---------------------------------------
+PLUGXX_FIXED.ASM line 343: Label not found: OUT
+PLUGXX_FIXED.ASM line 343: Bytes lost
+PLUGXX_FIXED.ASM line 343: Unexpected: (#33)
+343   81A0 3E 00       GSFET   LD A,#80:OUT (#33)
+344   81A2 FB                  EI
+PLUGXX_FIXED.ASM line 345: Invalid labelname: 2
+345   81A3 76          .2      HALT
+PLUGXX_FIXED.ASM line 346: Label not found: OUT
+PLUGXX_FIXED.ASM line 346: Bytes lost
+PLUGXX_FIXED.ASM line 346: Unexpected: (#BB),A
+346   81A4 3E 00               LD A,#F3:OUT (#BB),A
+347   81A6             
+PLUGXX_FIXED.ASM line 348: Label not found: JR
+PLUGXX_FIXED.ASM line 348: Bytes lost
+PLUGXX_FIXED.ASM line 348: Unexpected: Z,WSE
+348   81A6 CD 00 D1            CALL DYK:JR Z,WSE
+349   81A9             
+PLUGXX_FIXED.ASM line 350: Label not found: OUT
+PLUGXX_FIXED.ASM line 350: Bytes lost
+PLUGXX_FIXED.ASM line 350: Unexpected: (#BB),A
+350   81A9 3E 00               LD A,#23:OUT (#BB),A
+351   81AB 01 00 0F            LD BC,#0F00
+PLUGXX_FIXED.ASM line 352: Unexpected: :LD A,B:OR C:JR Z,WSE
+352   81AE 0B          DIK     DEC BC:LD A,B:OR C:JR Z,WSE
+353   81AF DB BB               IN A,(#BB)
+354   81B1 0F                  RRCA
+355   81B2 38 FA               JR C,DIK
+PLUGXX_FIXED.ASM line 356: Unexpected: :CP 3:JR C,WSE
+356   81B4 DB B3               IN A,(#B3):CP 3:JR C,WSE
+PLUGXX_FIXED.ASM line 357: Label not found: OUT
+PLUGXX_FIXED.ASM line 357: Bytes lost
+PLUGXX_FIXED.ASM line 357: Unexpected: (#B3),A
+357   81B6 3E 00       WNE     LD A,1:OUT (#B3),A
+PLUGXX_FIXED.ASM line 358: Label not found: CALL
+PLUGXX_FIXED.ASM line 358: Bytes lost
+PLUGXX_FIXED.ASM line 358: Unexpected: SENDCOM
+358   81B8 3E 00               LD A,#6A:CALL SENDCOM
+PLUGXX_FIXED.ASM line 359: Unexpected: :OUT (#B3),A
+359   81BA AF                  XOR A:OUT (#B3),A
+PLUGXX_FIXED.ASM line 360: Label not found: CALL
+PLUGXX_FIXED.ASM line 360: Bytes lost
+PLUGXX_FIXED.ASM line 360: Unexpected: SENDCOM
+360   81BB 3E 00               LD A,#6B:CALL SENDCOM
+361   81BD AF                  XOR A
+362   81BE 18 0B               JR WZE ;NeoGS found (GSENA=0)
+363   81C0             
+364   81C0             WSE     ;Check for standard GS
+PLUGXX_FIXED.ASM line 365: Label not found: OUT
+PLUGXX_FIXED.ASM line 365: Bytes lost
+PLUGXX_FIXED.ASM line 365: Unexpected: (#BB),A
+365   81C0 3E 00               LD A,#F3:OUT (#BB),A
+366   81C2 06 FF               LD B,255
+PLUGXX_FIXED.ASM line 367: Unexpected: :IN A,(#BB):RRCA:JR NC,GS_OK
+367   81C4 76          GS_WAIT HALT:IN A,(#BB):RRCA:JR NC,GS_OK
+368   81C5 10 FD               DJNZ GS_WAIT
+PLUGXX_FIXED.ASM line 369: Label not found: OR
+PLUGXX_FIXED.ASM line 369: Bytes lost
+PLUGXX_FIXED.ASM line 369: Unexpected: A:JR WZE 
+369   81C7 3E 00               LD A,1:OR A:JR WZE ;No GS (GSENA=1)
+370   81C9             
+371   81C9 3E 02       GS_OK   LD A,2 ;Standard GS found (GSENA=2)
+372   81CB             ;-------
+373   81CB 32 1B 83    WZE     LD (GSENA),A
+PLUGXX_FIXED.ASM line 374: Unexpected: :LD A,#F3:CALL SNDCOM
+374   81CE F5                  PUSH AF:LD A,#F3:CALL SNDCOM
+375   81CF F1                  POP AF
+376   81D0 C9                  RET
+377   81D1             ;-------
+378   81D1 06 30       DYK     LD B,#30
+PLUGXX_FIXED.ASM line 379: Unexpected: :HALT
+379   81D3 76          D_K     HALT:HALT
+PLUGXX_FIXED.ASM line 380: Unexpected: :LD A,B:RET Z
+380   81D4 05                  DEC B:LD A,B:RET Z
+PLUGXX_FIXED.ASM line 381: Unexpected: :RRA:JR C,D_K
+381   81D5 DB BB               IN A,(#BB):RRA:JR C,D_K
+PLUGXX_FIXED.ASM line 382: Unexpected: :INC A
+382   81D7 AF                  XOR A:INC A
+383   81D8 C9                  RET
+384   81D9             
+PLUGXX_FIXED.ASM line 385: Label not found: OUT
+PLUGXX_FIXED.ASM line 385: Bytes lost
+PLUGXX_FIXED.ASM line 385: Unexpected: (#BB):RET
+385   81D9 3E 00       MUTEGS  LD A,#F3:OUT (#BB):RET
+386   81DB             ;---------------------------------------
+387   81DB E5          PBSHW   PUSH HL
+PLUGXX_FIXED.ASM line 388: Unexpected: ,E,H,H,L,L,D
+388   81DC 16 00               LD D,0,E,H,H,L,L,D
+389   81DE CD 15 82            CALL DEL32
+390   81E1 22 22 82            LD (PBSTL+1),HL
+391   81E4 ED 53 1E 82         LD (PBSTH+1),DE
+PLUGXX_FIXED.ASM line 392: Unexpected: ,(PBNOW),HL,(PBNOW+2),HL
+392   81E8 21 00 00            LD HL,0,(PBNOW),HL,(PBNOW+2),HL
+393   81EB E1                  POP HL
+394   81EC C9                  RET
+395   81ED             ;-------
+396   81ED FB          PBHTW   EI
+PLUGXX_FIXED.ASM line 397: Invalid labelname: 4
+397   81EE 76          .4      HALT
+PLUGXX_FIXED.ASM line 398: Label has different value in pass 2: _LD
+PLUGXX_FIXED.ASM line 398: Unrecognized instruction: IX,PLWND
+398   81EF             _LD IX,PLWND
+PLUGXX_FIXED.ASM line 399: Label has different value in pass 2: _LD
+PLUGXX_FIXED.ASM line 399: Unrecognized instruction: HL,TXT32,DE,#0201,BC,32:CALL PRSRW
+399   81EF             _LD HL,TXT32,DE,#0201,BC,32:CALL PRSRW
+400   81EF C9                  RET
+401   81F0             ;-------
+402   81F0 2A 0B 83    PBPR    LD HL,(PBNOW)
+403   81F3 ED 5B 0D 83         LD DE,(PBNOW+2)
+404   81F7 01 00 01            LD BC,256
+PLUGXX_FIXED.ASM line 405: Unexpected: :JR NC,$+3:INC DE
+405   81FA 09                  ADD HL,BC:JR NC,$+3:INC DE
+406   81FB 22 0B 83            LD (PBNOW),HL
+407   81FE ED 53 0D 83         LD (PBNOW+2),DE
+408   8202             
+409   8202 CD 18 82            CALL DELIT4P
+410   8205             
+411   8205 21 77 82            LD HL,TXTBU
+412   8208 0E 20               LD C,32
+PLUGXX_FIXED.ASM line 413: Unexpected: :JR NZ,$+5:LD A,C:JR DoL
+413   820A B7                  OR A:JR NZ,$+5:LD A,C:JR DoL
+PLUGXX_FIXED.ASM line 414: Unexpected: :JR C,$+3:LD A,C
+414   820B B9                  CP C:JR C,$+3:LD A,C
+415   820C 47                  LD B,A
+PLUGXX_FIXED.ASM line 416: Unexpected: :SUB B
+416   820D 79                  LD A,C:SUB B
+417   820E             
+418   820E 0E DB               LD C,#DB
+PLUGXX_FIXED.ASM line 419: Unexpected: :INC HL:DJNZ $-2
+419   8210 71                  LD (HL),C:INC HL:DJNZ $-2
+420   8211             
+PLUGXX_FIXED.ASM line 421: Unexpected: :JR Z,DOL
+421   8211 B7                  OR A:JR Z,DOL
+PLUGXX_FIXED.ASM line 422: Unexpected: ,C,#B1
+422   8212 47          DoL     LD B,A,C,#B1
+PLUGXX_FIXED.ASM line 423: Unexpected: :INC HL:DJNZ $-2
+423   8213 71                  LD (HL),C:INC HL:DJNZ $-2
+424   8214             DOL
+PLUGXX_FIXED.ASM line 425: Label has different value in pass 2: _LD
+PLUGXX_FIXED.ASM line 425: Unrecognized instruction: IX,PLWND
+425   8214             _LD IX,PLWND
+PLUGXX_FIXED.ASM line 426: Label has different value in pass 2: _LD
+PLUGXX_FIXED.ASM line 426: Unrecognized instruction: HL,TXTBU,DE,#0201,BC,32:CALL PRSRW
+426   8214             _LD HL,TXTBU,DE,#0201,BC,32:CALL PRSRW
+427   8214 C9                  RET
+428   8215             ;---------------------------------------
+429   8215             DEL32
+PLUGXX_FIXED.ASM line 430: Invalid labelname: 5
+PLUGXX_FIXED.ASM line 430: Unexpected: :RR E,H,L
+430   8215 CB 3A       .5      SRL D:RR E,H,L
+431   8217 C9                  RET
+432   8218             ;-------
+433   8218 DD 21 FF FF DELIT4P LD IX,0-1
+434   821C B7          NAZE    OR A
+PLUGXX_FIXED.ASM line 435: Label not found: INC
+PLUGXX_FIXED.ASM line 435: Unexpected: IX
+435   821D 01 00 00    PBSTH   LD BC,0:INC IX
+PLUGXX_FIXED.ASM line 436: Unexpected: :SBC HL,BC:JR C,ND
+436   8220 EB                  EX DE,HL:SBC HL,BC:JR C,ND
+437   8221 01 00 00    PBSTL   LD BC,0
+PLUGXX_FIXED.ASM line 438: Unexpected: :SBC HL,BC:JR NC,PBSTH
+438   8224 EB                  EX DE,HL:SBC HL,BC:JR NC,PBSTH
+439   8225 1B                  DEC DE
+PLUGXX_FIXED.ASM line 440: Unexpected: :INC A:JR NZ,NAZE
+440   8226 7A                  LD A,D:INC A:JR NZ,NAZE
+PLUGXX_FIXED.ASM line 441: Unexpected: :INC A:JR NZ,NAZE
+441   8227 7B                  LD A,E:INC A:JR NZ,NAZE
+442   8228 13                  INC DE
+443   8229             
+444   8229 09                  ADD HL,BC
+445   822A EB                  EX DE,HL
+446   822B ED 4B 1E 82         LD BC,(PBSTH+1)
+447   822F 09          ND      ADD HL,BC
+448   8230 EB                  EX DE,HL
+449   8231 DD E5               PUSH IX
+450   8233 C1                  POP BC
+451   8234 79                  LD A,C
+452   8235 C9                  RET
+453   8236             ;---------------------------------------
+PLUGXX_FIXED.ASM line 454: Unexpected: :CP 2:RET NZ
+454   8236 DD 7E 1D    DEVCHE  LD A,(IX+29):CP 2:RET NZ
+455   8239             
+456   8239 CD 51 82            CALL GEDPL
+457   823C             
+PLUGXX_FIXED.ASM line 458: Label not found: CALL
+PLUGXX_FIXED.ASM line 458: Bytes lost
+PLUGXX_FIXED.ASM line 458: Unexpected: PRWOW
+458   823C DD 21 00 6B         LD IX,ERWND:CALL PRWOW
+PLUGXX_FIXED.ASM line 459: Label has different value in pass 2: _LD
+PLUGXX_FIXED.ASM line 459: Unrecognized instruction: HL,TXTER,DE,#0103,BC,26:CALL PRSRW
+459   8240             _LD HL,TXTER,DE,#0103,BC,26:CALL PRSRW
+460   8240             
+461   8240 CD 55 82            CALL USPO
+462   8243 CD 57 82            CALL NUSP
+463   8246             
+464   8246 CD 4D 82            CALL RRESB
+465   8249             
+466   8249 AF                  XOR A
+467   824A C9                  RET
+468   824B             ;---------------------------------------
+PLUGXX_FIXED.ASM line 469: Label not found: JP
+PLUGXX_FIXED.ASM line 469: Bytes lost
+PLUGXX_FIXED.ASM line 469: Unexpected: WLD
+469   824B 3E 00       PRWOW   LD A,1:JP WLD
+PLUGXX_FIXED.ASM line 470: Label not found: JP
+PLUGXX_FIXED.ASM line 470: Bytes lost
+PLUGXX_FIXED.ASM line 470: Unexpected: WLD
+470   824D 3E 00       RRESB   LD A,2:JP WLD
+PLUGXX_FIXED.ASM line 471: Label not found: JP
+PLUGXX_FIXED.ASM line 471: Bytes lost
+PLUGXX_FIXED.ASM line 471: Unexpected: WLD
+471   824F 3E 00       PRSRW   LD A,3:JP WLD
+PLUGXX_FIXED.ASM line 472: Unrecognized instruction: EXA:LD A,4:JP WLD
+472   8251             PRIAT   EXA:LD A,4:JP WLD
+473   8251             
+PLUGXX_FIXED.ASM line 474: Unrecognized instruction: EXA:LD A,13:JP WLD
+474   8251             DMAPL   EXA:LD A,13:JP WLD
+PLUGXX_FIXED.ASM line 475: Label not found: JP
+PLUGXX_FIXED.ASM line 475: Bytes lost
+PLUGXX_FIXED.ASM line 475: Unexpected: WLD
+475   8251 3E 00       GEDPL   LD A,15:JP WLD
+476   8253             ;-------
+PLUGXX_FIXED.ASM line 477: Label not found: JP
+PLUGXX_FIXED.ASM line 477: Bytes lost
+PLUGXX_FIXED.ASM line 477: Unexpected: WLD
+477   8253 3E 00       ESC     LD A,23:JP WLD
+PLUGXX_FIXED.ASM line 478: Label not found: JP
+PLUGXX_FIXED.ASM line 478: Bytes lost
+PLUGXX_FIXED.ASM line 478: Unexpected: WLD
+478   8255 3E 00       USPO    LD A,46:JP WLD
+PLUGXX_FIXED.ASM line 479: Label not found: JP
+PLUGXX_FIXED.ASM line 479: Bytes lost
+PLUGXX_FIXED.ASM line 479: Unexpected: WLD
+479   8257 3E 00       NUSP    LD A,47:JP WLD
+480   8259             ;-------
+PLUGXX_FIXED.ASM line 481: Label not found: JP
+PLUGXX_FIXED.ASM line 481: Bytes lost
+PLUGXX_FIXED.ASM line 481: Unexpected: WLD
+481   8259 3E 00       LOAD512 LD A,48:JP WLD
+PLUGXX_FIXED.ASM line 482: Label not found: JP
+PLUGXX_FIXED.ASM line 482: Bytes lost
+PLUGXX_FIXED.ASM line 482: Unexpected: WLD
+482   825B 3E 00       LOAD256 LD A,60:JP WLD
+PLUGXX_FIXED.ASM line 483: Label not found: JP
+PLUGXX_FIXED.ASM line 483: Bytes lost
+PLUGXX_FIXED.ASM line 483: Unexpected: WLD
+483   825D 3E 00       LOADNON LD A,61:JP WLD
+484   825F             ;-------
+PLUGXX_FIXED.ASM line 485: Unrecognized instruction: EXA:LD A,64:JP WLD
+485   825F             MNGV_PL EXA:LD A,64:JP WLD
+PLUGXX_FIXED.ASM line 486: Unrecognized instruction: EXA:LD A,65:JP WLD
+486   825F             MNGCVPL EXA:LD A,65:JP WLD
+PLUGXX_FIXED.ASM line 487: Unrecognized instruction: EXA:LD A,66:JP WLD
+487   825F             GVmod   EXA:LD A,66:JP WLD
+488   825F             ;-------
+PLUGXX_FIXED.ASM line 489: Unrecognized instruction: EXA:LD A,86:JP WLD
+489   825F             INT_PL  EXA:LD A,86:JP WLD
+490   825F             ;---------------------------------------
+491   825F 93 00       PLWND   DB 3+16+128,0
+492   8261 FF FF               DB 255,255;  X,Y
+493   8263 22 04               DB 32+2,2+2; W,H
+494   8265 7F                  DB %01111111;PAPER+INK
+495   8266 00                  DB 0
+496   8267 00 00               DW #0000;    BUFFER
+497   8269 00 00               DB 0,0;      LINES
+498   826B             ;-------
+499   826B 93 00       ERWND   DB 3+16+128,0
+500   826D FF FF               DB 255,255;  X,Y
+501   826F 22 03               DB 32+2,1+2; W,H
+502   8271 2F                  DB %00101111;PAPER+INK
+503   8272 00                  DB 0
+504   8273 00 00               DW #0000;    BUFFER
+505   8275 00 00               DB 0,0;      LINES
+506   8277             ;-------
+507   8277 00          TXTBU   DS 64
+508   82B7 00          TXT32   DS 32
+509   82D7             
+510   82D7             TXT0    DB "Video Player"
+510   82D7 566964656F20506C61796572
+511   82E3             TXT00   DB "Please Wait..."
+511   82E3 506C6561736520576169742E2E2E
+512   82F1             
+513   82F1             TXTER   DB "CAN'T PLAY FROM SD(NGS)!!!"
+513   82F1 43414E275420504C41592046524F4D205344284E475329212121
+514   830B             ;---------------------------------------
+515   830B 00          PBNOW   DS 4
+516   830F             
+517   830F 00          SPBU    DS 2
+518   8311 00          LINES   DS 2
+519   8313 00          LNZ     DS 2
+520   8315             
+521   8315 00          DAHL    DS 2
+522   8317 00          DADE    DS 2
+523   8319             
+524   8319 00          SC      NOP
+525   831A 00          PGNA    NOP
+526   831B             
+527   831B FF          GSENA   DB #FF
+528   831C 00          ESTAT   NOP
+529   831D             END
+530   831D             ;---------------------------------------
+531   831D             ;---------------------------------------
+532   831D             ;--------------MP3 Driver---------------
+533   831D             ;---------------------------------------
+534   831D             ORGSWAV EQU #6200+END-PLUGIN
+535   831D             ;-------
+PLUGXX_FIXED.ASM line 536: Unexpected: ,ORGSWAV
+536   831D             MP3TOGS ORG #4000,ORGSWAV
+537   4000 F3                  DI
+538   4001 F3                  DI
+539   4002 18 02               JR $+2+2
+540   4004 00                  DS 2
+541   4006             ;-------
+542   4006 31 00 50            LD SP,#5000
+PLUGXX_FIXED.ASM line 543: Unexpected: ,(#5EFF),HL
+543   4009 21 6B 40            LD HL,I_U_T,(#5EFF),HL
+PLUGXX_FIXED.ASM line 544: Unexpected: ,I,A
+544   400C 3E 5E               LD A,#5E,I,A
+545   400E ED 5E               IM 2
+546   4010             ;-------
+PLUGXX_FIXED.ASM line 547: Label not found: CALL
+PLUGXX_FIXED.ASM line 547: Bytes lost
+PLUGXX_FIXED.ASM line 547: Unexpected: FREQNC
+547   4010 3E 00               LD A,3:CALL FREQNC
+548   4012             
+PLUGXX_FIXED.ASM line 549: Unexpected: ,(PAGR2+1),A
+549   4012 3E 01               LD A,1,(PAGR2+1),A
+PLUGXX_FIXED.ASM line 550: Label not found: INC
+PLUGXX_FIXED.ASM line 550: Bytes lost
+PLUGXX_FIXED.ASM line 550: Unexpected: (HL):LD A,(HL)
+550   4014 21 00 77    LDE2    LD HL,PAGR2+1:INC (HL):LD A,(HL)
+551   4017 D3 00               OUT (#00),A
+PLUGXX_FIXED.ASM line 552: Label not found: CALL
+PLUGXX_FIXED.ASM line 552: Bytes lost
+PLUGXX_FIXED.ASM line 552: Unexpected: LDPG:JR NZ,LDE2
+552   4019 21 00 00            LD HL,#8000:CALL LDPG:JR NZ,LDE2
+553   401C             
+554   401C D3 00               OUT (#00),A
+PLUGXX_FIXED.ASM line 555: Unexpected: ,(PAG2+1),A
+555   401E 3E 02               LD A,2,(PAG2+1),A
+556   4020             ;-------
+557   4020 CD 87 40            CALL MP3INIT
+558   4023             ;-------
+PLUGXX_FIXED.ASM line 559: Unexpected: :LD HL,#8000
+559   4023 D9                  EXX:LD HL,#8000
+560   4024 D9                  EXX
+561   4025             ;-------
+562   4025 FB                  EI
+563   4026 01 02 00            LD BC,#02
+PLUGXX_FIXED.ASM line 564: Unexpected: :OR A:JR NZ,EXIT2
+564   4029 DB 01       WAITNGS IN A,(#01):OR A:JR NZ,EXIT2
+565   402B DB 04               IN A,(#04)
+PLUGXX_FIXED.ASM line 566: Unexpected: :JR NC,WAITNGS
+566   402D 07                  RLCA:JR NC,WAITNGS
+567   402E C3 29 40            JP WAITNGS
+568   4031             ;-------
+PLUGXX_FIXED.ASM line 569: Unexpected: :JR NZ,FUCK2
+569   4031 3C          EXIT2   INC A:JR NZ,FUCK2
+PLUGXX_FIXED.ASM line 570: Illegal instruction:         IN A
+570   4032                     IN A
+PLUGXX_FIXED.ASM line 571: Unexpected: ,E,A
+571   4032 3A 77 40            LD A,(PAGR2+1),E,A
+PLUGXX_FIXED.ASM line 572: Label not found: CP
+PLUGXX_FIXED.ASM line 572: Bytes lost
+PLUGXX_FIXED.ASM line 572: Unexpected: E:JR Z,NXS2
+572   4035 3E 00       EXT2    LD A,(PAG2+1):CP E:JR Z,NXS2
+PLUGXX_FIXED.ASM line 573: Unexpected: :CP #80:JR C,EXT2
+573   4037 7C                  LD A,H:CP #80:JR C,EXT2
+PLUGXX_FIXED.ASM line 574: Label not found: INC
+PLUGXX_FIXED.ASM line 574: Unexpected: HL
+574   4038 36 00               LD (HL),0:INC HL
+575   403A 18 F9               JR EXT2
+PLUGXX_FIXED.ASM line 576: Label not found: CP
+PLUGXX_FIXED.ASM line 576: Bytes lost
+PLUGXX_FIXED.ASM line 576: Unexpected: E:JR NZ,EAH
+576   403C 3E 00       NXS2    LD A,(PAG2+1):CP E:JR NZ,EAH
+577   403E 18 FC               JR NXS2
+578   4040             ;-------
+PLUGXX_FIXED.ASM line 579: Illegal instruction: FUCK2   IN A
+579   4040             FUCK2   IN A
+580   4040 F3          EAH     DI
+PLUGXX_FIXED.ASM line 581: Unexpected: ,(I_U_T),HL
+581   4041 21 FB C9            LD HL,#C9FB,(I_U_T),HL
+PLUGXX_FIXED.ASM line 582: Label not found: CALL
+PLUGXX_FIXED.ASM line 582: Bytes lost
+PLUGXX_FIXED.ASM line 582: Unexpected: FREQNC
+582   4044 3E 00               LD A,3:CALL FREQNC
+583   4046 C3 00 00            JP #0000
+584   4049             ;---------------------------------------
+585   4049 0E 40       LDPG    LD C,64
+586   404B 06 80       D512    LD B,#80
+PLUGXX_FIXED.ASM line 587: Unexpected: :RLCA:JR NC,D1
+587   404D DB 04       D1      IN A,(#04):RLCA:JR NC,D1
+PLUGXX_FIXED.ASM line 588: Unexpected: :LD (HL),A:INC L
+588   404F DB 02               IN A,(#02):LD (HL),A:INC L
+PLUGXX_FIXED.ASM line 589: Unexpected: :RLCA:JR NC,D2
+589   4051 DB 04       D2      IN A,(#04):RLCA:JR NC,D2
+PLUGXX_FIXED.ASM line 590: Unexpected: :LD (HL),A:INC L
+590   4053 DB 02               IN A,(#02):LD (HL),A:INC L
+PLUGXX_FIXED.ASM line 591: Unexpected: :RLCA:JR NC,D3
+591   4055 DB 04       D3      IN A,(#04):RLCA:JR NC,D3
+PLUGXX_FIXED.ASM line 592: Unexpected: :LD (HL),A:INC L
+592   4057 DB 02               IN A,(#02):LD (HL),A:INC L
+PLUGXX_FIXED.ASM line 593: Unexpected: :RLCA:JR NC,D4
+593   4059 DB 04       D4      IN A,(#04):RLCA:JR NC,D4
+PLUGXX_FIXED.ASM line 594: Unexpected: :LD (HL),A:INC HL
+594   405B DB 02               IN A,(#02):LD (HL),A:INC HL
+595   405D 10 EE               DJNZ D1
+596   405F             
+PLUGXX_FIXED.ASM line 597: Label not found: DEC
+PLUGXX_FIXED.ASM line 597: Bytes lost
+PLUGXX_FIXED.ASM line 597: Unexpected: DE
+597   405F 11 00 04            LD DE,(#4000+4):DEC DE
+598   4062 ED 53 04 40         LD (#4000+4),DE
+PLUGXX_FIXED.ASM line 599: Unexpected: :OR E:RET Z
+599   4066 7A                  LD A,D:OR E:RET Z
+600   4067             
+PLUGXX_FIXED.ASM line 601: Unexpected: :JP NZ,D512
+601   4067 0D                  DEC C:JP NZ,D512
+PLUGXX_FIXED.ASM line 602: Label not found: OR
+PLUGXX_FIXED.ASM line 602: Bytes lost
+PLUGXX_FIXED.ASM line 602: Unexpected: A
+602   4068 3E 00               LD A,1:OR A
+603   406A C9                  RET
+604   406B             
+605   406B             ;---------------------------------------
+PLUGXX_FIXED.ASM line 606: Unexpected: :EXA
+606   406B D9          I_U_T   EXX:EXA
+607   406C             ;-------
+PLUGXX_FIXED.ASM line 608: Label not found: OUT
+PLUGXX_FIXED.ASM line 608: Bytes lost
+PLUGXX_FIXED.ASM line 608: Unexpected: (#00),A
+608   406C 3E 00       PAG2    LD A,2:OUT (#00),A
+609   406E             
+PLUGXX_FIXED.ASM line 610: Label not found: SSTAT
+PLUGXX_FIXED.ASM line 610: Unexpected: :RRA:JR NC,PAGR2
+610   406E DB 00               IN A,(SSTAT):RRA:JR NC,PAGR2
+611   4070 06 20               LD B,#20
+PLUGXX_FIXED.ASM line 612: Unexpected: :OUT (MD_SEND),A:INC HL
+612   4072 7E          DATT    LD A,(HL):OUT (MD_SEND),A:INC HL
+613   4073 10 FD               DJNZ DATT
+PLUGXX_FIXED.ASM line 614: Unexpected: :OR L:JR Z,POZ2
+614   4075 7C                  LD A,H:OR L:JR Z,POZ2
+615   4076             
+PLUGXX_FIXED.ASM line 616: Label not found: OUT
+PLUGXX_FIXED.ASM line 616: Bytes lost
+PLUGXX_FIXED.ASM line 616: Unexpected: (#00),A
+616   4076 3E 00       PAGR2   LD A,2:OUT (#00),A
+617   4078             ;-------
+PLUGXX_FIXED.ASM line 618: Unexpected: :EXA
+618   4078 D9                  EXX:EXA
+619   4079 FB                  EI
+620   407A C9                  RET
+621   407B             ;-------
+PLUGXX_FIXED.ASM line 622: Unexpected: ,E,A,A,(PAG2+1)
+622   407B 3A 3A 41    POZ2    LD A,(MXPG2),E,A,A,(PAG2+1)
+PLUGXX_FIXED.ASM line 623: Unexpected: :CP E:JR C,$+4:LD A,2
+623   407E 3C                  INC A:CP E:JR C,$+4:LD A,2
+624   407F 32 6D 40            LD (PAG2+1),A
+625   4082             
+626   4082 26 80               LD H,#80
+627   4084 C3 76 40            JP PAGR2
+628   4087             ;---------------------------------------
+PLUGXX_FIXED.ASM line 629: Unexpected: :CALL FREQNC
+629   4087 AF          MP3INIT XOR A:CALL FREQNC;         10MHz
+630   4088             
+631   4088 CD A5 40            CALL HARDMP3
+632   408B             
+633   408B             ;LD HL,#020B
+634   408B             ;LD DE,#0000
+635   408B             ;CALL COM_MP3
+636   408B             
+637   408B CD CC 40            CALL SOFTMP3
+638   408E C9                  RET
+639   408F             
+640   408F             ;=======================================
+641   408F             NOPER
+PLUGXX_FIXED.ASM line 642: Invalid labelname: 32
+642   408F 00          .32     NOP
+643   4090 C9                  RET
+644   4091             
+645   4091             ;---------------------------------------
+PLUGXX_FIXED.ASM line 646: Label not found: C_10MHZ
+646   4091 16 00       FREQNC  LD D,C_10MHZ;#30
+PLUGXX_FIXED.ASM line 647: Label not found: JR
+PLUGXX_FIXED.ASM line 647: Bytes lost
+PLUGXX_FIXED.ASM line 647: Unexpected: Z,FREQNCS
+647   4093 E6 00               AND 3:JR Z,FREQNCS
+648   4095             
+PLUGXX_FIXED.ASM line 649: Label not found: C_12MHZ
+649   4095 16 00               LD D,C_12MHZ;#10
+PLUGXX_FIXED.ASM line 650: Unexpected: :JR Z,FREQNCS
+650   4097 3D                  DEC A:JR Z,FREQNCS
+651   4098             
+PLUGXX_FIXED.ASM line 652: Label not found: C_20MHZ
+652   4098 16 00               LD D,C_20MHZ;#20
+PLUGXX_FIXED.ASM line 653: Unexpected: :JR Z,FREQNCS
+653   409A 3D                  DEC A:JR Z,FREQNCS
+654   409B             
+PLUGXX_FIXED.ASM line 655: Label not found: C_24MHZ
+655   409B 16 00               LD D,C_24MHZ;0
+656   409D             
+PLUGXX_FIXED.ASM line 657: Label not found: GSCFG0
+657   409D DB 00       FREQNCS IN A,(GSCFG0)
+658   409F E6 CF               AND #CF
+659   40A1 B2                  OR D
+PLUGXX_FIXED.ASM line 660: Label not found: GSCFG0
+660   40A2 D3 00               OUT (GSCFG0),A
+661   40A4 C9                  RET
+662   40A5             ;---------------------------------------
+663   40A5             ;HARD RESET:
+PLUGXX_FIXED.ASM line 664: Label not found: OR
+PLUGXX_FIXED.ASM line 664: Bytes lost
+PLUGXX_FIXED.ASM line 664: Unexpected: A:RET Z
+664   40A5 3E 00       HARDMP3 LD A,(#4000):OR A:RET Z
+665   40A7             
+PLUGXX_FIXED.ASM line 666: Unexpected: :CALL VOL_MOD
+666   40A7 AF                  XOR A:CALL VOL_MOD
+667   40A8             
+PLUGXX_FIXED.ASM line 668: Label not found: MC_SEND
+668   40A8 01 00 00            LD BC,MC_SEND
+PLUGXX_FIXED.ASM line 669: Label not found: OUT
+PLUGXX_FIXED.ASM line 669: Bytes lost
+PLUGXX_FIXED.ASM line 669: Unexpected: (SCTRL),A
+669   40AB 3E 00               LD A,%10011100:OUT (SCTRL),A
+670   40AD             
+PLUGXX_FIXED.ASM line 671: Label not found: CALL
+PLUGXX_FIXED.ASM line 671: Bytes lost
+PLUGXX_FIXED.ASM line 671: Unexpected: COM_MP3
+671   40AD 21 00 01            LD HL,#0301:CALL COM_MP3
+PLUGXX_FIXED.ASM line 672: Unexpected: :AND %01110000
+672   40B0 7B                  LD A,E:AND %01110000
+673   40B1             
+674   40B1 F5                  PUSH AF
+PLUGXX_FIXED.ASM line 675: Label not found: M_MPXRS
+675   40B2 3E 00               LD A,M_MPXRS
+PLUGXX_FIXED.ASM line 676: Label not found: SCTRL
+PLUGXX_FIXED.ASM line 676: Unexpected: :CALL NOPER
+676   40B4 D3 00               OUT (SCTRL),A:CALL NOPER
+677   40B6             
+PLUGXX_FIXED.ASM line 678: Label not found: M_MPXRS
+PLUGXX_FIXED.ASM line 678: Label not found: M_SNCLR
+678   40B6 3E 00               LD A,M_MPXRS+M_SNCLR
+PLUGXX_FIXED.ASM line 679: Label not found: SCTRL
+679   40B8 D3 00               OUT (SCTRL),A
+PLUGXX_FIXED.ASM line 680: Label not found: SSTAT
+PLUGXX_FIXED.ASM line 680: Unexpected: :RRA:JR NC,$-3
+680   40BA DB 00               IN A,(SSTAT):RRA:JR NC,$-3
+681   40BC             
+682   40BC 21 03 02            LD HL,#0203;#8000+#9B58=7000
+PLUGXX_FIXED.ASM line 683: Label not found: CALL
+PLUGXX_FIXED.ASM line 683: Bytes lost
+PLUGXX_FIXED.ASM line 683: Unexpected: COM_MP3
+683   40BF 11 00 58            LD DE,#9B58:CALL COM_MP3
+684   40C2 F1                  POP AF
+685   40C3             
+686   40C3 21 02 02            LD HL,#0202
+PLUGXX_FIXED.ASM line 687: Label not found: CALL
+PLUGXX_FIXED.ASM line 687: Bytes lost
+PLUGXX_FIXED.ASM line 687: Unexpected: Z,COM_MP3
+687   40C6 11 00 08            LD DE,#8008:CALL Z,COM_MP3
+688   40C9             
+PLUGXX_FIXED.ASM line 689: Label not found: CALL
+PLUGXX_FIXED.ASM line 689: Bytes lost
+PLUGXX_FIXED.ASM line 689: Unexpected: FREQNC
+689   40C9 3E 00               LD A,1:CALL FREQNC;        12MHz
+690   40CB C9                  RET
+691   40CC             ;---------------------------------------
+692   40CC             ;SOFT RESET:
+PLUGXX_FIXED.ASM line 693: Label not found: MC_SEND
+693   40CC 01 00 00    SOFTMP3 LD BC,MC_SEND
+PLUGXX_FIXED.ASM line 694: Label not found: CALL
+PLUGXX_FIXED.ASM line 694: Bytes lost
+PLUGXX_FIXED.ASM line 694: Unexpected: COM_MP3
+694   40CF 21 00 0B            LD HL,#030B:CALL COM_MP3
+695   40D2             
+696   40D2 D5                  PUSH DE
+697   40D3 11 FE FE            LD DE,#FEFE
+698   40D6             
+PLUGXX_FIXED.ASM line 699: Label not found: CALL
+PLUGXX_FIXED.ASM line 699: Bytes lost
+PLUGXX_FIXED.ASM line 699: Unexpected: COM_MP3
+699   40D6 21 00 0B            LD HL,#020B:CALL COM_MP3
+700   40D9             
+PLUGXX_FIXED.ASM line 701: Label not found: CALL
+PLUGXX_FIXED.ASM line 701: Bytes lost
+PLUGXX_FIXED.ASM line 701: Unexpected: COM_MP3
+701   40D9 21 00 01            LD HL,#0301:CALL COM_MP3
+702   40DC 7B                  LD A,E
+703   40DD E6 70               AND %01110000
+704   40DF F5                  PUSH AF
+PLUGXX_FIXED.ASM line 705: Label not found: CALL
+PLUGXX_FIXED.ASM line 705: Bytes lost
+PLUGXX_FIXED.ASM line 705: Unexpected: COM_MP3
+705   40E0 21 00 00            LD HL,#0300:CALL COM_MP3
+706   40E3             
+PLUGXX_FIXED.ASM line 707: Unexpected: :XOR 4:LD E,A
+707   40E3 7B                  LD A,E:XOR 4:LD E,A
+PLUGXX_FIXED.ASM line 708: Label not found: CALL
+PLUGXX_FIXED.ASM line 708: Bytes lost
+PLUGXX_FIXED.ASM line 708: Unexpected: COM_MP3
+708   40E4 21 00 00            LD HL,#0200:CALL COM_MP3
+PLUGXX_FIXED.ASM line 709: Unexpected: :XOR 4:LD E,A
+709   40E7 7B                  LD A,E:XOR 4:LD E,A
+PLUGXX_FIXED.ASM line 710: Label not found: CALL
+PLUGXX_FIXED.ASM line 710: Bytes lost
+PLUGXX_FIXED.ASM line 710: Unexpected: COM_MP3
+710   40E8 21 00 00            LD HL,#0200:CALL COM_MP3
+711   40EB             
+PLUGXX_FIXED.ASM line 712: Label not found: SSTAT
+PLUGXX_FIXED.ASM line 712: Unexpected: :RRA:JR NC,$-3
+712   40EB DB 00               IN A,(SSTAT):RRA:JR NC,$-3
+713   40ED             
+714   40ED 21 03 02            LD HL,#0203
+715   40F0 11 58 9B            LD DE,#9B58
+716   40F3 CD 14 41            CALL COM_MP3
+717   40F6 F1                  POP AF
+718   40F7             
+719   40F7 21 02 02            LD HL,#0202
+PLUGXX_FIXED.ASM line 720: Label not found: CALL
+PLUGXX_FIXED.ASM line 720: Bytes lost
+PLUGXX_FIXED.ASM line 720: Unexpected: Z,COM_MP3
+720   40FA 11 00 08            LD DE,#8008:CALL Z,COM_MP3
+721   40FD             
+722   40FD D1                  POP DE
+723   40FE 21 0B 02            LD HL,#020B
+724   4101 18 11               JR COM_MP3
+725   4103             
+726   4103             ;---------------------------------------
+PLUGXX_FIXED.ASM line 727: Label not found: VOL1
+727   4103 D3 00       VOL_MOD OUT (VOL1),A
+PLUGXX_FIXED.ASM line 728: Label not found: VOL2
+728   4105 D3 00               OUT (VOL2),A
+PLUGXX_FIXED.ASM line 729: Label not found: VOL3
+729   4107 D3 00               OUT (VOL3),A
+PLUGXX_FIXED.ASM line 730: Label not found: VOL4
+730   4109 D3 00               OUT (VOL4),A
+PLUGXX_FIXED.ASM line 731: Label not found: VOL5
+731   410B D3 00               OUT (VOL5),A
+PLUGXX_FIXED.ASM line 732: Label not found: VOL6
+732   410D D3 00               OUT (VOL6),A
+PLUGXX_FIXED.ASM line 733: Label not found: VOL7
+733   410F D3 00               OUT (VOL7),A
+PLUGXX_FIXED.ASM line 734: Label not found: VOL8
+734   4111 D3 00               OUT (VOL8),A
+735   4113 C9                  RET
+736   4114             ;---------------------------------------
+737   4114             ;i: H - Command (3-READ, 2-WRITE)
+738   4114             ;   L - Register Address
+739   4114             ;  DE - Value
+740   4114             
+741   4114 CD 8F 40    COM_MP3 CALL NOPER
+742   4117             
+PLUGXX_FIXED.ASM line 743: Label not found: SSTAT
+PLUGXX_FIXED.ASM line 743: Unexpected: :RRA:JR NC,$-3
+743   4117 DB 00               IN A,(SSTAT):RRA:JR NC,$-3
+744   4119             
+745   4119 CD 8F 40            CALL NOPER
+746   411C             
+PLUGXX_FIXED.ASM line 747: Label not found: M_MCNCS
+PLUGXX_FIXED.ASM line 747: Label not found: OUT
+PLUGXX_FIXED.ASM line 747: Unexpected: (SCTRL),A
+747   411C 3E 00               LD A,M_MCNCS:OUT (SCTRL),A
+748   411E             
+749   411E CD 8F 40            CALL NOPER
+750   4121             
+PLUGXX_FIXED.ASM line 751: Label not found: MC_SEND
+751   4121 01 00 00            LD BC,MC_SEND
+752   4124 7C                  LD A,H
+PLUGXX_FIXED.ASM line 753: Illegal instruction:         OUT H:CALL NOPER
+753   4125                     OUT H:CALL NOPER
+PLUGXX_FIXED.ASM line 754: Illegal instruction:         OUT L:CALL NOPER
+754   4125                     OUT L:CALL NOPER
+PLUGXX_FIXED.ASM line 755: Label not found: JR
+PLUGXX_FIXED.ASM line 755: Bytes lost
+PLUGXX_FIXED.ASM line 755: Unexpected: Z,MP3READ
+755   4125 FE 00               CP 3:JR Z,MP3READ
+756   4127             
+PLUGXX_FIXED.ASM line 757: Illegal instruction:         OUT D:CALL NOPER
+757   4127                     OUT D:CALL NOPER
+PLUGXX_FIXED.ASM line 758: Illegal instruction:         OUT E
+758   4127                     OUT E
+759   4127             
+760   4127 CD 8F 40    MP3END  CALL NOPER
+761   412A             
+PLUGXX_FIXED.ASM line 762: Label not found: M_MCNCS
+PLUGXX_FIXED.ASM line 762: Label not found: M_SNCLR
+762   412A 3E 00               LD A,M_MCNCS+M_SNCLR;#82
+PLUGXX_FIXED.ASM line 763: Label not found: SCTRL
+763   412C D3 00               OUT (SCTRL),A
+764   412E             
+765   412E C3 8F 40            JP NOPER
+766   4131             ;-------
+PLUGXX_FIXED.ASM line 767: Label not found: MC_READ
+PLUGXX_FIXED.ASM line 767: Unexpected: ,A,#FF
+767   4131 01 00 00    MP3READ LD BC,MC_READ,A,#FF
+PLUGXX_FIXED.ASM line 768: Label not found: MC_SEND
+PLUGXX_FIXED.ASM line 768: Unexpected: :CALL NOPER
+768   4134 D3 00               OUT (MC_SEND),A:CALL NOPER
+PLUGXX_FIXED.ASM line 769: Illegal instruction:         IN D:CALL NOPER
+769   4136                     IN D:CALL NOPER
+PLUGXX_FIXED.ASM line 770: Label not found: MC_SEND
+PLUGXX_FIXED.ASM line 770: Unexpected: :CALL NOPER
+770   4136 D3 00               OUT (MC_SEND),A:CALL NOPER
+PLUGXX_FIXED.ASM line 771: Illegal instruction:         IN E
+771   4138                     IN E
+772   4138 18 ED               JR MP3END
+773   413A             
+774   413A             ;=======================================
+775   413A 40          MXPG2   DB 64
+776   413B 04          MXP2    DB 4
+777   413C             ;---------------------------------------
+778   413C             ;--------------PCM Driver---------------
+779   413C             ;---------------------------------------
+780   413C             ORGPCM  EQU $
+PLUGXX_FIXED.ASM line 781: Unexpected: ,ORGPCM
+781   413C             GSPCM   ORG #4000,ORGPCM
+782   4000 F3                  DI
+783   4001 31 00 40            LD SP,#4000
+PLUGXX_FIXED.ASM line 784: Unexpected: :RLCA:JR NC,L1_
+784   4004 DB 04       L1_     IN A,(#04):RLCA:JR NC,L1_
+785   4006 DB 02               IN A,(#02)
+786   4008 D3 06               OUT (#06),A
+787   400A D3 07               OUT (#07),A
+788   400C D3 08               OUT (#08),A
+789   400E D3 09               OUT (#09),A
+790   4010 18 F2               JR L1_
+791   4012 00          GSPCM_E NOP
+792   4013             ;---------------------------------------

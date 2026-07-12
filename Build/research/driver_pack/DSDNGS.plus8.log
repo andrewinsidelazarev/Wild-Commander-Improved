@@ -1,0 +1,13 @@
+﻿mhmt - MeHruMsT - MEgalz, HRUM and hruST (c) 2009 lvd^nedopc
+
+Configuration review:
+
+Pack format: Hrust1.x
+Mode:        depacking.
+Header for old ZX hrust1.x depackers is on.
+Bitstream is grouped in words -
+ words are little-endian, compatible with old ZX depackers.
+Maximum lookback window size is 65536 bytes.
+
+Input file "W:\WildCommander\Build\research\driver_pack\DSDNGS.plus8.hst" (826 bytes) successfully loaded.
+Output file "W:\WildCommander\Build\research\driver_pack\DSDNGS.plus8.depacked.bin" created.

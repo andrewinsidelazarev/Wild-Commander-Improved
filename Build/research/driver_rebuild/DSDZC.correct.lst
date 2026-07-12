@@ -1,0 +1,702 @@
+# file opened: DSDZC.correct.ASM
+  1   0000                      IFNDEF __ALASM_CORG_ACTIVE
+  2   0000                      ORG 0
+  3   0000                      DISP #3800
+  4   3800                      DEFINE __ALASM_CORG_ACTIVE 1
+  5   3800              __ALASM_CORG_CODE DEFL 0
+  6   3800              __ALASM_CORG_LOGICAL DEFL #3800
+  7   3800              __ALASM_CORG_DISP DEFL 1
+  8   3800                      ELSE
+  9   3800 ~            __ALASM_CORG_END DEFL __ALASM_CORG_CODE + ($ - __ALASM_CORG_LOGICAL)
+ 10   3800 ~            __ALASM_CORG_NEW DEFL __ALASM_CORG_END
+ 11   3800 ~                    IF __ALASM_CORG_NEW > __ALASM_CORG_END
+ 12   3800 ~                    DS __ALASM_CORG_NEW - __ALASM_CORG_END,0
+ 13   3800 ~                    ENDIF
+ 14   3800 ~                    IF __ALASM_CORG_DISP
+ 15   3800 ~                    ENT
+ 16   3800 ~                    ENDIF
+ 17   3800 ~                    DISP #3800
+ 18   3800 ~            __ALASM_CORG_CODE DEFL __ALASM_CORG_NEW
+ 19   3800 ~            __ALASM_CORG_LOGICAL DEFL #3800
+ 20   3800 ~            __ALASM_CORG_DISP DEFL 1
+ 21   3800                      ENDIF;      SD Card Driver
+ 22   3800              ;-------
+ 23   3800              SDBSF   EQU #6000+21;WC global vars
+ 24   3800              SDBSF2  EQU SDBSF+1
+ 25   3800
+ 26   3800              CONF    EQU #77
+ 27   3800              DATA    EQU #57
+ 28   3800
+ 29   3800              CMD_1   EQU %01000000+1; init
+ 30   3800              CMD_12  EQU %01000000+12;Stop Transmiss
+ 31   3800              CMD_16  EQU %01000000+16;Block Size
+ 32   3800              CMD_18  EQU %01000000+18;Mult Read
+ 33   3800              CMD_25  EQU %01000000+25;Mult Write
+ 34   3800              ACMD_41 EQU %01000000+41;init (SDC only)
+ 35   3800              CMD_55  EQU %01000000+55;app CMD
+ 36   3800              CMD_58  EQU %01000000+58;Read OCR
+ 37   3800              ;---------------------------------------
+ 38   3800 C3 7A 3C             JP SELDEV
+ 39   3803 C3 7C 3A             JP SDINI
+ 40   3806 C3 E3 38             JP REINI
+ 41   3809
+ 42   3809 C3 D5 38             JP XPOZI
+ 43   380C C3 DC 38             JP PROZ
+ 44   380F
+ 45   380F C3 E4 38             JP RDDSE
+ 46   3812 C3 0E 39             JP SDDSE
+ 47   3815
+ 48   3815 C3 01 3A             JP RDD256
+ 49   3818
+ 50   3818 00 00 00      DS 3
+ 51   381B 00 00 00      DS 3
+ 52   381E 00 00 00      DS 3
+ 53   3821 00 00 00      DS 3
+ 54   3824 00 00 00      DS 3
+ 55   3827 00 00 00      DS 3
+ 56   382A 00 00 00      DS 3
+ 57   382D 00 00 00      DS 3
+ 58   3830 00 00 00      DS 3
+ 59   3833 00 00 00      DS 3
+ 60   3836 00 00 00      DS 3
+ 61   3839 00 00 00      DS 3
+ 62   383C 00 00 00      DS 3
+ 63   383F 00 00 00      DS 3
+ 64   3842 00 00 00      DS 3
+ 65   3845 00 00 00      DS 3
+ 66   3848              ;---------------------------------------
+ 67   3848 00           NSDC    NOP ;\ sec num in CLUS
+ 68   3849 00           EOC     NOP ;/ End Of Chain flag
+ 69   384A
+ 70   384A 00           ABT     NOP
+ 71   384B
+ 72   384B 04           BZN     DB 4
+ 73   384C 04 00        NR0     DW 4;sectors to load
+ 74   384E
+ 75   384E 00 00        CAHL    DS 2
+ 76   3850 00 00        CADE    DS 2
+ 77   3852
+ 78   3852 00 00 00 00  LSTSE   DS 4
+ 79   3856
+ 80   3856 00 00        REZDE   DS 2
+ 81   3858
+ 82   3858 00 00 00 00  PR      DS 4
+ 83   385C
+ 84   385C 00 00        CLHL    DS 2
+ 85   385E 00 00        CLDE    DS 2
+ 86   3860
+ 87   3860 00 00 00 00  LLHL    DS 4
+ 88   3864
+ 89   3864 00 00        LTHL    DS 2;LAST
+ 90   3866 00 00        LTDE    DS 2
+ 91   3868              ;------------ENTRY PATTERN:-------------
+ 92   3868 00 00 00...  ENTRY   DS 11
+ 93   3873 00 00        EFLG    DB 0,0
+ 94   3875 00                   DB #00;ms
+ 95   3876 00 00                DW #0000
+ 95   3878 00 00         DW #0000;time,date
+ 96   387A 00 00                DW #0000;acc date
+ 97   387C 00 00        CLSDE   DS 2
+ 98   387E 00 00                DW #0000
+ 98   3880 00 00         DW #0000;time,date
+ 99   3882 00 00        CLSHL   DS 2
+100   3884 00 00 00 00  SIZIK   DS 4
+101   3888 00                   NOP
+102   3889              ;---------------------------------------
+103   3889 00 00        BREZS   DS 2;+14          FAT PARAMETERS
+104   388B 00 00 00 00  FSINF   DS 4;[+48(2)]+[ADDTOP]
+105   388F
+106   388F 00           BFATS   NOP
+107   3890 00 00 00 00  BFTSZ   DS 4
+108   3894 00 00        BSECPC  DS 2;USE 1
+109   3896 00 00 00 00  BROOTC  DS 4
+110   389A
+111   389A 02 00 00 00  FSTFRC  DW 2,0
+112   389E
+113   389E 00 00 00 00  ADDTOP  DS 4
+114   38A2
+115   38A2 00 00        SFAT    DS 2
+116   38A4 00 00 00 00  SDFAT   DS 4
+117   38A8
+118   38A8 00 00        CUHL    DS 2
+119   38AA 00 00        CUDE    DS 2
+120   38AC
+121   38AC 00 00        NXDE    DS 2
+122   38AE 00 00        NXHL    DS 2
+123   38B0
+124   38B0 00 00        LDHL    DS 2;LOAD/SAVE addres
+125   38B2 00           COUNT   NOP
+126   38B3 00 00        DUHL    DS 2
+127   38B5 00 00        DUDE    DS 2
+128   38B7
+129   38B7 00           DUBA    NOP
+130   38B8 00 00        UUHL    DS 2
+131   38BA 00 00        BUHL    DS 2
+132   38BC 00 00        GARY    DS 2;AAA
+133   38BE 00 00        CLCNT   DS 2;couter
+134   38C0 00 00 00 00  FCTS    DS 4
+135   38C4 00 00 00 00  BUTS    DS 4
+136   38C8
+137   38C8 00 00 00 00  LSTCAT  DS 4;current dir
+138   38CC 00 00 00 00  RECCAT  DS 4;recycle bin
+139   38D0
+140   38D0 00 00 00 00  BLKNUM  DS 4
+141   38D4              ;---------------------------------------
+142   38D4 00           BLKT    NOP
+143   38D5              ;---------------------------------------
+144   38D5              ;=======================================
+145   38D5 22 64 38 ED  XPOZI   LD (LTHL),HL,(LTDE),DE
+145   38D9 53 66 38
+146   38DC 22 D0 38 ED  PROZ    LD (BLKNUM),HL,(BLKNUM+2),DE
+146   38E0 53 D2 38
+147   38E3 C9           REINI   RET
+148   38E4
+149   38E4              ;i:HL - Address
+150   38E4              ;   A - Sectors
+151   38E4 ED 5B D0 38  RDDSE   LD DE,(BLKNUM)
+152   38E8 ED 4B D2 38          LD BC,(BLKNUM+2)
+153   38EC 08                   EXA
+154   38ED CD BE 3B             CALL CMD18
+154   38F0 20 FE         JR NZ,$
+155   38F2 08                   EXA
+156   38F3 08           RD1     EXA
+157   38F4 CD 61 3C             CALL WTDO
+157   38F7 FE FE         CP #FE
+157   38F9 20 F9         JR NZ,$-5
+158   38FB CD 3F 39             CALL READS
+159   38FE 08                   EXA
+159   38FF 3D            DEC A
+159   3900 20 F1         JR NZ,RD1
+160   3902
+161   3902 CD 83 3B CD          CALL CMD12,SNB
+161   3906 48 3B
+162   3908 CD 54 3C             CALL WTBY
+163   390B C3 20 3B             JP CSH
+164   390E
+165   390E ED 5B D0 38  SDDSE   LD DE,(BLKNUM)
+166   3912 ED 4B D2 38          LD BC,(BLKNUM+2)
+167   3916 08                   EXA
+168   3917 AF                   XOR A
+168   3918 DB 77         IN A,(CONF)
+168   391A E6 02         AND 2
+168   391C C0            RET NZ
+169   391D
+170   391D CD F3 3B CD          CALL CMD25,WAIT
+170   3921 6D 3C
+171   3923 08                   EXA
+172   3924 08           SD1     EXA
+172   3925 CD 9D 39 CD   CALL SAVDS,DRESP
+172   3929 2D 3C
+173   392B 08                   EXA
+173   392C 3D            DEC A
+173   392D 20 F5         JR NZ,SD1
+174   392F
+175   392F 01 57 00 3E  SDND    LD BC,DATA,A,#FD
+175   3933 FD
+175   3934 ED 79         OUT (C),A
+175   3936 CD 48 3B      CALL SNB
+176   3939 CD 54 3C             CALL WTBY
+177   393C C3 20 3B             JP CSH
+178   393F              ;---------------------------------------
+179   393F C5 D5        READS   PUSH BC,DE
+180   3941
+181   3941 7D                   LD A,L
+181   3942 B7            OR A
+181   3943 20 4F         JR NZ,OLDRDS
+182   3945 CB 44                BIT 0,H
+182   3947 20 4B         JR NZ,OLDRDS
+183   3949
+184   3949 01 00 40             LD BC,#4000
+185   394C 7C                   LD A,H
+186   394D 90                   SUB B
+186   394E 38 0A         JR C,MAK
+186   3950 0C            INC C
+187   3951 90                   SUB B
+187   3952 38 06         JR C,MAK
+187   3954 0C            INC C
+188   3955 90                   SUB B
+188   3956 38 02         JR C,MAK
+188   3958 0C            INC C
+189   3959 90                   SUB B
+190   395A 80           MAK     ADD A,B
+190   395B 57            LD D,A
+191   395C 06 60 0A             LD B,#60,A,(BC)
+192   395F
+193   395F 01 AF 27             LD BC,STS
+193   3962 ED 70         INF
+193   3964 FA 62 39      JP M,$-2
+194   3967
+195   3967 06 1F                LD B,high DMADX
+195   3969 ED 79         OUT (C),A
+196   396B 05                   DEC B
+196   396C ED 51         OUT (C),D
+197   396E 05                   DEC B
+197   396F ED 69         OUT (C),L
+198   3971
+199   3971 06 28                LD B,high DMA_T
+199   3973 AF            XOR A
+199   3974 ED 79         OUT (C),A
+200   3976 06 26                LD B,high DMA_N
+200   3978 3D            DEC A
+200   3979 ED 79         OUT (C),A
+201   397B
+202   397B 06 27 3E 42          LD B,high DMA_C,A,%01000010
+202   397F ED 79         OUT (C),A
+203   3981 11 00 02             LD DE,512
+203   3984 19            ADD HL,DE
+204   3985 ED 70                INF
+204   3987 FA 85 39      JP M,$-2
+205   398A
+206   398A 01 57 00     RDSEX   LD BC,DATA
+206   398D ED 78         IN A,(C)
+206   398F ED 78         IN A,(C)
+207   3991 D1 C1                POP DE,BC
+208   3993 C9                   RET
+209   3994
+210   3994 01 57 00     OLDRDS  LD BC,DATA
+211   3997 ED B2         INIR
+212   3999 ED B2         INIR
+213   399B 18 ED                JR RDSEX
+214   399D
+215   399D              ;---------------------------------------
+216   399D C5 D5        SAVDS   PUSH BC,DE
+217   399F 01 57 00 3E          LD BC,DATA,A,#FC
+217   39A3 FC
+217   39A4 ED 79         OUT (C),A
+218   39A6
+219   39A6 7D                   LD A,L
+219   39A7 B7            OR A
+219   39A8 20 51         JR NZ,OLDSVS
+220   39AA CB 44                BIT 0,H
+220   39AC 20 4D         JR NZ,OLDSVS
+221   39AE
+222   39AE 01 00 40             LD BC,#4000
+223   39B1 7C                   LD A,H
+224   39B2 90                   SUB B
+224   39B3 38 0A         JR C,MAS
+224   39B5 0C            INC C
+225   39B6 90                   SUB B
+225   39B7 38 06         JR C,MAS
+225   39B9 0C            INC C
+226   39BA 90                   SUB B
+226   39BB 38 02         JR C,MAS
+226   39BD 0C            INC C
+227   39BE 90                   SUB B
+228   39BF 80           MAS     ADD A,B
+228   39C0 57            LD D,A
+229   39C1 06 60 0A             LD B,#60,A,(BC)
+230   39C4
+231   39C4 01 AF 27             LD BC,STS
+231   39C7 ED 70         INF
+231   39C9 FA C7 39      JP M,$-2
+232   39CC
+233   39CC 06 1C                LD B,high DMASX
+233   39CE ED 79         OUT (C),A
+234   39D0 05                   DEC B
+234   39D1 ED 51         OUT (C),D
+235   39D3 05                   DEC B
+235   39D4 ED 69         OUT (C),L
+236   39D6
+237   39D6 06 28                LD B,high DMA_T
+237   39D8 AF            XOR A
+237   39D9 ED 79         OUT (C),A
+238   39DB 06 26                LD B,high DMA_N
+238   39DD 3D            DEC A
+238   39DE ED 79         OUT (C),A
+239   39E0
+240   39E0 06 27 3E C2          LD B,high DMA_C,A,%11000010
+240   39E4 ED 79         OUT (C),A
+241   39E6 11 00 02             LD DE,512
+241   39E9 19            ADD HL,DE
+242   39EA ED 70                INF
+242   39EC FA EA 39      JP M,$-2
+243   39EF
+244   39EF 01 57 00 3E  SVSEX   LD BC,DATA,A,#FF
+244   39F3 FF
+244   39F4 ED 79         OUT (C),A
+244   39F6 ED 79         OUT (C),A
+245   39F8 D1 C1                POP DE,BC
+246   39FA C9                   RET
+247   39FB
+248   39FB              OLDSVS
+249   39FB ED B3         OTIR
+250   39FD ED B3         OTIR
+251   39FF 18 EE                JR SVSEX
+252   3A01              ;---------------------------------------
+253   3A01 ED 5B D0 38  RDD256  LD DE,(BLKNUM)
+254   3A05 ED 4B D2 38          LD BC,(BLKNUM+2)
+255   3A09 08                   EXA
+255   3A0A CD BE 3B      CALL CMD18;JR NZ,$
+256   3A0D 08                   EXA
+257   3A0E              ;-------
+258   3A0E 08           RDS256  EXA
+259   3A0F CD 61 3C             CALL WTDO
+259   3A12 FE FE         CP #FE
+259   3A14 20 FE         JR NZ,$
+260   3A16              ;-------
+261   3A16 01 00 40             LD BC,#4000
+262   3A19 7C                   LD A,H
+263   3A1A 90                   SUB B
+263   3A1B 38 0A         JR C,MA2
+263   3A1D 0C            INC C
+264   3A1E 90                   SUB B
+264   3A1F 38 06         JR C,MA2
+264   3A21 0C            INC C
+265   3A22 90                   SUB B
+265   3A23 38 02         JR C,MA2
+265   3A25 0C            INC C
+266   3A26 90                   SUB B
+267   3A27 80           MA2     ADD A,B
+267   3A28 57            LD D,A
+268   3A29 06 60 0A             LD B,#60,A,(BC)
+269   3A2C
+270   3A2C 01 AF 27             LD BC,STS
+270   3A2F ED 70         INF
+270   3A31 FA 2F 3A      JP M,$-2
+271   3A34
+272   3A34 06 1F                LD B,high DMADX
+272   3A36 ED 79         OUT (C),A
+273   3A38 05                   DEC B
+273   3A39 ED 51         OUT (C),D
+274   3A3B 05                   DEC B
+274   3A3C ED 69         OUT (C),L
+275   3A3E
+276   3A3E 06 28 3E 01          LD B,high DMA_T,A,1
+276   3A42 ED 79         OUT (C),A
+277   3A44 06 26 3E 7F          LD B,high DMA_N,A,127
+277   3A48 ED 79         OUT (C),A
+278   3A4A
+279   3A4A 06 27 3E 5A          LD B,high DMA_C,A,%01011010
+279   3A4E ED 79         OUT (C),A
+280   3A50 24            INC H
+281   3A51 24            INC H
+282   3A52 24            INC H
+283   3A53 24            INC H
+284   3A54 ED 70                INF
+284   3A56 FA 54 3A      JP M,$-2
+285   3A59
+286   3A59 01 57 00             LD BC,DATA
+287   3A5C ED 78         IN A,(C)
+288   3A5E ED 78         IN A,(C)
+289   3A60              ;-------
+290   3A60 08                   EXA
+290   3A61 3D            DEC A
+290   3A62 20 AA         JR NZ,RDS256
+291   3A64
+292   3A64 CD 83 3B             CALL CMD12;JR NZ,$
+293   3A67 C3 20 3B             JP CSH
+294   3A6A              ;---------------------------------------
+295   3A6A 40           CMD00   DB %01000000+0
+295   3A6B 00 00 00 00   DS 4
+295   3A6F 95            DB #95
+296   3A70 48 00 00 01  CMD08   DB %01000000+8,0,0,1,#AA,#87
+296   3A74 AA 87
+297   3A76 50 00 00 02  CMD16   DB %01000000+16,0,0,2,0,#FF
+297   3A7A 00 FF
+298   3A7C              ;---------------------------------------
+299   3A7C CD 20 3B     SDINI   CALL CSH
+300   3A7F 11 0A 02             LD DE,512+10
+300   3A82 CD 54 3B      CALL CYCL
+301   3A85
+302   3A85 11 40 1F             LD DE,8000
+303   3A88 1B           SDWT    DEC DE
+303   3A89 7A            LD A,D
+303   3A8A B3            OR E
+303   3A8B CA 1D 3B      JP Z,NOSD
+304   3A8E CD 01 3C             CALL CMD0
+304   3A91 20 F5         JR NZ,SDWT
+305   3A93 3D                   DEC A
+305   3A94 C2 88 3A      JP NZ,SDWT
+306   3A97
+307   3A97 CD FC 3B             CALL CMD8
+308   3A9A F5                   PUSH AF
+309   3A9B ED 58         IN E,(C)
+310   3A9D ED 58         IN E,(C)
+311   3A9F ED 60                IN H,(C)
+312   3AA1 ED 68                IN L,(C)
+313   3AA3 F1                   POP AF
+313   3AA4 20 E2         JR NZ,SDWT
+314   3AA6 CB 57                BIT 2,A
+314   3AA8 28 2E         JR Z,SDNEW
+315   3AAA              ;-------
+316   3AAA 11 40 1F     SDOLD   LD DE,8000
+317   3AAD 1B           AA      DEC DE
+317   3AAE 7A            LD A,D
+317   3AAF B3            OR E
+317   3AB0 28 10         JR Z,LC
+318   3AB2 26 00                LD H,0
+319   3AB4 CD 9E 3B             CALL ACMD41
+319   3AB7 20 F4         JR NZ,AA
+320   3AB9 FE 01                CP 1
+320   3ABB 28 F0         JR Z,AA
+321   3ABD B7                   OR A
+321   3ABE 20 02         JR NZ,LC
+322   3AC0              ;SDV1 Detected
+323   3AC0 18 53                JR FBS
+324   3AC2              ;-------
+325   3AC2 11 40 1F     LC      LD DE,8000
+326   3AC5 1B           OO      DEC DE
+326   3AC6 7A            LD A,D
+326   3AC7 B3            OR E
+326   3AC8 28 53         JR Z,NOSD
+327   3ACA CD 7B 3B             CALL CMD1
+327   3ACD 20 F6         JR NZ,OO
+328   3ACF FE 01                CP 1
+328   3AD1 28 F2         JR Z,OO
+329   3AD3 B7                   OR A
+329   3AD4 20 47         JR NZ,NOSD
+330   3AD6              ;MMC Ver.3 Detected
+331   3AD6 18 3D                JR FBS
+332   3AD8              ;-------
+333   3AD8 11 AA 01     SDNEW   LD DE,#01AA
+334   3ADB B7                   OR A
+334   3ADC ED 52         SBC HL,DE
+334   3ADE 20 3D         JR NZ,NOSD
+335   3AE0
+336   3AE0 11 40 1F             LD DE,8000
+337   3AE3 1B           YY      DEC DE
+337   3AE4 7A            LD A,D
+337   3AE5 B3            OR E
+337   3AE6 28 35         JR Z,NOSD
+338   3AE8 26 40                LD H,#40
+339   3AEA CD 9E 3B             CALL ACMD41
+339   3AED 20 F4         JR NZ,YY
+340   3AEF FE 01                CP 1
+340   3AF1 28 F0         JR Z,YY
+341   3AF3 B7                   OR A
+341   3AF4 20 27         JR NZ,NOSD
+342   3AF6              ;SDV2 Detected
+343   3AF6
+344   3AF6 CD 96 3B             CALL CMD58
+344   3AF9 20 22         JR NZ,NOSD
+345   3AFB 01 57 00             LD BC,DATA
+346   3AFE ED 78                IN A,(C)
+347   3B00 ED 68         IN L,(C)
+348   3B02 ED 68         IN L,(C)
+349   3B04 ED 68         IN L,(C)
+350   3B06 CB 77                BIT 6,A
+350   3B08 28 0B         JR Z,FBS;SDV2 Byte Addr
+351   3B0A              ;SDV2 Block Address
+352   3B0A
+353   3B0A 3E 01                LD A,1
+354   3B0C 32 D4 38     SDFND   LD (BLKT),A
+355   3B0F 32 15 60     SDBS    LD (SDBSF),A
+356   3B12 AF                   XOR A
+357   3B13 18 0B                JR CSH
+358   3B15              ;-------
+359   3B15 CD F7 3B     FBS     CALL CMDi6
+359   3B18 20 03         JR NZ,NOSD
+360   3B1A B7                   OR A
+360   3B1B 28 EF         JR Z,SDFND
+361   3B1D              ;-------
+362   3B1D              NOSD    ;CALL SDOFF
+363   3B1D AF                   XOR A
+363   3B1E 3C            INC A
+364   3B1F C9                   RET
+365   3B20              ;---------------------------------------
+366   3B20 C5 F5        CSH     PUSH BC,AF
+367   3B22 01 77 00 3E          LD BC,CONF,A,%00000011
+367   3B26 03
+367   3B27 ED 79         OUT (C),A
+368   3B29 01 57 00 3E          LD BC,DATA,A,#FF
+368   3B2D FF
+368   3B2E ED 79         OUT (C),A
+369   3B30 F1 C1                POP AF,BC
+370   3B32 C9                   RET
+371   3B33 C5 F5        CSL     PUSH BC,AF
+372   3B35 01 77 00             LD BC,CONF
+373   3B38 3E 01        CS_ON   LD A,%00000001
+373   3B3A ED 79         OUT (C),A
+374   3B3C 01 57 00 3E          LD BC,DATA,A,#FF
+374   3B40 FF
+374   3B41 ED 79         OUT (C),A
+375   3B43 F1 C1                POP AF,BC
+376   3B45 C3 6D 3C             JP WAIT
+377   3B48
+378   3B48 C5 F5        SNB     PUSH BC,AF
+379   3B4A 06 10                LD B,16
+380   3B4C AF           SnB     XOR A
+380   3B4D DB 57         IN A,(DATA)
+380   3B4F 10 FB         DJNZ SnB
+381   3B51 F1 C1                POP AF,BC
+382   3B53 C9                   RET
+383   3B54
+384   3B54 01 57 00     CYCL    LD BC,DATA
+385   3B57 3E FF        Cy      LD A,#FF
+385   3B59 ED 79         OUT (C),A
+386   3B5B 1B                   DEC DE
+386   3B5C 7A            LD A,D
+386   3B5D B3            OR E
+386   3B5E 20 F7         JR NZ,Cy
+387   3B60 C9                   RET
+388   3B61              ;-------
+389   3B61 CD 20 3B     CMDo    CALL CSH
+390   3B64 CD 33 3B             CALL CSL
+391   3B67 C5           CMDx    PUSH BC
+392   3B68 01 57 00             LD BC,DATA
+392   3B6B ED 79         OUT (C),A
+393   3B6D AF                   XOR A
+394   3B6E ED 79                OUT (C),A
+395   3B70 ED 79                OUT (C),A
+396   3B72 ED 79                OUT (C),A
+397   3B74 ED 79                OUT (C),A
+398   3B76 3D                   DEC A
+398   3B77 ED 79         OUT (C),A
+399   3B79 C1                   POP BC
+400   3B7A C9                   RET
+401   3B7B 3E 41        CMD1    LD A,CMD_1
+401   3B7D CD 61 3B      CALL CMDo
+401   3B80 C3 19 3C      JP RESP
+402   3B83 3E 4C        CMD12   LD A,CMD_12
+402   3B85 CD 67 3B      CALL CMDx
+403   3B88 AF                   XOR A
+403   3B89 DB 57         IN A,(DATA)
+404   3B8B C3 19 3C             JP RESP
+405   3B8E 3E 77        CMD55   LD A,CMD_55
+405   3B90 CD 61 3B      CALL CMDo
+405   3B93 C3 19 3C      JP RESP
+406   3B96 3E 7A        CMD58   LD A,CMD_58
+406   3B98 CD 61 3B      CALL CMDo
+406   3B9B C3 19 3C      JP RESP
+407   3B9E              ;-------
+408   3B9E CD 8E 3B     ACMD41  CALL CMD55
+409   3BA1 CD 20 3B             CALL CSH
+410   3BA4 CD 33 3B             CALL CSL
+411   3BA7
+412   3BA7 01 57 00 3E          LD BC,DATA,A,ACMD_41
+412   3BAB 69
+412   3BAC ED 79         OUT (C),A
+413   3BAE 2E 00                LD L,0
+414   3BB0 ED 61                OUT (C),H
+415   3BB2 ED 69                OUT (C),L
+416   3BB4 ED 69                OUT (C),L
+417   3BB6 ED 69                OUT (C),L
+418   3BB8 2D                   DEC L
+418   3BB9 ED 69         OUT (C),L
+419   3BBB C3 19 3C             JP RESP
+420   3BBE              ;-------
+421   3BBE 3E 52        CMD18   LD A,CMD_18
+422   3BC0 CD 20 3B     CMDz    CALL CSH
+423   3BC3 CD 33 3B             CALL CSL
+424   3BC6 E5 D5 C5             PUSH HL,DE,BC
+425   3BC9
+426   3BC9 69 60                LD L,C,H,B
+427   3BCB
+428   3BCB 4F 3A D4 38          LD C,A,A,(BLKT)
+428   3BCF B7            OR A
+428   3BD0 20 09         JR NZ,CMzz
+429   3BD2 EB                   EX DE,HL
+429   3BD3 29            ADD HL,HL
+430   3BD4 EB                   EX DE,HL
+430   3BD5 ED 6A         ADC HL,HL
+431   3BD7 65 6A 53 5F          LD H,L,L,D,D,E,E,A
+432   3BDB
+433   3BDB 79 01 57 00  CMzz    LD A,C,BC,DATA
+433   3BDF ED 79         OUT (C),A
+434   3BE1 ED 61                OUT (C),H
+435   3BE3 ED 69                OUT (C),L
+436   3BE5 ED 51                OUT (C),D
+437   3BE7 ED 59                OUT (C),E
+438   3BE9 3E FF                LD A,#FF
+438   3BEB ED 79         OUT (C),A
+439   3BED C1 D1 E1             POP BC,DE,HL
+440   3BF0 C3 19 3C             JP RESP
+441   3BF3 3E 59        CMD25   LD A,CMD_25
+441   3BF5 18 C9         JR CMDz
+442   3BF7              ;-------
+443   3BF7 21 76 3A     CMDi6   LD HL,CMD16
+443   3BFA 18 08         JR CMD
+444   3BFC 21 70 3A     CMD8    LD HL,CMD08
+444   3BFF 18 03         JR CMD
+445   3C01 21 6A 3A     CMD0    LD HL,CMD00
+446   3C04 CD 20 3B     CMD     CALL CSH
+447   3C07 CD 33 3B             CALL CSL
+448   3C0A 01 57 00             LD BC,DATA
+449   3C0D ED A3         OUTI
+450   3C0F ED A3         OUTI
+451   3C11 ED A3         OUTI
+452   3C13 ED A3         OUTI
+453   3C15 ED A3         OUTI
+454   3C17 ED A3         OUTI
+455   3C19
+456   3C19 D5 C5        RESP    PUSH DE,BC
+457   3C1B 01 57 00 16          LD BC,DATA,D,10
+457   3C1F 0A
+458   3C20 ED 78        RESp    IN A,(C)
+458   3C22 CB 7F         BIT 7,A
+458   3C24 28 04         JR Z,REZ
+459   3C26 15                   DEC D
+459   3C27 20 F7         JR NZ,RESp
+459   3C29 14            INC D
+460   3C2A C1 D1        REZ     POP BC,DE
+461   3C2C C9                   RET
+462   3C2D              ;-------
+463   3C2D C5 F5        DRESP   PUSH BC,AF
+464   3C2F 01 57 00             LD BC,DATA
+465   3C32 ED 78                IN A,(C)
+465   3C34 FE FF         CP #FF
+465   3C36 28 FA         JR Z,$-4
+466   3C38 E6 1F                AND #1F
+466   3C3A FE 05         CP 5
+466   3C3C 20 08         JR NZ,ER
+467   3C3E ED 78                IN A,(C)
+467   3C40 B7            OR A
+467   3C41 28 FB         JR Z,$-3
+468   3C43 F1 C1                POP AF,BC
+469   3C45 C9                   RET
+470   3C46 E6 0F        ER      AND 15
+470   3C48 C6 F0         ADD A,240
+471   3C4A 01 AF 0F             LD BC,#0FAF
+471   3C4D ED 79         OUT (C),A
+472   3C4F CD 2F 39             CALL SDND;,SDOFF
+473   3C52 18 FE                JR $
+474   3C54              ;-------
+475   3C54 C5 F5        WTBY    PUSH BC,AF
+476   3C56 01 57 00             LD BC,DATA
+476   3C59 ED 78         IN A,(C)
+476   3C5B B7            OR A
+476   3C5C 28 FB         JR Z,$-3
+477   3C5E F1 C1                POP AF,BC
+478   3C60 C9                   RET
+479   3C61
+480   3C61 C5           WTDO    PUSH BC
+481   3C62 01 57 00             LD BC,DATA
+481   3C65 ED 78         IN A,(C)
+481   3C67 FE FF         CP #FF
+481   3C69 28 FA         JR Z,$-4
+482   3C6B C1                   POP BC
+483   3C6C C9                   RET
+484   3C6D
+485   3C6D C5 F5        WAIT    PUSH BC,AF
+486   3C6F 01 57 00             LD BC,DATA
+486   3C72 ED 78         IN A,(C)
+486   3C74 3C            INC A
+486   3C75 20 FB         JR NZ,$-3
+487   3C77 F1 C1                POP AF,BC
+488   3C79 C9                   RET
+489   3C7A
+490   3C7A B7           SELDEV  OR A
+490   3C7B 3E 01 21 15   LD A,%00000001,HL,SDBSF
+490   3C7F 60
+491   3C80 28 03                JR Z,SDn1
+492   3C82 3E 0B        SDn2    LD A,%00001011
+492   3C84 23            INC HL
+493   3C85 32 39 3B     SDn1    LD (CS_ON+1),A
+494   3C88 22 10 3B             LD (SDBS+1),HL
+495   3C8B C9                   RET
+496   3C8C              ;---------------------------------------
+497   3C8C              STS     EQU #27AF
+498   3C8C
+499   3C8C              DMASL   EQU #1AAF
+500   3C8C              DMASH   EQU #1BAF
+501   3C8C              DMASX   EQU #1CAF
+502   3C8C              DMADL   EQU #1DAF
+503   3C8C              DMADH   EQU #1EAF
+504   3C8C              DMADX   EQU #1FAF
+505   3C8C
+506   3C8C              DMA_T   EQU #28AF;0=1, 255=256
+507   3C8C              DMA_N   EQU #26AF;255=512
+508   3C8C              DMA_C   EQU #27AF;RW 1 - - - 0 0 1
+509   3C8C              ;---------------------------------------
+510   3C8C
+# file closed: DSDZC.correct.ASM

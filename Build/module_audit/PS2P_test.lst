@@ -1,0 +1,990 @@
+# file opened: PS2P_test.ASM
+  1   0000                      ORG #7143
+  2   7143
+  3   7143              GPOZA   EQU #7B30
+  4   7143              TXTPR   EQU #7D81
+  5   7143              PRSRW   EQU #7D25
+  6   7143
+  7   7143                      INCLUDE "../../source/PS2P.ASM"
+# file opened: PS2P.ASM
+  1+  7143              ;---------------------------------------
+  2+  7143              ;PS/2 HANDLER (STAND-ALONE)
+  3+  7143              ;(C) KOSHI/MGN/2018
+  4+  7143              ;---------------------------------------
+  5+  7143              RPT     EQU 25;AUTO REPEAT
+  6+  7143              SCANS   EQU 51;SCANCODES
+  7+  7143              ;-------
+  8+  7143 2A C7 76     TAB4E   LD HL,(TAB+#00)
+  8+  7146 7C            LD A,H
+  8+  7147 B5            OR L
+  9+  7148 2A C9 76             LD HL,(TAB+#02)
+  9+  714B B4 B5         OR H,L
+ 10+  714D 2A CB 76             LD HL,(TAB+#04)
+ 10+  7150 B4 B5         OR H,L
+ 11+  7152 2A CD 76             LD HL,(TAB+#06)
+ 11+  7155 B4 B5         OR H,L
+ 12+  7157 2A CF 76             LD HL,(TAB+#08)
+ 12+  715A B4 B5         OR H,L
+ 13+  715C 2A D1 76             LD HL,(TAB+#0A)
+ 13+  715F B4 B5         OR H,L
+ 14+  7161 2A D3 76             LD HL,(TAB+#0C)
+ 14+  7164 B4 B5         OR H,L
+ 15+  7166 2A D5 76             LD HL,(TAB+#0E)
+ 15+  7169 B4 B5         OR H,L
+ 16+  716B 2A D7 76             LD HL,(TAB+#10)
+ 16+  716E B4 B5         OR H,L
+ 17+  7170 2A D9 76             LD HL,(TAB+#12)
+ 17+  7173 B4 B5         OR H,L
+ 18+  7175 C9                   RET
+ 19+  7176              ;-------
+ 20+  7176              ISTR    ;i:A=#FF init0:
+ 21+  7176              ;             i: HL - Address of string
+ 22+  7176              ;                            (on screen)
+ 23+  7176              ;                 D - CURMAX
+ 24+  7176              ;                 E - CURNOW
+ 25+  7176              ;          A=#01 terminate:
+ 26+  7176              ;             o: HL - Address of string
+ 27+  7176              ;          A=#00 input(CALL every frame)
+ 28+  7176              ;
+ 29+  7176              ;          A=#FD init2:
+ 30+  7176              ;             i: HL - Address of string
+ 31+  7176              ;                 D - Y (in window)
+ 32+  7176              ;                 E - X (in window)
+ 33+  7176              ;                 B - CURMAX
+ 34+  7176              ;                 C - CURNOW
+ 35+  7176              ;                HL'- buffer size
+ 36+  7176              ;          A=#02 window REFRESH (on SCR)
+ 37+  7176              ;
+ 38+  7176              ;          A=#FE init info position:
+ 39+  7176              ;                 H - 0=top, 1=bottom
+ 40+  7176              ;                 L - reserved
+ 41+  7176              ;          A=#03 info refresh
+ 42+  7176              ;
+ 43+  7176              ;          A=#FC CAPS, INS, CTRL+SHIFT
+ 44+  7176              ;             i:none
+ 45+  7176              ;             o: A - state:
+ 46+  7176              ;                     [7]: %0 - INS
+ 47+  7176              ;                          %1 - OVR
+ 48+  7176              ;                     [6]: %0 - CAPS off
+ 49+  7176              ;                          %1 - CAPS on
+ 50+  7176              ;                   [5-2]:reserved
+ 51+  7176              ;                   [1-0]:%00 - ENG
+ 52+  7176              ;                         %01 - RUS
+ 53+  7176              ;                         %10 - reserved
+ 54+  7176              ;                         %11 - reserved
+ 55+  7176
+ 56+  7176 3C                   INC A
+ 56+  7177 CA 59 72      JP Z,IINIT
+ 57+  717A 3C                   INC A
+ 57+  717B CA 2E 73      JP Z,IINIF
+ 58+  717E 3C                   INC A
+ 58+  717F CA 78 72      JP Z,IINI2
+ 59+  7182 3C                   INC A
+ 59+  7183 CA 97 73      JP Z,FCREF
+ 60+  7186
+ 61+  7186 FE 05                CP #01+4
+ 61+  7188 CA 71 72      JP Z,IEXIT
+ 62+  718B FE 06                CP #02+4
+ 62+  718D CA 81 73      JP Z,IWRFR
+ 63+  7190 FE 07                CP #03+4
+ 63+  7192 CA 3B 73      JP Z,IREFR
+ 64+  7195
+ 65+  7195 CD 82 74 C4          CALL BSPC,NZ,IBS; Backspace
+ 65+  7199 24 72
+ 66+  719B CD 91 74 C4          CALL DELE,NZ,IDL; Delete
+ 66+  719F 40 72
+ 67+  71A1
+ 68+  71A1 CD 66 74 C4          CALL RGGG,NZ,IRG; Right Arrow
+ 68+  71A5 D8 71
+ 69+  71A7 CD 60 74 C4          CALL LFFF,NZ,ILF; Left Arrow
+ 69+  71AB 07 72
+ 70+  71AD
+ 71+  71AD CD 96 74 C4          CALL INS,NZ,INSOVR
+ 71+  71B1 25 73
+ 72+  71B3 CD F8 72             CALL LNGCHE
+ 73+  71B6 CD 0B 73             CALL CAPSCHE
+ 74+  71B9
+ 75+  71B9 CD BB 73             CALL CLAvA
+ 75+  71BC C8            RET Z
+ 76+  71BD              ;-------
+ 77+  71BD CD CF 72     SMBADD  CALL ICPO
+ 78+  71C0 4F                   LD C,A
+ 79+  71C1 3A 6B 78             LD A,(INOV)
+ 79+  71C4 B7            OR A
+ 79+  71C5 20 10         JR NZ,IZIMOD
+ 80+  71C7
+ 81+  71C7 E5 C5                PUSH HL,BC
+ 82+  71C9 CD DF 72             CALL ILNG
+ 82+  71CC 28 07         JR Z,LSIS
+ 83+  71CE 09                   ADD HL,BC
+ 83+  71CF 2B            DEC HL
+ 84+  71D0 54 5D                LD DE,HL
+ 84+  71D2 13            INC DE
+ 84+  71D3 ED B8         LDDR
+ 85+  71D5 C1 E1        LSIS    POP BC,HL
+ 86+  71D7
+ 87+  71D7 71           IZIMOD  LD (HL),C
+ 88+  71D8              ;-------
+ 89+  71D8 ED 4B 74 78  IRG     LD BC,(ICUP)
+ 90+  71DC 79                   LD A,C
+ 90+  71DD 3C            INC A
+ 91+  71DE B8                   CP B
+ 91+  71DF 30 09         JR NC,IRGW
+ 92+  71E1 CD 9D 72             CALL IRCU
+ 93+  71E4 32 74 78             LD (ICUP),A
+ 94+  71E7 C3 9D 72             JP ICUR
+ 95+  71EA 2A 70 78     IRGW    LD HL,(IBSZ)
+ 96+  71ED ED 5B 74 78          LD DE,(ICUP),E,D,D,0
+ 96+  71F1 5A 16 00
+ 97+  71F4 B7                   OR A
+ 97+  71F5 ED 52         SBC HL,DE
+ 97+  71F7 C8            RET Z
+ 97+  71F8 D8            RET C
+ 98+  71F9 EB                   EX DE,HL
+ 99+  71FA 2A 6E 78             LD HL,(IWOF)
+100+  71FD ED 52                SBC HL,DE
+100+  71FF D0            RET NC
+101+  7200 19                   ADD HL,DE
+101+  7201 23            INC HL
+102+  7202 22 6E 78             LD (IWOF),HL
+103+  7205 AF                   XOR A
+104+  7206 C9                   RET
+105+  7207
+106+  7207 ED 4B 74 78  ILF     LD BC,(ICUP)
+107+  720B 79                   LD A,C
+107+  720C 3D            DEC A
+108+  720D B8                   CP B
+108+  720E 30 09         JR NC,ILFW
+109+  7210 CD 9D 72             CALL IRCU
+110+  7213 32 74 78             LD (ICUP),A
+111+  7216 C3 9D 72             JP ICUR
+112+  7219 2A 6E 78     ILFW    LD HL,(IWOF)
+112+  721C 7C            LD A,H
+112+  721D B5            OR L
+112+  721E C8            RET Z
+113+  721F 2B                   DEC HL
+113+  7220 22 6E 78      LD (IWOF),HL
+114+  7223 C9                   RET
+115+  7224              ;-------
+116+  7224 CD 07 72     IBS     CALL ILF
+116+  7227 C8            RET Z
+117+  7228 CD CF 72             CALL ICPO
+118+  722B 3A 6B 78             LD A,(INOV)
+118+  722E B7            OR A
+118+  722F 28 03         JR Z,BSINS
+119+  7231 36 20        BSYO    LD (HL),32
+120+  7233 C9                   RET
+121+  7234 EB           BSINS   EX DE,HL
+122+  7235 62 6B                LD HL,DE
+122+  7237 23            INC HL
+123+  7238 CD DF 72             CALL ILNG
+123+  723B ED B0         LDIR
+124+  723D EB                   EX DE,HL
+125+  723E 18 F1                JR BSYO
+126+  7240              ;-------
+127+  7240 CD CF 72     IDL     CALL ICPO
+128+  7243 EB                   EX DE,HL
+129+  7244 2A 70 78 ED          LD HL,(IBSZ),BC,(ISAD)
+129+  7248 4B 72 78
+129+  724B 09            ADD HL,BC
+130+  724C EB                   EX DE,HL
+130+  724D 23            INC HL
+131+  724E B7                   OR A
+131+  724F ED 52         SBC HL,DE
+132+  7251 08                   EXA
+132+  7252 19            ADD HL,DE
+132+  7253 2B            DEC HL
+133+  7254 08                   EXA
+133+  7255 30 DA         JR NC,BSYO
+134+  7257 18 DB                JR BSINS
+135+  7259              ;-------
+136+  7259 22 72 78     IINIT   LD (ISAD),HL
+137+  725C ED 53 74 78          LD (ICUP),DE
+138+  7260 21 00 00             LD HL,0
+139+  7263 22 6E 78             LD (IWOF),HL
+140+  7266 6A                   LD L,D
+141+  7267 22 70 78             LD (IBSZ),HL
+142+  726A
+143+  726A AF                   XOR A
+143+  726B 32 9F 72      LD (ICRF+1),A
+144+  726E C3 9D 72             JP ICUR
+145+  7271              IEXIT   ;XOR A:LD (LANG),A
+146+  7271 CD 9D 72             CALL IRCU
+147+  7274 2A 72 78             LD HL,(ISAD)
+148+  7277 C9                   RET
+149+  7278              ;-------
+150+  7278 22 72 78     IINI2   LD (ISAD),HL
+151+  727B ED 43 74 78          LD (ICUP),BC
+152+  727F ED 53 6C 78          LD (IWAD),DE
+153+  7283 D9                   EXX
+154+  7284 7C                   LD A,H
+154+  7285 B7            OR A
+154+  7286 20 07         JR NZ,UPSZ
+155+  7288 3A 75 78             LD A,(ICUP+1)
+155+  728B BD            CP L
+155+  728C 38 01         JR C,UPSZ
+156+  728E 6F                   LD L,A
+157+  728F 22 70 78     UPSZ    LD (IBSZ),HL
+158+  7292
+159+  7292 21 00 00             LD HL,0
+160+  7295 22 6E 78             LD (IWOF),HL
+161+  7298
+162+  7298 3E 01 32 9F          LD A,1,(ICRF+1),A
+162+  729C 72
+163+  729D              ;-------
+164+  729D              ICUR
+165+  729D F5           IRCU    PUSH AF
+166+  729E 3E 00        ICRF    LD A,0
+166+  72A0 B7            OR A
+167+  72A1 CC C3 72 C4          CALL Z,ICPC,NZ,ICCC
+167+  72A5 AE 72
+168+  72A7 CB FD                SET 7,L
+168+  72A9 7E            LD A,(HL)
+168+  72AA ED 67         RRD
+169+  72AC F1                   POP AF
+170+  72AD C9                   RET
+171+  72AE CD 30 7B     ICCC    CALL GPOZA
+172+  72B1 ED 4B 6C 78          LD BC,(IWAD)
+173+  72B5 7C                   LD A,H
+173+  72B6 80            ADD A,B
+173+  72B7 67            LD H,A
+174+  72B8 7D                   LD A,L
+174+  72B9 81            ADD A,C
+174+  72BA 6F            LD L,A
+175+  72BB ED 4B 74 78          LD BC,(ICUP),B,0
+175+  72BF 06 00
+175+  72C1 09            ADD HL,BC
+176+  72C2 C9                   RET
+177+  72C3 2A 72 78     ICPC    LD HL,(ISAD)
+178+  72C6 ED 4B 74 78          LD BC,(ICUP),B,0
+178+  72CA 06 00
+178+  72CC 09            ADD HL,BC
+179+  72CD BF                   CP A
+180+  72CE C9                   RET
+181+  72CF              ;-------
+182+  72CF 2A 72 78     ICPO    LD HL,(ISAD)
+183+  72D2 ED 4B 74 78          LD BC,(ICUP),B,0
+183+  72D6 06 00
+183+  72D8 09            ADD HL,BC
+184+  72D9 ED 4B 6E 78          LD BC,(IWOF)
+184+  72DD 09            ADD HL,BC
+185+  72DE C9                   RET
+186+  72DF E5           ILNG    PUSH HL
+187+  72E0 2A 70 78             LD HL,(IBSZ)
+188+  72E3 ED 4B 74 78          LD BC,(ICUP),B,0
+188+  72E7 06 00
+188+  72E9 0C            INC C
+189+  72EA B7                   OR A
+189+  72EB ED 42         SBC HL,BC
+190+  72ED ED 4B 6E 78          LD BC,(IWOF)
+191+  72F1 B7                   OR A
+191+  72F2 ED 42         SBC HL,BC
+192+  72F4 44 4D                LD BC,HL
+193+  72F6 E1                   POP HL
+194+  72F7 C9                   RET
+195+  72F8              ;-------
+196+  72F8 CD E4 74     LNGCHE  CALL CTRL
+196+  72FB C8            RET Z
+197+  72FC CD DE 74             CALL SHIFT
+197+  72FF C8            RET Z
+198+  7300 3A 6A 78             LD A,(LANG)
+198+  7303 EE 01         XOR 1
+199+  7305 32 6A 78             LD (LANG),A
+200+  7308 C3 4C 74             JP USPO
+201+  730B              ;-------
+202+  730B CD D2 74     CAPSCHE CALL CAPS
+202+  730E C8            RET Z
+203+  730F 01 F7 DF 3E          LD BC,#DFF7,A,#0C
+203+  7313 0C
+203+  7314 ED 79         OUT (C),A
+204+  7316 06 BF                LD B,#BF
+205+  7318 3A 69 78             LD A,(CLST)
+205+  731B EE 01         XOR 1
+206+  731D 32 69 78             LD (CLST),A
+207+  7320 CB 27                SLA A
+207+  7322 ED 79         OUT (C),A
+208+  7324 C9                   RET
+209+  7325              ;-------
+210+  7325 3A 6B 78     INSOVR  LD A,(INOV)
+210+  7328 EE 01         XOR 1
+211+  732A 32 6B 78             LD (INOV),A
+212+  732D C9                   RET
+213+  732E              ;-------
+214+  732E AF           IINIF   XOR A
+214+  732F 25            DEC H
+214+  7330 20 04         JR NZ,IINIf
+215+  7332 DD 7E 05             LD A,(IX+5)
+215+  7335 3D            DEC A
+216+  7336 67 22 76 78  IINIf   LD H,A,(IISP),HL
+217+  733A C9                   RET
+218+  733B
+219+  733B 3A 6A 78     IREFR   LD A,(LANG)
+219+  733E B7            OR A
+220+  733F 21 56 78             LD HL,ISI1
+220+  7342 28 03         JR Z,$+5
+220+  7344 21 59 78      LD HL,ISI2
+221+  7347 11 44 78 01          LD DE,ISIL,BC,3
+221+  734B 03 00
+221+  734D ED B0         LDIR
+222+  734F
+223+  734F 3A 6B 78             LD A,(INOV)
+223+  7352 B7            OR A
+224+  7353 21 5C 78             LD HL,ISI3
+224+  7356 28 03         JR Z,$+5
+224+  7358 21 5F 78      LD HL,ISI4
+225+  735B 11 48 78 01          LD DE,ISII,BC,3
+225+  735F 03 00
+225+  7361 ED B0         LDIR
+226+  7363
+227+  7363 3A 69 78             LD A,(CLST)
+227+  7366 B7            OR A
+228+  7367 21 62 78             LD HL,ISI5
+228+  736A 28 03         JR Z,$+5
+228+  736C 21 65 78      LD HL,ISI6
+229+  736F 11 52 78 01          LD DE,ISIC,BC,3
+229+  7373 03 00
+229+  7375 ED B0         LDIR
+230+  7377
+231+  7377 21 42 78 ED          LD HL,ISINF,DE,(IISP)
+231+  737B 5B 76 78
+231+  737E C3 81 7D      JP TXTPR
+232+  7381              ;-------
+233+  7381 2A 72 78     IWRFR   LD HL,(ISAD)
+234+  7384 ED 4B 6E 78          LD BC,(IWOF)
+234+  7388 09            ADD HL,BC
+235+  7389 ED 5B 6C 78          LD DE,(IWAD)
+236+  738D 3A 75 78 06          LD A,(ICUP+1),B,0,C,A
+236+  7391 00 4F
+236+  7393 CD 25 7D      CALL PRSRW
+237+  7396 C9                   RET
+238+  7397              ;-------
+239+  7397 CD 96 74 C4  FCREF   CALL INS,NZ,INSOVR
+239+  739B 25 73
+240+  739D CD F8 72             CALL LNGCHE
+241+  73A0 CD 0B 73             CALL CAPSCHE
+242+  73A3
+243+  73A3 3A 6A 78             LD A,(LANG)
+243+  73A6 E6 03         AND %00000011
+244+  73A8 4F                   LD C,A
+245+  73A9 3A 6B 78             LD A,(INOV)
+246+  73AC B7                   OR A
+246+  73AD 28 02         JR Z,$+4
+246+  73AF CB F9         SET 7,C
+247+  73B1 3A 69 78             LD A,(CLST)
+248+  73B4 B7                   OR A
+248+  73B5 28 02         JR Z,$+4
+248+  73B7 CB F1         SET 6,C
+249+  73B9 79                   LD A,C
+250+  73BA C9                   RET
+251+  73BB              ;---------------------------------------
+252+  73BB              CLAvA   ;i:none
+253+  73BB              ;        o: Z - no chars
+254+  73BB              ;           A - char [a-z/A-Z;0-9]
+255+  73BB              ;                    [а-я/А-Я;0-9]
+256+  73BB              ;               also see TAIE1,TAIE2
+257+  73BB              ;                        TAIR1,TAIR2
+258+  73BB
+259+  73BB 21 D4 76             LD HL,TAB+13
+260+  73BE 7E                   LD A,(HL)
+260+  73BF 23            INC HL
+260+  73C0 B7            OR A
+260+  73C1 28 FB         JR Z,$-3
+261+  73C3 FE FF                CP #FF
+261+  73C5 C8            RET Z
+262+  73C6
+263+  73C6 CD 3D 75             CALL ARL
+263+  73C9 C8            RET Z
+263+  73CA 7E            LD A,(HL)
+264+  73CB
+265+  73CB 21 E1 76 06          LD HL,TAI0,B,SCANS
+265+  73CF 33
+266+  73D0 BE           AvA     CP (HL)
+266+  73D1 28 05         JR Z,CLA
+266+  73D3 23            INC HL
+267+  73D4 10 FA                DJNZ AvA
+268+  73D6 AF                   XOR A
+269+  73D7 C9                   RET
+270+  73D8 01 1F 89     CLA     LD BC,0-TAI0
+270+  73DB 09            ADD HL,BC
+271+  73DC
+272+  73DC AF                   XOR A
+272+  73DD 32 68 78      LD (CLTT),A
+273+  73E0 3A 69 78             LD A,(CLST)
+273+  73E3 B7            OR A
+273+  73E4 20 24         JR NZ,SHIT
+274+  73E6 3A 6A 78     NOSHI   LD A,(LANG)
+275+  73E9 01 4C 77             LD BC,TAIE1
+276+  73EC B7                   OR A
+276+  73ED 28 03         JR Z,$+5
+276+  73EF 01 D7 77      LD BC,TAIR1
+277+  73F2 09                   ADD HL,BC
+278+  73F3 E5                   PUSH HL
+278+  73F4 CD DE 74      CALL SHIFT
+279+  73F7 E1                   POP HL
+279+  73F8 0E 00         LD C,0
+279+  73FA 28 01         JR Z,$+3
+279+  73FC 0C            INC C
+280+  73FD 3A 68 78             LD A,(CLTT)
+280+  7400 A9            XOR C
+280+  7401 28 04         JR Z,NOSH
+281+  7403 01 33 00             LD BC,SCANS
+281+  7406 09            ADD HL,BC
+282+  7407 7E           NOSH    LD A,(HL)
+283+  7408 B7                   OR A
+284+  7409 C9                   RET
+285+  740A              ;-------
+286+  740A 3A 6A 78     SHIT    LD A,(LANG)
+287+  740D 01 B2 77             LD BC,TAIE0
+288+  7410 B7                   OR A
+288+  7411 28 03         JR Z,$+5
+288+  7413 01 C8 77      LD BC,TAIR0
+289+  7416 CD 22 74             CALL TAIZ
+289+  7419 20 CB         JR NZ,NOSHI
+290+  741B 3E 01 32 68          LD A,1,(CLTT),A
+290+  741F 78
+291+  7420 18 C4                JR NOSHI
+292+  7422              ;-------
+293+  7422 0A           TAIZ    LD A,(BC)
+293+  7423 03            INC BC
+294+  7424 FE FF                CP #FF
+294+  7426 C8            RET Z
+295+  7427 BD                   CP L
+295+  7428 20 F8         JR NZ,TAIZ
+296+  742A 3C                   INC A
+297+  742B C9                   RET
+298+  742C
+299+  742C              ;---------------------------------------
+300+  742C              CLAVA   ;i:none
+301+  742C              ;        o: Z - no chars
+302+  742C              ;           A - char [a-z;0-9]
+303+  742C              ;               also see TAIE1 table
+304+  742C
+305+  742C CD 09 75             CALL ART
+305+  742F C8            RET Z
+306+  7430
+307+  7430 21 E1 76 06          LD HL,TAI0,B,SCANS
+307+  7434 33
+308+  7435 BE           AVA     CP (HL)
+308+  7436 28 05         JR Z,ClA
+308+  7438 23            INC HL
+309+  7439 10 FA                DJNZ AVA
+310+  743B AF                   XOR A
+311+  743C C9                   RET
+312+  743D 01 33 00     ClA     LD BC,SCANS
+312+  7440 09            ADD HL,BC
+313+  7441 7E                   LD A,(HL)
+313+  7442 B7            OR A
+314+  7443 C9                   RET
+315+  7444              ;---------------------------------------
+316+  7444 FB           NUSP    EI
+316+  7445 76            HALT
+317+  7446 CD 6B 75             CALL ANYK
+317+  7449 C0            RET NZ
+318+  744A 18 F8                JR NUSP
+319+  744C FB           USPO    EI
+319+  744D 76            HALT
+320+  744E CD 6B 75             CALL ANYK
+320+  7451 C8            RET Z
+321+  7452 18 F8                JR USPO
+322+  7454              ;---------------------------------------
+323+  7454 21 CC 76     UPPP    LD HL,BUP
+323+  7457 C3 48 75      JP ARC;UP
+324+  745A 21 CE 76     DWWW    LD HL,BDN
+324+  745D C3 48 75      JP ARC;DOWN
+325+  7460 21 CD 76     LFFF    LD HL,BLF
+325+  7463 C3 48 75      JP ARC;LEFT
+326+  7466 21 CF 76     RGGG    LD HL,BRG
+326+  7469 C3 48 75      JP ARC;RIGHT
+327+  746C 21 D1 76     PGU     LD HL,BPU
+327+  746F C3 48 75      JP ARC;pgUP
+328+  7472 21 D3 76     PGD     LD HL,BPD
+328+  7475 C3 48 75      JP ARC;pgDN
+329+  7478
+330+  7478 3E 5A        ENKE    LD A,#5A
+330+  747A C3 3D 75      JP ARL; ENTER
+331+  747D 3E 29        SPKE    LD A,#29
+331+  747F C3 3D 75      JP ARL; SPACE
+332+  7482 3E 66        BSPC    LD A,#66
+332+  7484 C3 3D 75      JP ARL; BACKSPACE
+333+  7487 3E 6C        HOME    LD A,#6C
+333+  7489 C3 3D 75      JP ARL; HOME
+334+  748C 3E 69        END     LD A,#69
+334+  748E C3 3D 75      JP ARL; END
+335+  7491 3E 71        DELE    LD A,#71
+335+  7493 C3 3D 75      JP ARL; DELETE
+336+  7496 3E 70        INS     LD A,#70
+336+  7498 C3 3D 75      JP ARL; INSERT
+337+  749B
+338+  749B 3E 76        ESC     LD A,#76
+338+  749D C3 01 75      JP AR2
+339+  74A0 3E 05        F1      LD A,#05
+339+  74A2 C3 01 75      JP AR2
+340+  74A5 3E 06        F2      LD A,#06
+340+  74A7 C3 01 75      JP AR2
+341+  74AA 3E 04        F3      LD A,#04
+341+  74AC C3 01 75      JP AR2
+342+  74AF 3E 0C        F4      LD A,#0C
+342+  74B1 C3 01 75      JP AR2
+343+  74B4 3E 03        F5      LD A,#03
+343+  74B6 C3 01 75      JP AR2
+344+  74B9 3E 0B        F6      LD A,#0B
+344+  74BB C3 01 75      JP AR2
+345+  74BE 3E 83        F7      LD A,#83
+345+  74C0 C3 01 75      JP AR2
+346+  74C3 3E 0A        F8      LD A,#0A
+346+  74C5 C3 01 75      JP AR2
+347+  74C8 3E 01        F9      LD A,#01
+347+  74CA C3 01 75      JP AR2
+348+  74CD 3E 09        F10     LD A,#09
+348+  74CF C3 01 75      JP AR2
+349+  74D2
+350+  74D2 21 C8 76     CAPS    LD HL,BCA
+350+  74D5 C3 48 75      JP ARC;CAPS LOCK
+351+  74D8 21 D0 76     ALT     LD HL,BHM
+351+  74DB C3 66 75      JP ARG
+352+  74DE 21 C9 76     SHIFT   LD HL,BCS
+352+  74E1 C3 66 75      JP ARG
+353+  74E4 21 CA 76     CTRL    LD HL,BSS
+353+  74E7 C3 66 75      JP ARG
+354+  74EA 21 C7 76     TABK    LD HL,TAB
+354+  74ED C3 48 75      JP ARC
+355+  74F0
+356+  74F0 3E 5A 21 D4  ENK2    LD A,#5A,HL,TAB+13
+356+  74F4 76
+356+  74F5 18 05         JR II
+357+  74F7 3E 76 21 CB  ESC2    LD A,#76,HL,TAB+4
+357+  74FB 76
+358+  74FC BE           II      CP (HL)
+358+  74FD 20 08         JR NZ,ArL
+359+  74FF 18 5F                JR AC
+360+  7501              ;-------
+361+  7501 21 CB 76     AR2     LD HL,TAB+4
+362+  7504 BE                   CP (HL)
+362+  7505 28 41         JR Z,ARC
+363+  7507 AF           ArL     XOR A
+364+  7508 C9                   RET
+365+  7509              ;-------
+366+  7509 21 D4 76     ART     LD HL,TAB+13
+367+  750C 7E                   LD A,(HL)
+367+  750D 23            INC HL
+367+  750E B7            OR A
+367+  750F 28 FB         JR Z,$-3
+368+  7511 22 0A 75             LD (ART+1),HL
+369+  7514 2B                   DEC HL
+369+  7515 FE FF         CP #FF
+369+  7517 28 1D         JR Z,BKZ
+370+  7519
+371+  7519 7E           ARc     LD A,(HL)
+371+  751A B7            OR A
+371+  751B C8            RET Z
+372+  751C
+373+  751C 3A DF 76             LD A,(ARK)
+373+  751F BE            CP (HL)
+373+  7520 20 0F         JR NZ,ACZ
+374+  7522 3A DE 76             LD A,(ARR)
+375+  7525 B7                   OR A
+375+  7526 28 09         JR Z,ACZ
+376+  7528 FE FF                CP #FF
+376+  752A 20 08         JR NZ,ArCZ
+377+  752C 3E 19 32 DE          LD A,RPT,(ARR),A
+377+  7530 76
+378+  7531 7E           ACZ     LD A,(HL)
+379+  7532 B7                   OR A
+380+  7533 C9                   RET
+381+  7534 AF           ArCZ    XOR A
+382+  7535 C9                   RET
+383+  7536 21 D4 76 22  BKZ     LD HL,TAB+13,(ART+1),HL
+383+  753A 0A 75
+383+  753C C9            RET
+384+  753D              ;-------
+385+  753D 21 D4 76 01  ARL     LD HL,TAB+13,BC,7
+385+  7541 07 00
+386+  7543 ED B1                CPIR
+386+  7545 20 C0         JR NZ,ArL
+386+  7547 2B            DEC HL
+387+  7548              ;-------
+388+  7548 7E           ARC     LD A,(HL)
+388+  7549 B7            OR A
+388+  754A C8            RET Z
+389+  754B 3A DF 76             LD A,(ARK)
+389+  754E BE            CP (HL)
+389+  754F 20 13         JR NZ,ArC
+390+  7551 3A DE 76             LD A,(ARR)
+391+  7554 B7                   OR A
+391+  7555 28 09         JR Z,AC
+392+  7557 FE FF                CP #FF
+392+  7559 20 09         JR NZ,ArC
+393+  755B 3E 19 32 DE          LD A,RPT,(ARR),A
+393+  755F 76
+394+  7560 3E 01        AC      LD A,1
+394+  7562 B7            OR A
+395+  7563 C9                   RET
+396+  7564 AF           ArC     XOR A
+397+  7565 C9                   RET
+398+  7566              ;-------
+399+  7566 7E           ARG     LD A,(HL)
+399+  7567 B7            OR A
+399+  7568 C8            RET Z
+400+  7569 18 F5                JR AC
+401+  756B              ;-------
+402+  756B 21 C7 76 06  ANYK    LD HL,TAB,B,20
+402+  756F 14
+403+  7570 AF                   XOR A
+403+  7571 BE            CP (HL)
+403+  7572 20 04         JR NZ,NYK
+403+  7574 23            INC HL
+403+  7575 10 FA         DJNZ $-4
+404+  7577 C9                   RET
+405+  7578 3E 19 32 DE  NYK     LD A,RPT,(ARR),A
+405+  757C 76
+406+  757D C9                   RET
+407+  757E              ;---------------------------------------
+408+  757E 21 D4 76 01  ALM     LD HL,TAB+13,BC,7
+408+  7582 07 00
+409+  7584 ED B1                CPIR
+409+  7586 C8            RET Z
+410+  7587
+411+  7587 5F                   LD E,A
+412+  7588 AF                   XOR A
+413+  7589 21 D4 76 01          LD HL,TAB+13,BC,7
+413+  758D 07 00
+414+  758F ED B1                CPIR
+414+  7591 C0            RET NZ
+414+  7592 2B            DEC HL
+415+  7593
+416+  7593 73                   LD (HL),E
+417+  7594 DD 73 18             LD (IX+24),E
+418+  7597 DD 36 17 FF          LD (IX+23),#FF
+419+  759B C9                   RET
+420+  759C              ;---------------------------------------
+421+  759C 01 F7 DF 3E  OVER    LD BC,#DFF7,A,#0C
+421+  75A0 0C
+421+  75A1 ED 79         OUT (C),A
+422+  75A3 01 F7 BF 3E          LD BC,#BFF7,A,#01
+422+  75A7 01
+422+  75A8 ED 79         OUT (C),A
+423+  75AA 01 F7 DF 3E          LD BC,#DFF7,A,#F0
+423+  75AE F0
+423+  75AF ED 79         OUT (C),A
+424+  75B1
+425+  75B1 AF                   XOR A
+426+  75B2 32 E0 76             LD (E0F),A
+427+  75B5 21 C7 76             LD HL,TAB
+428+  75B8 06 14 77             LD B,20,(HL),A
+428+  75BB 23            INC HL
+428+  75BC 10 FC         DJNZ $-2
+429+  75BE 3E 01                LD A,1
+429+  75C0 B7            OR A
+430+  75C1 C9                   RET
+431+  75C2 32 D0 76     K9      LD (BHM),A
+432+  75C5 C9                   RET
+433+  75C6              ;---------------------------------------
+434+  75C6 32 E0 76     E0Psd   LD (E0F),A
+434+  75C9 18 1B         JR Psd
+435+  75CB
+436+  75CB              ;GET SCAN CODE:
+437+  75CB DD 21 C7 76  PSD2    LD IX,TAB
+438+  75CF
+439+  75CF DD 7E 17             LD A,(IX+23)
+440+  75D2 B7                   OR A
+440+  75D3 28 07         JR Z,PSD
+441+  75D5 FE FF                CP #FF
+441+  75D7 28 03         JR Z,PSD
+442+  75D9 DD 35 17             DEC (IX+23)
+443+  75DC
+444+  75DC 01 F7 DF 3E  PSD     LD BC,#DFF7,A,#F0
+444+  75E0 F0
+444+  75E1 ED 79         OUT (C),A
+445+  75E3
+446+  75E3 01 F7 BF             LD BC,#BFF7
+447+  75E6 ED 78        Psd     IN A,(C)
+448+  75E8 B7                   OR A
+448+  75E9 C8            RET Z
+449+  75EA FE E0                CP #E0
+449+  75EC 28 D8         JR Z,E0Psd
+450+  75EE FE F0                CP #F0
+450+  75F0 CA 98 76      JP Z,KOF
+451+  75F3 FE FF                CP #FF
+451+  75F5 28 A5         JR Z,OVER
+452+  75F7
+453+  75F7 CA 9D 76     BAT     JP Z,KoF;JP/JP Z,
+454+  75FA              ;-------
+455+  75FA 4F                   LD C,A
+456+  75FB 3A E0 76             LD A,(E0F)
+456+  75FE B7            OR A
+456+  75FF DD 36 19 00   LD (IX+25),0
+457+  7603 79                   LD A,C
+457+  7604 28 06         JR Z,NOe0
+458+  7606 FE 12                CP #12
+458+  7608 C8            RET Z
+459+  7609 FE 59                CP #59
+459+  760B C8            RET Z
+460+  760C FE 12        NOe0    CP #12
+460+  760E 28 4D         JR Z,K2;LSHIFT
+461+  7610 FE 59                CP #59
+461+  7612 28 49         JR Z,K2;RSHIFT
+462+  7614
+463+  7614 FE 11                CP #11
+463+  7616 28 AA         JR Z,K9;ALT
+464+  7618 FE 0D                CP #0D
+464+  761A 28 37         JR Z,K0;TAB
+465+  761C FE 58                CP #58
+465+  761E 28 38         JR Z,K1;CAPS
+466+  7620 FE 14                CP #14
+466+  7622 28 3E         JR Z,K3;CTRL
+467+  7624
+468+  7624 FE 0D                CP #0D
+468+  7626 38 3F         JR C,K4
+469+  7628 FE 76                CP #76
+469+  762A 28 3B         JR Z,K4;ESC
+470+  762C FE 78                CP #78
+470+  762E 28 37         JR Z,K4;F11
+471+  7630 FE 83                CP #83
+471+  7632 28 33         JR Z,K4;F7
+472+  7634
+473+  7634 FE 75                CP #75
+473+  7636 28 34         JR Z,K5;U
+474+  7638 FE 6B                CP #6B
+474+  763A 28 35         JR Z,K6;L
+475+  763C FE 72                CP #72
+475+  763E 28 36         JR Z,K7;D
+476+  7640 FE 74                CP #74
+476+  7642 28 37         JR Z,K8;R
+477+  7644
+478+  7644 FE 7D                CP #7D
+478+  7646 28 38         JR Z,KA;PGup
+479+  7648 FE 7A                CP #7A
+479+  764A 28 3E         JR Z,KC;PGdn
+480+  764C
+481+  764C FE 77                CP #77
+481+  764E 28 35         JR Z,KB;NUML
+482+  7650 C3 7E 75             JP ALM
+483+  7653              ;-------
+484+  7653 21 C7 76     K0      LD HL,TAB+0
+484+  7656 18 35         JR KFF
+485+  7658 21 C8 76     K1      LD HL,TAB+1
+485+  765B 18 30         JR KFF
+486+  765D 21 C9 76     K2      LD HL,TAB+2
+486+  7660 18 2B         JR KFF
+487+  7662 21 CA 76     K3      LD HL,TAB+3
+487+  7665 18 26         JR KFF
+488+  7667 21 CB 76     K4      LD HL,TAB+4
+488+  766A 18 21         JR KFF
+489+  766C 21 CC 76     K5      LD HL,TAB+5
+489+  766F 18 1C         JR KFF
+490+  7671 21 CD 76     K6      LD HL,TAB+6
+490+  7674 18 17         JR KFF
+491+  7676 21 CE 76     K7      LD HL,TAB+7
+491+  7679 18 12         JR KFF
+492+  767B 21 CF 76     K8      LD HL,TAB+8
+492+  767E 18 0D         JR KFF
+493+  7680 21 D1 76     KA      LD HL,TAB+10
+493+  7683 18 08         JR KFF
+494+  7685 21 D2 76     KB      LD HL,TAB+11
+494+  7688 18 03         JR KFF
+495+  768A 21 D3 76     KC      LD HL,TAB+12
+496+  768D              ;-------
+497+  768D BE           KFF     CP (HL)
+497+  768E C8            RET Z
+498+  768F 77                   LD (HL),A
+499+  7690 32 DF 76             LD (ARK),A
+500+  7693 DD 36 17 FF          LD (IX+23),#FF
+501+  7697 C9                   RET
+502+  7698              ;-------
+503+  7698 ED 78        KOF     IN A,(C);                   BC=#BFF7
+504+  769A B7                   OR A
+504+  769B 28 24         JR Z,EBU
+505+  769D 4F           KoF     LD C,A
+506+  769E 3E CA 32 F7          LD A,#CA,(BAT),A
+506+  76A2 75
+507+  76A3
+508+  76A3 3A E0 76             LD A,(E0F)
+508+  76A6 B7            OR A
+508+  76A7 DD 36 19 00   LD (IX+25),0
+509+  76AB 79                   LD A,C
+509+  76AC 28 06         JR Z,NOE0
+510+  76AE FE 12                CP #12
+510+  76B0 C8            RET Z
+511+  76B1 FE 59                CP #59
+511+  76B3 C8            RET Z
+512+  76B4
+513+  76B4 21 C7 76 01  NOE0    LD HL,TAB,BC,20
+513+  76B8 14 00
+514+  76BA ED B1                CPIR
+514+  76BC C0            RET NZ
+514+  76BD 2B            DEC HL
+515+  76BE 36 00                LD (HL),0
+516+  76C0 C9                   RET
+517+  76C1
+518+  76C1 3E C3 32 F7  EBU     LD A,#C3,(BAT),A
+518+  76C5 75
+518+  76C6 C9            RET
+519+  76C7              ;-------
+520+  76C7 00           TAB     DS 1;  +0  TAB
+521+  76C8 00                   DS 1;  +1  CASP LOCK
+522+  76C9 00                   DS 1;  +2  SHIFT
+523+  76CA 00                   DS 1;  +3  CTRL
+524+  76CB 00                   DS 1;  +4  F1-F12,ESC
+525+  76CC 00 00 00 00          DS 4;  +5  CURSOR KEYZ
+526+  76D0 00 00 00 00          DS 4;  +9  ALT,pgUP,NUML,pgDN
+527+  76D4 00 00 00...          DS 7;  +13 oth KEYZ
+528+  76DB FF                   DB #FF
+529+  76DC 00                   NOP ;+21 NXF
+530+  76DD 00                   NOP ;+22 WIN
+531+  76DE 00           ARR     NOP ;+23 AR
+532+  76DF 00           ARK     NOP ;+24 LST KEY
+533+  76E0 00           E0F     NOP ;+25 E0 Prefx
+534+  76E1              ;-------
+535+  76E1 40 30 45 31  TAI0    DB "@0E161E26252E363D3E46454E55"
+535+  76E5 36 31 45 32
+535+  76E9 36 32 35 32
+535+  76ED 45 33 36 33
+535+  76F1 44 33 45 34
+535+  76F5 36 34 35 34
+535+  76F9 45 35 35
+536+  76FC 40 31 35 31          DB "@151D242D2C353C43444D545B5D"
+536+  7700 44 32 34 32
+536+  7704 44 32 43 33
+536+  7708 35 33 43 34
+536+  770C 33 34 34 34
+536+  7710 44 35 34 35
+536+  7714 42 35 44
+537+  7717 40 31 43 31          DB "@1C1B232B34333B424B4C52"
+537+  771B 42 32 33 32
+537+  771F 42 33 34 33
+537+  7723 33 33 42 34
+537+  7727 32 34 42 34
+537+  772B 43 35 32
+538+  772E 40 31 41 32          DB "@1A22212A32313A41494A29"
+538+  7732 32 32 31 32
+538+  7736 41 33 32 33
+538+  773A 31 33 41 34
+538+  773E 31 34 39 34
+538+  7742 41 32 39
+539+  7745 40 37 39 37          DB "@797B7C"
+539+  7749 42 37 43
+540+  774C              ;-------
+541+  774C 27 31 32 33  TAIE1   DB #27,"1234567890-="
+541+  7750 34 35 36 37
+541+  7754 38 39 30 2D
+541+  7758 3D
+542+  7759 71 77 65 72          DB "qwertyuiop[]\\"
+542+  775D 74 79 75 69
+542+  7761 6F 70 5B 5D
+542+  7765 5C
+543+  7766 61 73 64 66          DB "asdfghjkl;'"
+543+  776A 67 68 6A 6B
+543+  776E 6C 3B 27
+544+  7771 7A 78 63 76          DB "zxcvbnm,./ +-*"
+544+  7775 62 6E 6D 2C
+544+  7779 2E 2F 20 2B
+544+  777D 2D 2A
+545+  777F 7E 21 40 23  TAIE2   DB #7E,"!@#$%^&*()_+"
+545+  7783 24 25 5E 26
+545+  7787 2A 28 29 5F
+545+  778B 2B
+546+  778C 51 57 45 52          DB "QWERTYUIOP{}|"
+546+  7790 54 59 55 49
+546+  7794 4F 50 7B 7D
+546+  7798 7C
+547+  7799 41 53 44 46          DB "ASDFGHJKL:",#22
+547+  779D 47 48 4A 4B
+547+  77A1 4C 3A 22
+548+  77A4 5A 58 43 56          DB "ZXCVBNM<>? +-*"
+548+  77A8 42 4E 4D 3C
+548+  77AC 3E 3F 20 2B
+548+  77B0 2D 2A
+549+  77B2
+550+  77B2 00 01 02 03  TAIE0   DB 0,1,2,3,4,5,6,7,8,9,10,11,12
+550+  77B6 04 05 06 07
+550+  77BA 08 09 0A 0B
+550+  77BE 0C
+551+  77BF 17 18 19 23          DB 23,24,25,35,36,44,45,46,#FF
+551+  77C3 24 2C 2D 2E
+551+  77C7 FF
+552+  77C8 01 02 03 04  TAIR0   DB 1,2,3,4,5,6,7,8,9,10,11,12
+552+  77CC 05 06 07 08
+552+  77D0 09 0A 0B 0C
+553+  77D4 19 2E FF             DB 25,46,#FF
+554+  77D7
+555+  77D7 F1 31 32 33  TAIR1   DB #F1,"1234567890-="
+555+  77DB 34 35 36 37
+555+  77DF 38 39 30 2D
+555+  77E3 3D
+556+  77E4 A9 E6 E3 AA          DB #A9,#E6,#E3,#AA,#A5,#AD,#A3,#E8,#E9,#A7,#E5,#EA,"\\"
+556+  77E8 A5 AD A3 E8
+556+  77EC E9 A7 E5 EA
+556+  77F0 5C
+557+  77F1 E4 EB A2 A0          DB #E4,#EB,#A2,#A0,#AF,#E0,#AE,#AB,#A4,#A6,#ED
+557+  77F5 AF E0 AE AB
+557+  77F9 A4 A6 ED
+558+  77FC EF E7 E1 AC          DB #EF,#E7,#E1,#AC,#A8,#E2,#EC,#A1,#EE,". +-*"
+558+  7800 A8 E2 EC A1
+558+  7804 EE 2E 20 2B
+558+  7808 2D 2A
+559+  780A F0 40 32 31  TAIR2   DB #F0,"@2122FB3B","%:?*()_+"
+559+  780E 32 32 46 42
+559+  7812 33 42 25 3A
+559+  7816 3F 2A 28 29
+559+  781A 5F 2B
+560+  781C 89 96 93 8A          DB #89,#96,#93,#8A,#85,#8D,#83,#98,#99,#87,#95,#9A,"/"
+560+  7820 85 8D 83 98
+560+  7824 99 87 95 9A
+560+  7828 2F
+561+  7829 94 9B 82 80          DB #94,#9B,#82,#80,#8F,#90,#8E,#8B,#84,#86,#9D
+561+  782D 8F 90 8E 8B
+561+  7831 84 86 9D
+562+  7834 9F 97 91 8C          DB #9F,#97,#91,#8C,#88,#92,#9C,#81,#9E,", +-*"
+562+  7838 88 92 9C 81
+562+  783C 9E 2C 20 2B
+562+  7840 2D 2A
+563+  7842              ;-------
+564+  7842 09 0E        ISINF   DB #09,#0E
+565+  7844 45 4E 47     ISIL    DB "ENG"
+566+  7847 2F                   DB #2F
+567+  7848 49 4E 53     ISII    DB "INS"
+568+  784B 0B 01 43 41          DB #0B,1,"CAPS:"
+568+  784F 50 53 3A
+569+  7852 4F 46 46     ISIC    DB "OFF"
+570+  7855 00                   DB 0
+571+  7856
+572+  7856 45 4E 47     ISI1    DB "ENG"
+573+  7859 52 55 53     ISI2    DB "RUS"
+574+  785C 49 4E 53     ISI3    DB "INS"
+575+  785F 4F 56 52     ISI4    DB "OVR"
+576+  7862 4F 46 46     ISI5    DB "OFF"
+577+  7865 4F 4E 20     ISI6    DB "ON "
+578+  7868              ;-------
+579+  7868 00           CLTT    NOP ;TEMP
+580+  7869 00           CLST    NOP ;0-LOW, 1-HI
+581+  786A 00           LANG    NOP ;0-ENG, 1-RUS
+582+  786B 00           INOV    NOP ;0-INSERT, 1-OVER
+583+  786C
+584+  786C 00 00        IWAD    DS 2
+585+  786E 00 00        IWOF    DS 2
+586+  7870 00 00        IBSZ    DS 2
+587+  7872 00 00        ISAD    DS 2
+588+  7874 00           ICUP    NOP ;\
+589+  7875 00                   NOP ;/
+590+  7876 00 00        IISP    DS 2
+591+  7878              ;-------
+592+  7878              BCA     EQU TAB+1
+593+  7878              BCS     EQU TAB+2
+594+  7878              BSS     EQU TAB+3
+595+  7878              BFS     EQU TAB+4
+596+  7878
+597+  7878              BUP     EQU TAB+5
+598+  7878              BLF     EQU TAB+6
+599+  7878              BDN     EQU TAB+7
+600+  7878              BRG     EQU TAB+8
+601+  7878
+602+  7878              BHM     EQU TAB+9
+603+  7878              BPU     EQU TAB+10
+604+  7878              BED     EQU TAB+11
+605+  7878              BPD     EQU TAB+12
+606+  7878              BAL     EQU TAB+13
+607+  7878              ;---------------------------------------
+608+  7878
+# file closed: PS2P.ASM
+  8   7878
+# file closed: PS2P_test.ASM

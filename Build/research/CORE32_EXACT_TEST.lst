@@ -1,0 +1,3179 @@
+# file opened: CORE32_EXACT_TEST.ASM
+   1  0000              ; Исследовательская сборка: production source не изменён.
+   2  0000              ; ALASM .N повторяет всю группу команд, разделённую двоеточиями.
+   3  0000                      ORG #C000
+   4  C000
+   5  C000 21 0C C0 11          LD HL,CORE32,DE,#4000
+   5  C004 00 40
+   6  C006 01 C7 1B             LD BC,END-START
+   7  C009 ED B0                LDIR
+   8  C00B C9                   RET
+   9  C00C
+  10  C00C                      INCLUDE "KERNEL_EXACT_TEST.ASM"
+# file opened: KERNEL_EXACT_TEST.ASM
+   1+ C00C              ; Метка источника копирования должна иметь физический адрес #C00C.
+   2+ C00C              CORE32:
+   3+ C00C                      DISP #4000
+   4+ 4000              ;-------
+   5+ 4000              GENBU   EQU #0000
+   6+ 4000              GENBE   EQU #2000
+   7+ 4000              NXTBU   EQU #0000;buffer Start
+   8+ 4000              NXTBM   EQU #1000;buffer MID
+   9+ 4000              NXTBE   EQU #2000;buffer END
+  10+ 4000              NXTBZ   EQU (high NXTBE-high NXTBU)/2
+  11+ 4000
+  12+ 4000              DRVR    EQU #3800
+  13+ 4000              VALS    EQU DRVR+24*3
+  14+ 4000              ; Буфер управляющих значений драйвера расположен перед таблицей входов #3800.
+  15+ 4000              ; Исторический дамп исходников ошибочно отсчитывал эти четыре слова от VALS.
+  16+ 4000              CGFL    EQU DRVR-2;  - used in NXTETY
+  17+ 4000              CGPZ    EQU DRVR-4;  /
+  18+ 4000              CGHL    EQU DRVR-6; /
+  19+ 4000              CGDE    EQU DRVR-8;/
+  20+ 4000              ;DRV_LN  EQU #0600
+  21+ 4000
+  22+ 4000              SECBU   EQU #3000;x#200
+  23+ 4000              SECBE   EQU SECBU+512
+  24+ 4000              LOBU    EQU #3200
+  25+ 4000              LOBE    EQU LOBU+512
+  26+ 4000              LOBU2   EQU LOBE
+  27+ 4000              LOBE2   EQU LOBU2+512
+  28+ 4000              ;-------
+  29+ 4000              SELDEV  EQU DRVR
+  30+ 4000              DEVINI  EQU DRVR+3
+  31+ 4000              REINI   EQU DRVR+3*2
+  32+ 4000
+  33+ 4000              XPOZI   EQU DRVR+3*3
+  34+ 4000              PROZ    EQU XPOZI+3
+  35+ 4000
+  36+ 4000              RDDSE   EQU PROZ+3
+  37+ 4000              SDDSE   EQU RDDSE+3
+  38+ 4000
+  39+ 4000              RDD256  EQU SDDSE+3
+  40+ 4000              ;---------------------------------------
+  41+ 4000              NSDC    EQU VALS;  \ Sec num in Cluster
+  42+ 4000              EOC     EQU NSDC+1;/ Flag (EndOfChain)
+  43+ 4000
+  44+ 4000              ABT     EQU EOC+1
+  45+ 4000
+  46+ 4000              BZN     EQU ABT+1;Blocks
+  47+ 4000              NR0     EQU BZN+1
+  48+ 4000
+  49+ 4000              CAHL    EQU NR0+2
+  50+ 4000              CADE    EQU CAHL+2
+  51+ 4000
+  52+ 4000              LSTSE   EQU CADE+2
+  53+ 4000
+  54+ 4000              REZDE   EQU LSTSE+4
+  55+ 4000
+  56+ 4000              PR      EQU REZDE+2
+  57+ 4000
+  58+ 4000              CLHL    EQU PR+4
+  59+ 4000              CLDE    EQU CLHL+2
+  60+ 4000
+  61+ 4000              LLHL    EQU CLDE+2
+  62+ 4000
+  63+ 4000              LTHL    EQU LLHL+4;LAST
+  64+ 4000              LTDE    EQU LTHL+2
+  65+ 4000              ;-------Entry Pattern:
+  66+ 4000              ENTRY   EQU LTDE+2
+  67+ 4000              EFLG    EQU ENTRY+11
+  68+ 4000              CLSDE   EQU ENTRY+20
+  69+ 4000              CLSHL   EQU ENTRY+26
+  70+ 4000              SIZIK   EQU ENTRY+28
+  71+ 4000              ;-------FAT PARAMETERS:
+  72+ 4000              BREZS   EQU ENTRY+33;           [+14(2)]
+  73+ 4000              FSINF   EQU BREZS+2;   [+48(2)]+[ADDTOP]
+  74+ 4000
+  75+ 4000              BFATS   EQU FSINF+4
+  76+ 4000              BFTSZ   EQU BFATS+1
+  77+ 4000              BSECPC  EQU BFTSZ+4
+  78+ 4000              BROOTC  EQU BSECPC+2
+  79+ 4000
+  80+ 4000              FSTFRC  EQU BROOTC+4
+  81+ 4000
+  82+ 4000              ADDTOP  EQU FSTFRC+4
+  83+ 4000
+  84+ 4000              SFAT    EQU ADDTOP+4
+  85+ 4000              SDFAT   EQU SFAT+2
+  86+ 4000
+  87+ 4000              CUHL    EQU SDFAT+4
+  88+ 4000              CUDE    EQU CUHL+2
+  89+ 4000
+  90+ 4000              NXDE    EQU CUDE+2
+  91+ 4000              NXHL    EQU NXDE+2
+  92+ 4000
+  93+ 4000              LDHL    EQU NXHL+2;ADDRESS COPY
+  94+ 4000
+  95+ 4000              COUNT   EQU LDHL+2
+  96+ 4000              DUHL    EQU COUNT+1
+  97+ 4000              DUDE    EQU DUHL+2
+  98+ 4000
+  99+ 4000              DUBA    EQU DUDE+2
+ 100+ 4000              UUHL    EQU DUBA+1
+ 101+ 4000              BUHL    EQU UUHL+2
+ 102+ 4000              CLCNT   EQU BUHL+2; COUNTER USED in MKSG
+ 103+ 4000
+ 104+ 4000              FCTS    EQU CLCNT+4
+ 105+ 4000              BUTS    EQU FCTS+4
+ 106+ 4000
+ 107+ 4000              LSTCAT  EQU BUTS+4;  Active DIR
+ 108+ 4000              RECCAT  EQU LSTCAT+4;RECYCLED BIN DIR
+ 109+ 4000
+ 110+ 4000              ;***************************************
+ 111+ 4000 C3 62 43     START   JP Z0;SELDEV;           inDriver
+ 112+ 4003 C3 03 38             JP DEVINI;              inDriver
+ 113+ 4006 C3 62 43             JP Z0;REINI;            inDriver
+ 114+ 4009 C3 A2 4E             JP HDD; SEARCH PARTITION
+ 115+ 400C
+ 116+ 400C C3 79 43             JP RDD; READ SECTORS WITH POZ
+ 117+ 400F C3 81 43             JP SDD; SAVE SECTORS WITH POZ
+ 118+ 4012
+ 119+ 4012 C3 0F 45             JP GIPAG; POZ to FirstCluster
+ 120+ 4015 C3 BF 43             JP LOAD512
+ 121+ 4018 C3 AD 43             JP SAVE512
+ 122+ 401B
+ 123+ 401B C3 3B 50             JP DOS_SWP;SELDEVnDRIVERinit
+ 124+ 401E
+ 125+ 401E C3 63 43             JP GLSTCAT
+ 126+ 4021 C3 70 43             JP TLSTCAT
+ 127+ 4024
+ 128+ 4024 C3 5C 44             JP SRHFCL
+ 129+ 4027 C3 62 43             JP Z0
+ 130+ 402A C3 A6 48             JP MKSG
+ 131+ 402D C3 62 43             JP Z0
+ 132+ 4030 C3 FF 4D             JP RFRH
+ 133+ 4033
+ 134+ 4033 C3 51 43             JP GENTRY
+ 135+ 4036 C3 5A 43             JP TENTRY
+ 136+ 4039
+ 137+ 4039 C3 52 4D             JP MKFILE
+ 138+ 403C C3 78 4D             JP MKDIR
+ 139+ 403F
+ 140+ 403F C3 F8 4C             JP DELFL
+ 141+ 4042 C3 31 4D             JP RENAME
+ 142+ 4045
+ 143+ 4045 C3 E1 49             JP DLSG
+ 144+ 4048 C3 24 4E             JP CHTOSE
+ 145+ 404B
+ 146+ 404B C3 62 43             JP Z0
+ 147+ 404E C3 63 4A             JP SRHDRN
+ 148+ 4051
+ 149+ 4051 C3 9B 43             JP LOAD256
+ 150+ 4054 C3 89 43             JP LOADNON
+ 151+ 4057
+ 152+ 4057 C3 40 41             JP NXTETY
+ 153+ 405A C3 67 40             JP NXTETY2
+ 154+ 405D              ;---------------------------------------
+ 155+ 405D
+# file closed: KERNEL_EXACT_TEST.ASM
+  11  405D              ;---------------------------------------
+  12  405D 7D           RMFL2   LD A,L
+  12  405E E6 F0         AND #F0
+  12  4060 6F            LD L,A
+  13  4061 0E 20                LD C,32
+  13  4063 09            ADD HL,BC
+  14  4064 C3 A6 40             JP NXFL2
+  15  4067              ;-------
+  16  4067              NXTETY2 ;i:DE - Address
+  17  4067              ;A -   [7]:1 - only short names
+  18  4067              ;    [6-5]:reserved
+  19  4067              ;      [4]:1 - enable created time field
+  20  4067              ;      [3]:1 - enable created date field
+  21  4067              ;      [2]:1 - enable size field
+  22  4067              ;    [1-0]:%00 find next Entry
+  23  4067              ;          %01 find next File
+  24  4067              ;          %10 find next DIR
+  25  4067              ;          %11 reserved
+  26  4067              ;
+  27  4067              ;        o: Z - End Of Dir
+  28  4067              ;          NZ - Buffer updated:
+  29  4067              ;          DE - [size(4)],
+  30  4067              ;               [date(2)],
+  31  4067              ;               [time(2)],
+  32  4067              ;               flag(1),Entry Name,#00
+  33  4067
+  34  4067 4F                   LD C,A
+  35  4068 AF                   XOR A
+  35  4069 CB 79         BIT 7,C
+  35  406B 28 01         JR Z,$+3
+  35  406D 3C            INC A
+  36  406E 32 06 41             LD (BT7+1),A
+  37  4071 AF                   XOR A
+  37  4072 CB 61         BIT 4,C
+  37  4074 28 01         JR Z,$+3
+  37  4076 3C            INC A
+  38  4077 32 F3 40             LD (BT4+1),A
+  39  407A AF                   XOR A
+  39  407B CB 59         BIT 3,C
+  39  407D 28 01         JR Z,$+3
+  39  407F 3C            INC A
+  40  4080 32 E8 40             LD (BT3+1),A
+  41  4083 AF                   XOR A
+  41  4084 CB 51         BIT 2,C
+  41  4086 28 01         JR Z,$+3
+  41  4088 3C            INC A
+  42  4089 32 D4 40             LD (BT2+1),A
+  43  408C 79                   LD A,C
+  43  408D E6 03         AND %00000011
+  44  408F 32 BC 40             LD (BT0+1),A
+  45  4092
+  46  4092 D5                   PUSH DE
+  47  4093 3A FE 37             LD A,(CGFL)
+  47  4096 B7            OR A
+  47  4097 CC 37 43      CALL Z,NXTINI
+  48  409A D1                   POP DE
+  49  409B
+  50  409B 21 A1 40 22          LD HL,NXFF2,(NxMR+1),HL
+  50  409F 32 41
+  51  40A1 2A FC 37 06  NXFF2   LD HL,(CGPZ),B,0
+  51  40A5 00
+  52  40A6 7C           NXFL2   LD A,H
+  52  40A7 FE 20         CP high NXTBE
+  52  40A9 30 67         JR NC,NXMR
+  53  40AB 7E                   LD A,(HL)
+  54  40AC B7                   OR A
+  54  40AD C8            RET Z
+  55  40AE FE E5                CP #E5
+  55  40B0 28 AB         JR Z,RMFL2
+  56  40B2
+  57  40B2 0E 0B                LD C,11
+  57  40B4 09            ADD HL,BC
+  58  40B5 7E                   LD A,(HL)
+  58  40B6 CB 5F         BIT 3,A
+  58  40B8 20 A3         JR NZ,RMFL2
+  59  40BA 08                   EXA
+  60  40BB 3E 00        BT0     LD A,0
+  61  40BD B7                   OR A
+  61  40BE 28 10         JR Z,BT1
+  62  40C0 3D                   DEC A
+  62  40C1 20 07         JR NZ,BT01
+  63  40C3 08                   EXA
+  63  40C4 CB 67         BIT 4,A
+  63  40C6 20 95 18 05   JR NZ,RMFL2,Bt1
+  64  40CA 08           BT01    EXA
+  64  40CB CB 67         BIT 4,A
+  64  40CD 28 8E         JR Z,RMFL2
+  65  40CF
+  66  40CF 08           Bt1     EXA
+  67  40D0 0E 05        BT1     LD C,16-11
+  67  40D2 09            ADD HL,BC
+  68  40D3 3E 00        BT2     LD A,0
+  68  40D5 B7            OR A
+  68  40D6 28 0F         JR Z,BT3
+  69  40D8 0E 0C                LD C,28-16
+  69  40DA 09            ADD HL,BC
+  70  40DB               DUP 4
+  71  40DB ED A0       >         LDI
+  71  40DD ED A0       >         LDI
+  71  40DF ED A0       >         LDI
+  71  40E1 ED A0       >         LDI
+  72  40E3               EDUP
+  73  40E3 0E 10                LD C,16
+  73  40E5 ED 42         SBC HL,BC
+  74  40E7
+  75  40E7 3E 00        BT3     LD A,0
+  75  40E9 B7            OR A
+  75  40EA 28 06         JR Z,BT4
+  76  40EC               DUP 2
+  77  40EC ED A0       >         LDI
+  77  40EE ED A0       >         LDI
+  78  40F0               EDUP
+  79  40F0               DUP 2
+  80  40F0 2D          >         DEC L
+  80  40F1 2D          >         DEC L
+  81  40F2               EDUP
+  82  40F2
+  83  40F2 3E 00        BT4     LD A,0
+  83  40F4 B7            OR A
+  83  40F5 28 06         JR Z,BT8
+  84  40F7               DUP 2
+  85  40F7 2D          >         DEC L
+  85  40F8 2D          >         DEC L
+  86  40F9               EDUP
+  87  40F9               DUP 2
+  88  40F9 ED A0       >         LDI
+  88  40FB ED A0       >         LDI
+  89  40FD               EDUP
+  90  40FD
+  91  40FD CB A5        BT8     RES 4,L
+  91  40FF CD 14 43      CALL LNCRC
+  92  4102
+  93  4102 08                   EXA
+  93  4103 12            LD (DE),A
+  93  4104 13            INC DE
+  94  4105 3E 00        BT7     LD A,0
+  94  4107 B7            OR A
+  94  4108 CA 9D 41      JP Z,NXTE2
+  95  410B 7D                   LD A,L
+  95  410C E6 F0         AND #F0
+  95  410E 6F            LD L,A
+  96  410F C3 44 42             JP Snm
+  97  4112
+  98  4112              ;---------------------------------------
+  99  4112 3A 49 38     NXMR    LD A,(EOC)
+  99  4115 FE 0F         CP #0F
+  99  4117 C8            RET Z
+ 100  4118
+ 101  4118 D5                   PUSH DE
+ 102  4119 21 00 1D             LD HL,NXTBE-#0300
+ 103  411C 11 00 0D             LD DE,NXTBM-#0300
+ 104  411F 01 00 03             LD BC,#0300
+ 104  4122 ED B0         LDIR
+ 105  4124
+ 106  4124 62 6B 22 FC          LD HL,DE,(CGPZ),HL
+ 106  4128 37
+ 107  4129 06 08                LD B,NXTBZ/2
+ 107  412B CD BF 43      CALL LOAD512
+ 108  412E 36 00                LD (HL),0
+ 109  4130 D1                   POP DE
+ 110  4131 C3 00 00     NxMR    JP 0
+ 111  4134
+ 112  4134 0E 15        RMFL    LD C,32-11
+ 112  4136 09            ADD HL,BC
+ 112  4137 C3 54 41      JP NXFL
+ 113  413A 0E 20        RMFL1   LD C,32
+ 113  413C 09            ADD HL,BC
+ 113  413D C3 54 41      JP NXFL
+ 114  4140              ;-------
+ 115  4140              NXTETY  ;i:DE - Address
+ 116  4140              ;        o:DE - New Value
+ 117  4140              ;           Z - End Of Dir
+ 118  4140              ;          NZ - OK
+ 119  4140              ;
+ 120  4140              ;fclus(4),size(4),date(2),time(2),
+ 121  4140              ;!flag(1),name(X),#00
+ 122  4140
+ 123  4140 D5                   PUSH DE
+ 124  4141 3A FE 37             LD A,(CGFL)
+ 124  4144 B7            OR A
+ 124  4145 CC 37 43      CALL Z,NXTINI
+ 125  4148 D1                   POP DE
+ 126  4149
+ 127  4149 21 4F 41 22          LD HL,NXFF,(NxMR+1),HL
+ 127  414D 32 41
+ 128  414F 2A FC 37 06  NXFF    LD HL,(CGPZ),B,0
+ 128  4153 00
+ 129  4154 7C           NXFL    LD A,H
+ 129  4155 FE 20         CP high NXTBE
+ 129  4157 30 B9         JR NC,NXMR
+ 130  4159 7E                   LD A,(HL)
+ 131  415A B7                   OR A
+ 131  415B C8            RET Z
+ 132  415C FE E5                CP #E5
+ 132  415E 28 DA         JR Z,RMFL1
+ 133  4160
+ 134  4160 0E 0B                LD C,11
+ 134  4162 09            ADD HL,BC
+ 135  4163 7E                   LD A,(HL)
+ 135  4164 CB 5F         BIT 3,A
+ 135  4166 20 CC         JR NZ,RMFL
+ 136  4168 08                   EXA
+ 137  4169 0E 0F                LD C,15
+ 137  416B 09            ADD HL,BC
+ 138  416C               DUP 2
+ 139  416C ED A0       >         LDI
+ 139  416E ED A0       >         LDI
+ 140  4170               EDUP
+ 141  4170 0E 08                LD C,8
+ 141  4172 ED 42         SBC HL,BC
+ 142  4174               DUP 2
+ 143  4174 ED A0       >         LDI
+ 143  4176 ED A0       >         LDI
+ 144  4178               EDUP
+ 145  4178 09                   ADD HL,BC
+ 146  4179               DUP 4
+ 147  4179 ED A0       >         LDI
+ 147  417B ED A0       >         LDI
+ 147  417D ED A0       >         LDI
+ 147  417F ED A0       >         LDI
+ 148  4181               EDUP
+ 149  4181 0E 10                LD C,16
+ 149  4183 ED 42         SBC HL,BC
+ 150  4185
+ 151  4185               DUP 2
+ 152  4185 ED A0       >         LDI
+ 152  4187 ED A0       >         LDI
+ 153  4189               EDUP
+ 154  4189               DUP 2
+ 155  4189 2D          >         DEC L
+ 155  418A 2D          >         DEC L
+ 156  418B               EDUP
+ 157  418B
+ 158  418B               DUP 2
+ 159  418B 2D          >         DEC L
+ 159  418C 2D          >         DEC L
+ 160  418D               EDUP
+ 161  418D               DUP 2
+ 162  418D ED A0       >         LDI
+ 162  418F ED A0       >         LDI
+ 163  4191               EDUP
+ 164  4191
+ 165  4191 CB A5                RES 4,L
+ 165  4193 CD 14 43      CALL LNCRC
+ 166  4196
+ 167  4196 08                   EXA
+ 168  4197 E6 10                AND #10
+ 169  4199 EE 10                XOR #10
+ 169  419B 12            LD (DE),A
+ 169  419C 13            INC DE
+ 170  419D
+ 171  419D B7           NXTE2   OR A
+ 171  419E 0E 20         LD C,32
+ 171  41A0 ED 42         SBC HL,BC
+ 171  41A2 DA 41 42      JP C,SNM
+ 172  41A5 7E                   LD A,(HL)
+ 172  41A6 FE 0F         CP #0F
+ 172  41A8 C2 41 42      JP NZ,SNM
+ 173  41AB 08                   EXA
+ 174  41AC
+ 175  41AC               DUP 2
+ 176  41AC 2C          >         INC L
+ 176  41AD 2C          >         INC L
+ 177  41AE               EDUP
+ 178  41AE BE                   CP (HL)
+ 178  41AF C2 39 42      JP NZ,SNM2
+ 179  41B2
+ 180  41B2 0E 01                LD C,1
+ 181  41B4 22 FA 37 ED          LD (CGHL),HL,(CGDE),DE
+ 181  41B8 53 F8 37
+ 182  41BB 7D                   LD A,L
+ 182  41BC E6 F0         AND #F0
+ 182  41BE 6F            LD L,A
+ 183  41BF
+ 184  41BF 7E           LNPARS  LD A,(HL)
+ 185  41C0 CB 77                BIT 6,A
+ 185  41C2 28 02         JR Z,$+4
+ 185  41C4 CB F1         SET 6,C
+ 186  41C6 B9                   CP C
+ 186  41C7 20 69         JR NZ,SNM3
+ 186  41C9 0C            INC C
+ 187  41CA
+ 188  41CA 2C                   INC L
+ 189  41CB               DUP 5
+ 190  41CB CD A3 42    >         CALL UCH
+ 190  41CE 30 60       > JR NC,SNMX
+ 190  41D0 CD A3 42    >         CALL UCH
+ 190  41D3 30 5B       > JR NC,SNMX
+ 190  41D5 CD A3 42    >         CALL UCH
+ 190  41D8 30 56       > JR NC,SNMX
+ 190  41DA CD A3 42    >         CALL UCH
+ 190  41DD 30 51       > JR NC,SNMX
+ 190  41DF CD A3 42    >         CALL UCH
+ 190  41E2 30 4C       > JR NC,SNMX
+ 191  41E4               EDUP
+ 192  41E4               DUP 3
+ 193  41E4 2C          >         INC L
+ 193  41E5 2C          >         INC L
+ 193  41E6 2C          >         INC L
+ 194  41E7               EDUP
+ 195  41E7               DUP 6
+ 196  41E7 CD A3 42    >         CALL UCH
+ 196  41EA 30 44       > JR NC,SNMX
+ 196  41EC CD A3 42    >         CALL UCH
+ 196  41EF 30 3F       > JR NC,SNMX
+ 196  41F1 CD A3 42    >         CALL UCH
+ 196  41F4 30 3A       > JR NC,SNMX
+ 196  41F6 CD A3 42    >         CALL UCH
+ 196  41F9 30 35       > JR NC,SNMX
+ 196  41FB CD A3 42    >         CALL UCH
+ 196  41FE 30 30       > JR NC,SNMX
+ 196  4200 CD A3 42    >         CALL UCH
+ 196  4203 30 2B       > JR NC,SNMX
+ 197  4205               EDUP
+ 198  4205               DUP 2
+ 199  4205 2C          >         INC L
+ 199  4206 2C          >         INC L
+ 200  4207               EDUP
+ 201  4207               DUP 2
+ 202  4207 CD A3 42    >         CALL UCH
+ 202  420A 30 24       > JR NC,SNMX
+ 202  420C CD A3 42    >         CALL UCH
+ 202  420F 30 1F       > JR NC,SNMX
+ 203  4211               EDUP
+ 204  4211 2D                   DEC L
+ 205  4212
+ 206  4212 79                   LD A,C
+ 206  4213 FE 40         CP #40
+ 206  4215 30 0A         JR NC,NXLEXI
+ 207  4217
+ 208  4217 B7                   OR A
+ 208  4218 0E 3F         LD C,64-1
+ 208  421A ED 42         SBC HL,BC
+ 209  421C 4F                   LD C,A
+ 209  421D 38 13         JR C,SNM3
+ 210  421F 18 9E                JR LNPARS
+ 211  4221
+ 212  4221 AF           NXLEXI  XOR A
+ 212  4222 12            LD (DE),A
+ 212  4223 13            INC DE
+ 213  4224 2A FA 37             LD HL,(CGHL)
+ 214  4227 0E 33                LD C,32+16+3
+ 214  4229 09            ADD HL,BC
+ 215  422A 22 FC 37             LD (CGPZ),HL
+ 216  422D AF           Nhdd    XOR A
+ 216  422E 3C            INC A
+ 217  422F C9                   RET
+ 218  4230
+ 219  4230 20 EF        SNMX    JR NZ,NXLEXI
+ 220  4232 2A FA 37 ED  SNM3    LD HL,(CGHL),DE,(CGDE)
+ 220  4236 5B F8 37
+ 221  4239 7D           SNM2    LD A,L
+ 221  423A E6 F0         AND #F0
+ 221  423C 6F            LD L,A
+ 222  423D 0E 20                LD C,32
+ 222  423F 18 02         JR SNM+2
+ 223  4241 0E 15        SNM     LD C,21
+ 223  4243 09            ADD HL,BC
+ 224  4244
+ 225  4244 06 08        Snm     LD B,8
+ 226  4246 7E           SNA     LD A,(HL)
+ 227  4247 CD F2 42             CALL Acs
+ 227  424A 12            LD (DE),A
+ 227  424B 13 2C         INC DE,L
+ 228  424D 10 F7                DJNZ SNA
+ 229  424F
+ 230  424F 06 08                LD B,8
+ 231  4251 1B           SNM_    DEC DE
+ 231  4252 1A            LD A,(DE)
+ 232  4253 FE 20                CP " "
+ 232  4255 20 02         JR NZ,$+4
+ 232  4257 10 F8         DJNZ SNM_
+ 233  4259 13                   INC DE
+ 234  425A
+ 235  425A 7D                   LD A,L
+ 235  425B E6 F0         AND #F0
+ 235  425D F6 08         OR 8
+ 235  425F 6F            LD L,A
+ 236  4260 D5                   PUSH DE
+ 237  4261 3E 2E 12             LD A,".",(DE),A
+ 237  4264 13            INC DE
+ 238  4265 7E                   LD A,(HL)
+ 238  4266 CD F2 42      CALL Acs
+ 238  4269 12            LD (DE),A
+ 238  426A 13 2C         INC DE,L
+ 239  426C 7E                   LD A,(HL)
+ 239  426D CD F2 42      CALL Acs
+ 239  4270 12            LD (DE),A
+ 239  4271 13 2C         INC DE,L
+ 240  4273 7E                   LD A,(HL)
+ 240  4274 CD F2 42      CALL Acs
+ 240  4277 12            LD (DE),A
+ 240  4278 13 2C         INC DE,L
+ 241  427A C1                   POP BC
+ 242  427B CB 66                BIT 4,(HL)
+ 242  427D 28 17         JR Z,SNMD
+ 243  427F               DUP 3
+ 244  427F 1B          >         DEC DE
+ 244  4280 1A          > LD A,(DE)
+ 244  4281 FE 20       > CP 32
+ 244  4283 20 10       > JR NZ,SNm
+ 244  4285 1B          >         DEC DE
+ 244  4286 1A          > LD A,(DE)
+ 244  4287 FE 20       > CP 32
+ 244  4289 20 0A       > JR NZ,SNm
+ 244  428B 1B          >         DEC DE
+ 244  428C 1A          > LD A,(DE)
+ 244  428D FE 20       > CP 32
+ 244  428F 20 04       > JR NZ,SNm
+ 245  4291               EDUP
+ 246  4291 50 59                LD DE,BC
+ 247  4293 18 01                JR SNMD
+ 248  4295 13           SNm     INC DE
+ 249  4296
+ 250  4296 AF           SNMD    XOR A
+ 250  4297 12            LD (DE),A
+ 250  4298 13            INC DE
+ 251  4299 01 15 00             LD BC,21
+ 251  429C 09            ADD HL,BC
+ 252  429D
+ 253  429D 22 FC 37             LD (CGPZ),HL
+ 254  42A0 AF                   XOR A
+ 254  42A1 3C            INC A
+ 255  42A2 C9                   RET
+ 256  42A3              ;-------
+ 257  42A3 2C           UCH     INC L
+ 258  42A4 7E                   LD A,(HL)
+ 258  42A5 B7            OR A
+ 258  42A6 20 14         JR NZ,UCHX
+ 259  42A8 2D                   DEC L
+ 259  42A9 7E            LD A,(HL)
+ 259  42AA 2C 2C         INC L,L
+ 260  42AC B7                   OR A
+ 260  42AD 28 0A         JR Z,UCHE
+ 261  42AF 12                   LD (DE),A
+ 261  42B0 13            INC DE
+ 262  42B1 FE 80                CP #80
+ 262  42B3 D8            RET C
+ 263  42B4 AF           UCH_    XOR A
+ 263  42B5 C9            RET
+ 264  42B6 2C           UCh_    INC L
+ 264  42B7 AF            XOR A
+ 264  42B8 C9            RET
+ 265  42B9 AF           UCHE    XOR A
+ 265  42BA 3C            INC A
+ 265  42BB C9            RET
+ 266  42BC
+ 267  42BC FE 04        UCHX    CP 4
+ 267  42BE 20 F6         JR NZ,UCh_
+ 268  42C0 2D                   DEC L
+ 268  42C1 7E            LD A,(HL)
+ 268  42C2 2C 2C         INC L,L
+ 269  42C4 FE 01                CP #01
+ 269  42C6 28 1E         JR Z,HYO
+ 270  42C8 FE 10                CP #10
+ 270  42CA 38 E8         JR C,UCH_
+ 271  42CC FE 40                CP #3F+1
+ 271  42CE 38 0A         JR C,DGG
+ 272  42D0 FE 50                CP #4F+1
+ 272  42D2 38 0C         JR C,DEE
+ 273  42D4 FE 51                CP #51
+ 273  42D6 28 14         JR Z,LYO
+ 274  42D8 AF                   XOR A
+ 275  42D9 C9                   RET
+ 276  42DA C6 70        DGG     ADD A,#70
+ 276  42DC 12            LD (DE),A
+ 276  42DD 13            INC DE
+ 277  42DE 37                   SCF
+ 277  42DF C9            RET
+ 278  42E0 C6 A0        DEE     ADD A,#A0
+ 278  42E2 12            LD (DE),A
+ 278  42E3 13            INC DE
+ 279  42E4 37                   SCF
+ 279  42E5 C9            RET
+ 280  42E6 3E F0 12     HYO     LD A,#F0,(DE),A
+ 280  42E9 13            INC DE
+ 280  42EA 37            SCF
+ 280  42EB C9            RET
+ 281  42EC 3E F1 12     LYO     LD A,#F1,(DE),A
+ 281  42EF 13            INC DE
+ 281  42F0 37            SCF
+ 281  42F1 C9            RET
+ 282  42F2              ;-------
+ 283  42F2 FE 80        Acs     CP #80
+ 283  42F4 30 09         JR NC,RU3
+ 284  42F6 FE 41                CP #40+1
+ 284  42F8 D8            RET C
+ 285  42F9 FE 5B                CP #5B
+ 285  42FB D0            RET NC
+ 286  42FC CB EF                SET 5,A
+ 287  42FE C9                   RET
+ 288  42FF FE F0        RU3     CP #F0
+ 288  4301 20 01         JR NZ,$+3
+ 288  4303 3C            INC A
+ 289  4304 FE F1                CP #F1
+ 289  4306 C8            RET Z
+ 290  4307 FE A0                CP #A0
+ 290  4309 D0            RET NC
+ 291  430A FE 90                CP #90
+ 291  430C 30 03         JR NC,RU4
+ 292  430E CB EF                SET 5,A
+ 292  4310 C9            RET
+ 293  4311 C6 50        RU4     ADD A,#50
+ 293  4313 C9            RET
+ 294  4314              ;-------
+ 295  4314 AF           LNCRC   XOR A
+ 296  4315               DUP 11
+ 297  4315 0F          >         RRCA
+ 297  4316 86          > ADD A,(HL)
+ 297  4317 2C          > INC L
+ 297  4318 0F          >         RRCA
+ 297  4319 86          > ADD A,(HL)
+ 297  431A 2C          > INC L
+ 297  431B 0F          >         RRCA
+ 297  431C 86          > ADD A,(HL)
+ 297  431D 2C          > INC L
+ 297  431E 0F          >         RRCA
+ 297  431F 86          > ADD A,(HL)
+ 297  4320 2C          > INC L
+ 297  4321 0F          >         RRCA
+ 297  4322 86          > ADD A,(HL)
+ 297  4323 2C          > INC L
+ 297  4324 0F          >         RRCA
+ 297  4325 86          > ADD A,(HL)
+ 297  4326 2C          > INC L
+ 297  4327 0F          >         RRCA
+ 297  4328 86          > ADD A,(HL)
+ 297  4329 2C          > INC L
+ 297  432A 0F          >         RRCA
+ 297  432B 86          > ADD A,(HL)
+ 297  432C 2C          > INC L
+ 297  432D 0F          >         RRCA
+ 297  432E 86          > ADD A,(HL)
+ 297  432F 2C          > INC L
+ 297  4330 0F          >         RRCA
+ 297  4331 86          > ADD A,(HL)
+ 297  4332 2C          > INC L
+ 297  4333 0F          >         RRCA
+ 297  4334 86          > ADD A,(HL)
+ 297  4335 2C          > INC L
+ 298  4336               EDUP
+ 299  4336 C9                   RET
+ 300  4337              ;-------
+ 301  4337 21 01 00     NXTINI  LD HL,1
+ 302  433A 22 FE 37             LD (CGFL),HL
+ 303  433D
+ 304  433D 21 C8 38             LD HL,LSTCAT
+ 304  4340 CD 0F 45      CALL GIPAG
+ 305  4343
+ 306  4343 21 00 00 22          LD HL,NXTBU,(CGPZ),HL,B,NXTBZ
+ 306  4347 FC 37 06 10
+ 307  434B CD BF 43             CALL LOAD512
+ 308  434E 36 00                LD (HL),0
+ 309  4350 C9                   RET
+ 310  4351
+ 311  4351              ;---------------------------------------
+ 312  4351              GENTRY  ;i:HL(32) -> ENTRY
+ 313  4351 11 68 38 01          LD DE,ENTRY,BC,32
+ 313  4355 20 00
+ 313  4357 ED B0         LDIR
+ 314  4359 C9                   RET
+ 315  435A
+ 316  435A              TENTRY  ;i:DE(32) <- ENTRY
+ 317  435A 21 68 38 01          LD HL,ENTRY,BC,32
+ 317  435E 20 00
+ 317  4360 ED B0         LDIR
+ 318  4362 C9           Z0      RET
+ 319  4363
+ 320  4363              ;GIVE/TAKE Active DIR:
+ 321  4363              GLSTCAT ;i:HL(4) - CLUS num
+ 322  4363 11 C8 38 01          LD DE,LSTCAT,BC,4
+ 322  4367 04 00
+ 322  4369 ED B0         LDIR
+ 323  436B ED 43 FE 37          LD (CGFL),BC
+ 324  436F C9                   RET
+ 325  4370
+ 326  4370              TLSTCAT ;i:DE(4) - Addres of value
+ 327  4370 21 C8 38 01          LD HL,LSTCAT,BC,4
+ 327  4374 04 00
+ 327  4376 ED B0         LDIR
+ 328  4378 C9                   RET
+ 329  4379
+ 330  4379              ;---------------------------------------
+ 331  4379              ;READ SECTORS WITH POSITIONING:
+ 332  4379              RDD     ;i:[DE,HL] - SEC number
+ 333  4379              ;               BC - Address
+ 334  4379              ;                A - number
+ 335  4379 C5                   PUSH BC
+ 336  437A CD 09 38             CALL XPOZI
+ 337  437D E1                   POP HL
+ 338  437E C3 0F 38             JP RDDSE
+ 339  4381
+ 340  4381              ;SAVE SECTORS WITH POSITIONING:
+ 341  4381              SDD     ;i:[DE,HL] - SEC number
+ 342  4381              ;               BC - Address
+ 343  4381              ;                A - number
+ 344  4381 C5                   PUSH BC
+ 345  4382 CD 09 38             CALL XPOZI
+ 346  4385 E1                   POP HL
+ 347  4386 C3 12 38             JP SDDSE
+ 348  4389
+ 349  4389              ;---------------------------------------
+ 350  4389              ;SKIP DATA from FAT32:
+ 351  4389 11 62 43 ED  LOADNON LD DE,Z0,(NW0+1),DE
+ 351  438D 53 17 44
+ 352  4390 CD BF 43             CALL LOAD512
+ 353  4393 11 0F 38 ED          LD DE,RDDSE,(NW0+1),DE
+ 353  4397 53 17 44
+ 354  439A C9                   RET
+ 355  439B
+ 356  439B              ;READ DATA from FAT32(256+256):
+ 357  439B 11 15 38 ED  LOAD256 LD DE,RDD256,(NW0+1),DE
+ 357  439F 53 17 44
+ 358  43A2 CD BF 43             CALL LOAD512
+ 359  43A5 11 0F 38 ED          LD DE,RDDSE,(NW0+1),DE
+ 359  43A9 53 17 44
+ 360  43AC C9                   RET
+ 361  43AD
+ 362  43AD              ;SAVE DATA to FAT32 (STREAM):
+ 363  43AD 11 12 38 ED  SAVE512 LD DE,SDDSE,(NW0+1),DE
+ 363  43B1 53 17 44
+ 364  43B4 CD BF 43             CALL LOAD512
+ 365  43B7 11 0F 38 ED          LD DE,RDDSE,(NW0+1),DE
+ 365  43BB 53 17 44
+ 366  43BE C9                   RET
+ 367  43BF
+ 368  43BF              ;---------------------------------------
+ 369  43BF              ;READ DATA from FAT32 (STREAM):
+ 370  43BF              LOAD512 ;i:HL - Address
+ 371  43BF              ;           B - lenght (512b blocks)
+ 372  43BF              ;     CUHL(4) - CLUSnum (if EOC+NSDC=0!)
+ 373  43BF              ;        o:HL - New value
+ 374  43BF              ;           A - EndOfChain
+ 375  43BF
+ 376  43BF AF                   XOR A
+ 376  43C0 32 4A 38      LD (ABT),A
+ 377  43C3 CD D3 43             CALL LPREX
+ 377  43C6 20 04         JR NZ,RH
+ 378  43C8
+ 379  43C8 78                   LD A,B
+ 379  43C9 CD EC 43      CALL NEWCLA
+ 380  43CC
+ 381  43CC 2A B0 38     RH      LD HL,(LDHL)
+ 382  43CF 3A 49 38             LD A,(EOC)
+ 383  43D2 C9                   RET
+ 384  43D3
+ 385  43D3              ;Positioning to Cluster, if needed:
+ 386  43D3 22 B0 38     LPREX   LD (LDHL),HL
+ 387  43D6 3A 49 38             LD A,(EOC)
+ 387  43D9 B7            OR A
+ 387  43DA C0            RET NZ
+ 388  43DB 3A 48 38             LD A,(NSDC)
+ 388  43DE B7            OR A
+ 388  43DF 20 09         JR NZ,RX
+ 389  43E1
+ 390  43E1 C5                   PUSH BC
+ 390  43E2 21 A8 38      LD HL,CUHL
+ 390  43E5 CD 0F 45      CALL GIPAG
+ 391  43E8 C1                   POP BC
+ 392  43E9 C9                   RET
+ 393  43EA AF           RX      XOR A
+ 394  43EB C9                   RET
+ 395  43EC              ;-------
+ 396  43EC 32 4B 38     NEWCLA  LD (BZN),A
+ 397  43EF
+ 398  43EF 2A 64 38 ED  NXTC    LD HL,(LTHL),DE,(LTDE)
+ 398  43F3 5B 66 38
+ 398  43F6 CD 0C 38      CALL PROZ
+ 399  43F9
+ 400  43F9 21 4B 38             LD HL,BZN
+ 401  43FC 3A 94 38 ED          LD A,(BSECPC),BC,(NSDC)
+ 401  4400 4B 48 38
+ 402  4403 91                   SUB C
+ 402  4404 47            LD B,A
+ 403  4405 7E                   LD A,(HL)
+ 403  4406 B7            OR A
+ 403  4407 C8            RET Z
+ 404  4408 90                   SUB B
+ 404  4409 30 03         JR NC,KN
+ 405  440B 80                   ADD A,B
+ 405  440C 47            LD B,A
+ 405  440D AF            XOR A
+ 406  440E 77           KN      LD (HL),A
+ 407  440F
+ 408  440F 78 32 4C 38          LD A,B,(NR0),A
+ 409  4413 2A B0 38             LD HL,(LDHL)
+ 410  4416 CD 0F 38     NW0     CALL RDDSE;       READ Sector(s)
+ 411  4419 22 B0 38             LD (LDHL),HL;   updating Address
+ 412  441C
+ 413  441C 21 64 38 11          LD HL,LTHL,DE,LLHL,BC,4
+ 413  4420 60 38 01 04
+ 413  4424 00
+ 413  4425 ED B0         LDIR
+ 414  4427
+ 415  4427 2A 64 38 ED          LD HL,(LTHL),DE,(LTDE)
+ 415  442B 5B 66 38
+ 416  442E ED 4B 4C 38          LD BC,(NR0)
+ 416  4432 09            ADD HL,BC
+ 416  4433 30 01         JR NC,$+3
+ 416  4435 13            INC DE
+ 417  4436 22 64 38 ED          LD (LTHL),HL,(LTDE),DE
+ 417  443A 53 66 38
+ 418  443D
+ 419  443D 21 48 38 79          LD HL,NSDC,A,C
+ 419  4441 86            ADD A,(HL)
+ 420  4442 77                   LD (HL),A
+ 421  4443
+ 422  4443 ED 4B 94 38          LD BC,(BSECPC)
+ 423  4447 B9                   CP C
+ 423  4448 DA EF 43      JP C,NXTC;  End OF Cluster?
+ 424  444B              ;                        YES!
+ 425  444B
+ 426  444B 2A A8 38 ED          LD HL,(CUHL),DE,(CUDE)
+ 426  444F 5B AA 38
+ 427  4452 CD C5 44 CD          CALL CURIT,GIPAG
+ 427  4456 0F 45
+ 427  4458 CA EF 43      JP Z,NXTC
+ 428  445B C9                   RET
+ 429  445C
+ 430  445C              ;------Searching for free Cluster:------
+ 431  445C 21 9A 38 11  SRHFCL  LD HL,FSTFRC,DE,CAHL,BC,4
+ 431  4460 4E 38 01 04
+ 431  4464 00
+ 431  4465 ED B0         LDIR
+ 432  4467              SRHFC   ;i:[CADE,CAHL]-Cluster number
+ 433  4467              ;        o:[DE,HL]- Cluster number
+ 434  4467              ;          EXX HL - position in BUFFER+4
+ 435  4467
+ 436  4467 2A 4E 38 ED          LD HL,(CAHL),DE,(CADE)
+ 436  446B 5B 50 38
+ 437  446E CD C5 44             CALL CURIT
+ 437  4471 D8            RET C
+ 438  4472
+ 439  4472 7E           FC      LD A,(HL)
+ 439  4473 23            INC HL
+ 440  4474 B6                   OR (HL)
+ 440  4475 23            INC HL
+ 441  4476 B6                   OR (HL)
+ 441  4477 23            INC HL
+ 442  4478 B6                   OR (HL)
+ 442  4479 23            INC HL
+ 442  447A 28 37         JR Z,GETZE
+ 443  447C
+ 444  447C EB                   EX DE,HL
+ 445  447D 21 4E 38             LD HL,CAHL
+ 446  4480 34                   INC (HL)
+ 446  4481 C2 8E 44      JP NZ,AGA
+ 446  4484 23            INC HL
+ 447  4485 34                   INC (HL)
+ 447  4486 20 06         JR NZ,AGA
+ 447  4488 23            INC HL
+ 448  4489 34                   INC (HL)
+ 448  448A 20 02         JR NZ,AGA
+ 448  448C 23            INC HL
+ 449  448D 34                   INC (HL)
+ 450  448E EB           AGA     EX DE,HL
+ 451  448F 7C                   LD A,H
+ 451  4490 FE 32         CP high SECBE
+ 451  4492 DA 72 44      JP C,FC
+ 452  4495
+ 453  4495 2A 64 38 ED          LD HL,(LTHL),DE,(LTDE)
+ 453  4499 5B 66 38
+ 453  449C 23            INC HL
+ 454  449D 7C                   LD A,H
+ 454  449E B5            OR L
+ 454  449F 20 01         JR NZ,$+3
+ 454  44A1 13            INC DE
+ 455  44A2 CD 09 38             CALL XPOZI
+ 456  44A5
+ 457  44A5 21 00 30 3E          LD HL,SECBU,A,1
+ 457  44A9 01
+ 457  44AA CD 0F 38      CALL RDDSE
+ 458  44AD 21 00 30             LD HL,SECBU
+ 459  44B0 C3 72 44             JP FC
+ 460  44B3              ;-------
+ 461  44B3 D9           GETZE   EXX
+ 462  44B4 2A 4E 38 ED          LD HL,(CAHL),DE,(CADE)
+ 462  44B8 5B 50 38
+ 463  44BB E5                   PUSH HL
+ 463  44BC 21 4E 38      LD HL,CAHL
+ 463  44BF CD DC 50      CALL INC4b
+ 464  44C2 E1                   POP HL
+ 465  44C3 AF                   XOR A
+ 466  44C4 C9                   RET
+ 467  44C5
+ 468  44C5              ;------Read Sector from FAT:------------
+ 469  44C5              CURIT   ;i:[DE,HL]-Cluster number
+ 470  44C5              ;        o:SECBU(512)
+ 471  44C5              ;          HL-poz in SECBU where Cluster
+ 472  44C5
+ 473  44C5 CD 72 50             CALL DEL128
+ 474  44C8               DUP 2
+ 475  44C8 CB 21       >         SLA C
+ 475  44CA CB 10       > RL B
+ 475  44CC CB 21       >         SLA C
+ 475  44CE CB 10       > RL B
+ 476  44D0               EDUP
+ 477  44D0
+ 478  44D0 C5                   PUSH BC
+ 479  44D1 ED 53 54 38          LD (LSTSE+2),DE,(LSTSE),HL
+ 479  44D5 22 52 38
+ 480  44D8
+ 481  44D8 ED 4B 92 38          LD BC,(BFTSZ+2)
+ 482  44DC 7A                   LD A,D
+ 482  44DD B8            CP B
+ 482  44DE 38 10         JR C,JK
+ 483  44E0 7B                   LD A,E
+ 483  44E1 B9            CP C
+ 483  44E2 38 0C         JR C,JK
+ 484  44E4 ED 4B 90 38          LD BC,(BFTSZ)
+ 485  44E8 7C                   LD A,H
+ 485  44E9 B8            CP B
+ 485  44EA 38 04         JR C,JK
+ 486  44EC 7D                   LD A,L
+ 486  44ED B9            CP C
+ 486  44EE 30 1C         JR NC,FATEND
+ 487  44F0
+ 488  44F0 ED 4B A2 38  JK      LD BC,(SFAT)
+ 489  44F4 CD B4 50             CALL ADD4B
+ 490  44F7 CD 61 45             CALL XSPOZ
+ 491  44FA CD 09 38             CALL XPOZI
+ 492  44FD 21 00 30 3E          LD HL,SECBU,A,1
+ 492  4501 01
+ 492  4502 CD 0F 38      CALL RDDSE
+ 493  4505 C1                   POP BC
+ 494  4506 21 00 30             LD HL,SECBU
+ 494  4509 09            ADD HL,BC
+ 495  450A AF                   XOR A
+ 496  450B C9                   RET
+ 497  450C              ;-------
+ 498  450C C1           FATEND  POP BC
+ 499  450D 37                   SCF
+ 500  450E C9                   RET
+ 501  450F
+ 502  450F              ;----Pos. to First Sector of Cluster:---
+ 503  450F              GIPAG   ;i:HL(4) - Cluster number
+ 504  450F CD 3D 51             CALL TOS
+ 505  4512
+ 506  4512 5E                   LD E,(HL)
+ 506  4513 23            INC HL
+ 507  4514 56                   LD D,(HL)
+ 507  4515 23            INC HL
+ 508  4516 7E                   LD A,(HL)
+ 508  4517 23            INC HL
+ 509  4518 66 6F                LD H,(HL),L,A
+ 509  451A B4 B3 B2      OR H,E,D
+ 509  451D 28 34         JR Z,RDIR
+ 510  451F
+ 511  451F 7C                   LD A,H
+ 511  4520 E6 0F         AND #0F
+ 511  4522 FE 0F         CP #0F
+ 511  4524 28 36         JR Z,MDC
+ 512  4526 EB                   EX DE,HL
+ 513  4527 22 A8 38 ED  POM     LD (CUHL),HL,(CUDE),DE
+ 513  452B 53 AA 38
+ 514  452E
+ 515  452E 01 02 00             LD BC,2
+ 515  4531 B7            OR A
+ 515  4532 ED 42         SBC HL,BC
+ 515  4534 30 01         JR NC,$+3
+ 515  4536 1B            DEC DE
+ 516  4537
+ 517  4537 3A 94 38             LD A,(BSECPC)
+ 517  453A CD B8 50      CALL UMNOX2
+ 518  453D ED 4B A4 38          LD BC,(SDFAT)
+ 518  4541 CD B4 50      CALL ADD4B
+ 519  4544 EB                   EX DE,HL
+ 520  4545 ED 4B A6 38          LD BC,(SDFAT+2)
+ 520  4549 09            ADD HL,BC
+ 521  454A EB                   EX DE,HL
+ 522  454B CD 61 45             CALL XSPOZ
+ 523  454E CD 09 38             CALL XPOZI
+ 524  4551 AF                   XOR A
+ 525  4552 C9                   RET
+ 526  4553
+ 527  4553 2A 96 38 ED  RDIR    LD HL,(BROOTC),DE,(BROOTC+2)
+ 527  4557 5B 98 38
+ 528  455A 18 CB                JR POM
+ 529  455C
+ 530  455C 32 49 38     MDC     LD (EOC),A
+ 531  455F B7                   OR A
+ 532  4560 C9                   RET
+ 533  4561
+ 534  4561              ;---Getting Absolute Position of SEC:---
+ 535  4561 ED 4B 9E 38  XSPOZ   LD BC,(ADDTOP),(CLHL),BC
+ 535  4565 ED 43 5C 38
+ 536  4569 ED 4B A0 38          LD BC,(ADDTOP+2),(CLDE),BC
+ 536  456D ED 43 5E 38
+ 537  4571 C3 E4 50             JP ADD4BF
+ 538  4574
+ 539  4574              ;-----ADD NEW ENTRY TO ACTIVE DIR:------
+ 540  4574              SVHDFL  ;i:HL - name(1-255),0
+ 541  4574              ;          EFLG(1) - flag
+ 542  4574              ;          LSTCAT(4)-active DIR
+ 543  4574              ;          FCTS(4)-cluster num
+ 544  4574              ;        o:[DE,HL]=FCTS(4)
+ 545  4574
+ 546  4574 3A 73 38             LD A,(EFLG)
+ 546  4577 E6 10         AND #10
+ 547  4579 CD 67 46             CALL ENTREZ
+ 547  457C C0            RET NZ
+ 548  457D 22 F8 37             LD (CGDE),HL
+ 549  4580
+ 550  4580 2A C8 38 ED          LD HL,(LSTCAT),DE,(LSTCAT+2)
+ 550  4584 5B CA 38
+ 551  4587 22 A8 38 ED  SHDFL   LD (CUHL),HL,(CUDE),DE
+ 551  458B 53 AA 38
+ 552  458E CD 3D 51             CALL TOS
+ 553  4591 21 00 32 06  NXDCL   LD HL,LOBU,B,1
+ 553  4595 01
+ 553  4596 CD BF 43      CALL LOAD512
+ 554  4599 21 00 32 11          LD HL,LOBU,DE,32,B,16
+ 554  459D 20 00 06 10
+ 555  45A1 AF                   XOR A
+ 556  45A2 BE           FIEL    CP (HL)
+ 556  45A3 CA 27 46      JP Z,FELD
+ 557  45A6 19                   ADD HL,DE
+ 558  45A7 10 F9                DJNZ FIEL
+ 559  45A9 3A 49 38     FIIL    LD A,(EOC)
+ 559  45AC FE 0F         CP #0F
+ 559  45AE 20 E1         JR NZ,NXDCL
+ 560  45B0 CD 5C 44             CALL SRHFCL
+ 560  45B3 38 6E         JR C,IEL
+ 561  45B5 22 C4 38 ED          LD (BUTS),HL,(BUTS+2),DE
+ 561  45B9 53 C6 38
+ 562  45BC D9                   EXX
+ 563  45BD 3E FF                LD A,#FF
+ 564  45BF 2B                   DEC HL
+ 564  45C0 36 0F         LD (HL),#0F
+ 565  45C2 2B                   DEC HL
+ 565  45C3 77            LD (HL),A
+ 566  45C4 2B                   DEC HL
+ 566  45C5 77            LD (HL),A
+ 567  45C6 2B                   DEC HL
+ 567  45C7 77            LD (HL),A
+ 568  45C8 21 00 30 3E          LD HL,SECBU,A,1
+ 568  45CC 01
+ 568  45CD CD 12 38      CALL SDDSE
+ 569  45D0
+ 570  45D0 2A A8 38 ED          LD HL,(CUHL),DE,(CUDE)
+ 570  45D4 5B AA 38
+ 571  45D7 CD C5 44             CALL CURIT
+ 571  45DA 38 47         JR C,IEL
+ 572  45DC EB                   EX DE,HL
+ 573  45DD 21 C4 38 01          LD HL,BUTS,BC,4
+ 573  45E1 04 00
+ 573  45E3 ED B0         LDIR
+ 574  45E5 21 00 30 3E          LD HL,SECBU,A,1
+ 574  45E9 01
+ 574  45EA CD 12 38      CALL SDDSE
+ 575  45ED
+ 576  45ED 21 C4 38             LD HL,BUTS
+ 577  45F0 CD 0F 45             CALL GIPAG
+ 577  45F3 3E FF         LD A,255
+ 577  45F5 C0            RET NZ
+ 578  45F6
+ 579  45F6 21 00 30 06          LD HL,SECBU,B,0
+ 579  45FA 00
+ 580  45FB               DUP 2
+ 581  45FB CD 67 51    >         CALL NOPING
+ 581  45FE CD 67 51    >         CALL NOPING
+ 582  4601               EDUP
+ 583  4601
+ 584  4601 2A 64 38 ED          LD HL,(LTHL),DE,(LTDE)
+ 584  4605 5B 66 38
+ 585  4608 E5 D5                PUSH HL,DE
+ 586  460A 21 00 30 3E          LD HL,SECBU,A,1
+ 586  460E 01
+ 586  460F CD 12 38      CALL SDDSE
+ 587  4612
+ 588  4612 3A 94 38             LD A,(BSECPC)
+ 589  4615 21 00 30             LD HL,SECBU
+ 589  4618 CD 45 51      CALL NOPCLA
+ 590  461B D1 E1                POP DE,HL
+ 591  461D CD 09 38             CALL XPOZI
+ 592  4620 C3 91 45             JP NXDCL
+ 593  4623
+ 594  4623 3E 10        IEL     LD A,16
+ 594  4625 B7            OR A
+ 594  4626 C9            RET
+ 595  4627
+ 596  4627 EB           FELD    EX DE,HL
+ 597  4628 2A F8 37             LD HL,(CGDE)
+ 598  462B 01 20 00     VYG     LD BC,32
+ 598  462E ED B0         LDIR
+ 599  4630 01 C0 FF             LD BC,0-64
+ 599  4633 09            ADD HL,BC
+ 600  4634 7C                   LD A,H
+ 600  4635 FE 10         CP high NXTBM
+ 600  4637 38 11         JR C,FFLD
+ 601  4639
+ 602  4639 7B                   LD A,E
+ 602  463A B7            OR A
+ 602  463B 20 EE         JR NZ,VYG
+ 603  463D CB 42                BIT 0,D
+ 603  463F 20 EA         JR NZ,VYG
+ 604  4641 22 F8 37             LD (CGDE),HL
+ 605  4644 CD 4C 46             CALL FFld
+ 606  4647 C3 A9 45             JP FIIL
+ 607  464A
+ 608  464A AF           FFLD    XOR A
+ 608  464B 12            LD (DE),A
+ 609  464C 2A 60 38 ED  FFld    LD HL,(LLHL),DE,(LLHL+2)
+ 609  4650 5B 62 38
+ 610  4653 CD 0C 38             CALL PROZ
+ 611  4656 21 00 32             LD HL,LOBU
+ 612  4659 3E 01                LD A,1
+ 612  465B CD 12 38      CALL SDDSE
+ 613  465E
+ 614  465E 2A C0 38 ED          LD HL,(FCTS),DE,(FCTS+2)
+ 614  4662 5B C2 38
+ 615  4665 AF                   XOR A
+ 616  4666 C9                   RET
+ 617  4667
+ 618  4667              ;-------ETRY'S GENERATING:
+ 619  4667              ENTREZ  ;i: A - flag
+ 620  4667              ;          HL - name(1-255),0
+ 621  4667              ;     FCTS(4) - cluster
+ 622  4667              ;
+ 623  4667              ;        o: Z - OK
+ 624  4667              ;          NZ - error
+ 625  4667              ;               A:1 - ln not valid
+ 626  4667              ;                 2 - sn index fatality
+ 627  4667              ;                 3 - ln already exists
+ 628  4667
+ 629  4667 11 00 00             LD DE,NXTBU
+ 630  466A 01 00 01             LD BC,255+1
+ 631  466D D5                   PUSH DE
+ 632  466E 12 32 73 38          LD (DE),A,(ENTRY+11),A
+ 632  4672 13            INC DE
+ 633  4673 ED B0                LDIR
+ 634  4675 E1                   POP HL
+ 635  4676 22 F8 37             LD (CGDE),HL
+ 636  4679 23                   INC HL
+ 636  467A CD 1C 48      CALL ENVAL
+ 636  467D 3E 01         LD A,1
+ 636  467F C0            RET NZ
+ 637  4680
+ 638  4680 2A C0 38 22          LD HL,(FCTS),(CLSHL),HL
+ 638  4684 82 38
+ 639  4686 2A C2 38 22          LD HL,(FCTS+2),(CLSDE),HL
+ 639  468A 7C 38
+ 640  468C
+ 641  468C 2A F8 37             LD HL,(CGDE)
+ 641  468F CD D7 4A      CALL LNLNGcs
+ 642  4692 CA 2A 48             JP Z,ENnvl
+ 643  4695
+ 644  4695 06 0B 21 68          LD B,11,HL,ENTRY
+ 644  4699 38
+ 645  469A 7E           SNCC    LD A,(HL)
+ 645  469B B7            OR A
+ 645  469C 28 29         JR Z,LONG
+ 646  469E CD 45 48             CALL SNCEN
+ 646  46A1 28 24         JR Z,LONG
+ 647  46A3 CD 7C 48             CALL CAPS_SV
+ 647  46A6 28 1F         JR Z,LONG
+ 648  46A8 CD 91 4C             CALL ACS
+ 648  46AB 77            LD (HL),A
+ 649  46AC 23                   INC HL
+ 649  46AD 10 EB         DJNZ SNCC
+ 650  46AF
+ 651  46AF 21 68 38             LD HL,ENTRY
+ 652  46B2 11 00 10             LD DE,NXTBM
+ 653  46B5 D5                   PUSH DE
+ 653  46B6 01 21 00      LD BC,33
+ 653  46B9 ED B0         LDIR
+ 654  46BB 21 00 00             LD HL,NXTBU
+ 654  46BE CD 63 4A      CALL SRHDRN
+ 654  46C1 3E 04         LD A,4
+ 655  46C3 E1                   POP HL
+ 655  46C4 C0            RET NZ
+ 656  46C5 AF                   XOR A
+ 657  46C6 C9                   RET
+ 658  46C7              ;-------
+ 659  46C7 11 68 38     LONG    LD DE,ENTRY
+ 660  46CA
+ 661  46CA 06 08 21 00          LD B,8,HL,NXTBU
+ 661  46CE 00
+ 662  46CF 23           FO      INC HL
+ 662  46D0 7E            LD A,(HL)
+ 663  46D1 CD 91 4C     KO      CALL ACS
+ 664  46D4 CD 5B 48             CALL ENCEN
+ 664  46D7 28 05         JR Z,KZ
+ 665  46D9 CD 45 48             CALL SNCEN
+ 665  46DC 20 06         JR NZ,KC
+ 666  46DE ED 5F        KZ      LD A,R
+ 666  46E0 E6 7F         AND %01111111
+ 666  46E2 18 ED         JR KO
+ 667  46E4 FE 20        KC      CP " "
+ 667  46E6 20 02         JR NZ,$+4
+ 667  46E8 3E 5F         LD A,"_"
+ 668  46EA 12                   LD (DE),A
+ 668  46EB 13            INC DE
+ 668  46EC 10 E1         DJNZ FO
+ 669  46EE D5                   PUSH DE
+ 669  46EF 06 03         LD B,3
+ 669  46F1 CD CE 4A      CALL NOP32
+ 670  46F4 D1                   POP DE
+ 671  46F5
+ 672  46F5 21 00 00             LD HL,NXTBU
+ 672  46F8 CB 66         BIT 4,(HL)
+ 672  46FA 20 27         JR NZ,NN
+ 673  46FC 23                   INC HL
+ 674  46FD AF                   XOR A
+ 674  46FE 01 00 01      LD BC,256
+ 674  4701 ED B1         CPIR
+ 674  4703 2B            DEC HL
+ 675  4704
+ 676  4704 06 04                LD B,4
+ 677  4706 2B           UR      DEC HL
+ 677  4707 7E            LD A,(HL)
+ 678  4708 B7                   OR A
+ 678  4709 28 18         JR Z,NN
+ 679  470B FE 2E                CP "."
+ 679  470D 28 04         JR Z,NB
+ 680  470F 10 F5                DJNZ UR
+ 680  4711 18 10         JR NN
+ 681  4713
+ 682  4713 06 03        NB      LD B,3
+ 683  4715 23           Nb      INC HL
+ 683  4716 7E            LD A,(HL)
+ 684  4717 CD 91 4C CD          CALL ACS,SNCEN
+ 684  471B 45 48
+ 684  471D 28 04         JR Z,NN
+ 685  471F 12                   LD (DE),A
+ 685  4720 13            INC DE
+ 685  4721 10 F2         DJNZ Nb
+ 686  4723              ;-------
+ 687  4723 21 68 38 11  NN      LD HL,ENTRY,DE,NXTBM,BC,32
+ 687  4727 00 10 01 20
+ 687  472B 00
+ 687  472C ED B0         LDIR
+ 688  472E 11 0B 10 ED          LD DE,NXTBM+11,(CGDE),DE
+ 688  4732 53 F8 37
+ 689  4735
+ 690  4735 21 E0 0F 3E          LD HL,NXTBM-32,A,#30
+ 690  4739 30
+ 691  473A 06 05 77             LD B,5,(HL),A
+ 691  473D 23            INC HL
+ 691  473E 10 FC         DJNZ $-2
+ 692  4740
+ 693  4740 21 E3 0F     BURA    LD HL,NXTBM-32+3
+ 694  4743 E5                   PUSH HL
+ 694  4744 CD D1 47      CALL INDEX
+ 694  4747 3E 02         LD A,2
+ 695  4749 E1                   POP HL
+ 695  474A C0            RET NZ
+ 696  474B
+ 697  474B 11 07 10             LD DE,NXTBM+7
+ 698  474E 01 FF 03 3E          LD BC,#03FF,A,#30
+ 698  4752 30
+ 699  4753 ED A8        ZZBZ    LDD
+ 699  4755 BE            CP (HL)
+ 699  4756 28 02         JR Z,$+4
+ 699  4758 10 F9         DJNZ ZZBZ
+ 700  475A 3E 7E 12             LD A,#7E,(DE),A
+ 701  475D
+ 702  475D 21 00 10 11          LD HL,NXTBM,DE,ENTRY,BC,12
+ 702  4761 68 38 01 0C
+ 702  4765 00
+ 702  4766 ED B0         LDIR
+ 703  4768 CD 6A 4A             CALL FNDSN
+ 703  476B 20 D3         JR NZ,BURA
+ 704  476D
+ 705  476D 21 00 10             LD HL,NXTBM
+ 706  4770 CD 14 43             CALL LNCRC
+ 706  4773 32 98 47      LD (CRC+1),A
+ 707  4776
+ 708  4776 21 20 10             LD HL,NXTBM+32
+ 709  4779 11 01 00             LD DE,NXTBU+1
+ 710  477C 01 01 00             LD BC,#0001
+ 711  477F 71           DNB     LD (HL),C
+ 711  4780 0C 23         INC C,HL
+ 712  4782               DUP 5
+ 713  4782 CD EA 47    >         CALL OEM2UC
+ 713  4785 CD EA 47    >         CALL OEM2UC
+ 713  4788 CD EA 47    >         CALL OEM2UC
+ 713  478B CD EA 47    >         CALL OEM2UC
+ 713  478E CD EA 47    >         CALL OEM2UC
+ 714  4791               EDUP
+ 715  4791 36 0F                LD (HL),#0F
+ 715  4793 23            INC HL
+ 716  4794 36 00                LD (HL),#00
+ 716  4796 23            INC HL
+ 717  4797 36 00        CRC     LD (HL),0
+ 717  4799 23            INC HL
+ 718  479A               DUP 6
+ 719  479A CD EA 47    >         CALL OEM2UC
+ 719  479D CD EA 47    >         CALL OEM2UC
+ 719  47A0 CD EA 47    >         CALL OEM2UC
+ 719  47A3 CD EA 47    >         CALL OEM2UC
+ 719  47A6 CD EA 47    >         CALL OEM2UC
+ 719  47A9 CD EA 47    >         CALL OEM2UC
+ 720  47AC               EDUP
+ 721  47AC 36 00                LD (HL),#00
+ 721  47AE 23            INC HL
+ 722  47AF 36 00                LD (HL),#00
+ 722  47B1 23            INC HL
+ 723  47B2               DUP 2
+ 724  47B2 CD EA 47    >         CALL OEM2UC
+ 724  47B5 CD EA 47    >         CALL OEM2UC
+ 725  47B8               EDUP
+ 726  47B8 1A                   LD A,(DE)
+ 726  47B9 B7            OR A
+ 726  47BA 20 C3         JR NZ,DNB
+ 727  47BC
+ 728  47BC 36 00                LD (HL),0
+ 729  47BE 01 E0 FF             LD BC,0-32
+ 729  47C1 09            ADD HL,BC
+ 729  47C2 CB F6         SET 6,(HL)
+ 730  47C4
+ 731  47C4 E5                   PUSH HL
+ 732  47C5 21 00 00             LD HL,NXTBU
+ 733  47C8 CD 63 4A             CALL SRHDRN
+ 733  47CB 3E 03         LD A,3
+ 734  47CD E1                   POP HL
+ 734  47CE C0            RET NZ
+ 735  47CF AF                   XOR A
+ 736  47D0 C9                   RET
+ 737  47D1              ;-------
+ 738  47D1 06 03        INDEX   LD B,3
+ 739  47D3 7E           XED     LD A,(HL)
+ 739  47D4 FE 39         CP #39
+ 739  47D6 38 08         JR C,DEX
+ 740  47D8 36 30                LD (HL),#30
+ 740  47DA 2B            DEC HL
+ 740  47DB 10 F6         DJNZ XED
+ 741  47DD AF                   XOR A
+ 741  47DE 3C            INC A
+ 742  47DF C9                   RET
+ 743  47E0 34           DEX     INC (HL)
+ 743  47E1 AF            XOR A
+ 743  47E2 C9            RET
+ 744  47E3              ;-------
+ 745  47E3 70           FNLZ    LD (HL),B
+ 745  47E4 23            INC HL
+ 746  47E5 70                   LD (HL),B
+ 746  47E6 23            INC HL
+ 747  47E7 06 FF                LD B,#FF
+ 748  47E9 C9                   RET
+ 749  47EA 1A           OEM2UC  LD A,(DE)
+ 749  47EB B7            OR A
+ 749  47EC 28 F5         JR Z,FNLZ
+ 749  47EE 13            INC DE
+ 750  47EF C5                   PUSH BC
+ 751  47F0 4F 06 00             LD C,A,B,0
+ 751  47F3 FE 80         CP #80
+ 751  47F5 D4 FE 47      CALL NC,ORU
+ 752  47F8 71                   LD (HL),C
+ 752  47F9 23            INC HL
+ 753  47FA 70                   LD (HL),B
+ 753  47FB 23            INC HL
+ 754  47FC C1                   POP BC
+ 755  47FD C9                   RET
+ 756  47FE 06 04        ORU     LD B,4
+ 757  4800 FE F0                CP #F0
+ 757  4802 0E 01         LD C,#01
+ 757  4804 C8            RET Z
+ 758  4805 FE F1                CP #F1
+ 758  4807 0E 51         LD C,#51
+ 758  4809 C8            RET Z
+ 759  480A FE B0                CP #B0
+ 759  480C 30 04         JR NC,OR2
+ 760  480E D6 70                SUB #70
+ 760  4810 4F            LD C,A
+ 760  4811 C9            RET
+ 761  4812 FE F0        OR2     CP #F0
+ 761  4814 D0            RET NC
+ 762  4815 FE E0                CP #E0
+ 762  4817 D8            RET C
+ 763  4818 D6 A0                SUB #A0
+ 763  481A 4F            LD C,A
+ 763  481B C9            RET
+ 764  481C              ;-------
+ 765  481C 06 FF        ENVAL   LD B,255
+ 766  481E 7E           ENval   LD A,(HL)
+ 766  481F B7            OR A
+ 766  4820 28 0B         JR Z,ENvld
+ 767  4822 CD 5B 48             CALL ENCEN
+ 767  4825 28 03         JR Z,ENnvl
+ 768  4827 23                   INC HL
+ 768  4828 10 F4         DJNZ ENval
+ 769  482A AF           ENnvl   XOR A
+ 769  482B 3C            INC A
+ 770  482C C9                   RET
+ 771  482D              ENvld
+ 772  482D 04           CHI     INC B
+ 772  482E 28 FA         JR Z,ENnvl
+ 773  4830 2B                   DEC HL
+ 773  4831 7E            LD A,(HL)
+ 773  4832 FE 20         CP " "
+ 773  4834 28 F7         JR Z,CHI
+ 774  4836 05                   DEC B
+ 775  4837 04           Chi     INC B
+ 775  4838 28 F0         JR Z,ENnvl
+ 776  483A 7E                   LD A,(HL)
+ 776  483B 2B            DEC HL
+ 776  483C FE 2E         CP "."
+ 776  483E 28 F7         JR Z,Chi
+ 777  4840 23 23                INC HL,HL
+ 778  4842 AF                   XOR A
+ 778  4843 77            LD (HL),A
+ 779  4844 C9                   RET
+ 780  4845              ;-------
+ 781  4845 FE 2B        SNCEN   CP #2B
+ 781  4847 C8            RET Z;+
+ 782  4848 FE 2C                CP #2C
+ 782  484A C8            RET Z;,
+ 783  484B FE 2E                CP #2E
+ 783  484D C8            RET Z;.
+ 784  484E FE 3B                CP #3B
+ 784  4850 C8            RET Z;;
+ 785  4851 FE 3D                CP #3D
+ 785  4853 C8            RET Z;=
+ 786  4854 FE 5B                CP #5B
+ 786  4856 C8            RET Z;[
+ 787  4857 FE 5D                CP #5D
+ 787  4859 C8            RET Z;]
+ 788  485A C9                   RET
+ 789  485B
+ 790  485B FE 20        ENCEN   CP #20
+ 790  485D 38 1B         JR C,MU
+ 791  485F
+ 792  485F FE 22                CP #22
+ 792  4861 C8            RET Z
+ 793  4862 FE 2A                CP #2A
+ 793  4864 C8            RET Z
+ 794  4865 FE 2F                CP #2F
+ 794  4867 C8            RET Z
+ 795  4868 FE 3A                CP #3A
+ 795  486A C8            RET Z
+ 796  486B FE 3C                CP #3C
+ 796  486D C8            RET Z
+ 797  486E FE 3E                CP #3E
+ 797  4870 C8            RET Z
+ 798  4871 FE 3F                CP #3F
+ 798  4873 C8            RET Z
+ 799  4874 FE 5C                CP #5C
+ 799  4876 C8            RET Z
+ 800  4877 FE 7C                CP #7C
+ 801  4879 C9                   RET
+ 802  487A BF           MU      CP A
+ 803  487B C9                   RET
+ 804  487C
+ 805  487C FE 41        CAPS_SV CP "A"
+ 805  487E D8            RET C
+ 806  487F FE 5B                CP "Z"+1
+ 806  4881 30 02         JR NC,CAPS_sv
+ 807  4883 AF                   XOR A
+ 808  4884 C9                   RET
+ 809  4885 FE 80        CAPS_sv CP #80
+ 809  4887 D8            RET C
+ 810  4888 FE A0                CP #9F+1
+ 810  488A 30 02         JR NC,CAPS_YO
+ 811  488C AF                   XOR A
+ 812  488D C9                   RET
+ 813  488E FE F0        CAPS_YO CP #F0
+ 813  4890 C9            RET
+ 814  4891
+ 815  4891              ;-----Generate Chain in FAT:------------
+ 816  4891 21 C0 38     ERG2    LD HL,FCTS
+ 816  4894 CD E1 49      CALL DLSG
+ 817  4897 21 C0 38 11          LD HL,FCTS,DE,FSTFRC,BC,4
+ 817  489B 9A 38 01 04
+ 817  489F 00
+ 817  48A0 ED B0         LDIR
+ 818  48A2 3E 10        ERG1    LD A,16
+ 818  48A4 B7            OR A
+ 819  48A5 C9                   RET
+ 820  48A6              ;-------
+ 821  48A6              MKSG    ;i:[DE,HL] - Number of Bytes
+ 822  48A6              ;       FSTFRC - First free Cluster
+ 823  48A6              ;o:FCTS(4)-First Cluster in New Chain
+ 824  48A6              ;FSTFRC(4)-New value
+ 825  48A6
+ 826  48A6 CD 8A 50             CALL DEL512
+ 827  48A9 3A 94 38             LD A,(BSECPC)
+ 827  48AC CD 99 50      CALL DELITX2
+ 828  48AF
+ 829  48AF ED 53 BE 38          LD (CLCNT+2),DE
+ 830  48B3 22 BC 38             LD (CLCNT+0),HL
+ 831  48B6
+ 832  48B6 CD CB 48             CALL SGENBU
+ 832  48B9 38 E7         JR C,ERG1
+ 833  48BB CD FB 48     ROSTIK  CALL PREPFC
+ 833  48BE 38 D1         JR C,ERG2
+ 834  48C0 CD 52 49             CALL BUtoFAT
+ 834  48C3 C8            RET Z
+ 835  48C4 CD F5 48             CALL SGENB2
+ 835  48C7 38 C8         JR C,ERG2
+ 836  48C9 18 F0                JR ROSTIK
+ 837  48CB              ;---------------------------------------
+ 838  48CB 21 00 00 22  SGENBU  LD HL,GENBU,(GARY),HL
+ 838  48CF 6D 51
+ 839  48D1
+ 840  48D1 CD 5C 44             CALL SRHFCL
+ 840  48D4 D8            RET C
+ 841  48D5 22 C0 38 ED          LD (FCTS),HL,(FCTS+2),DE
+ 841  48D9 53 C2 38
+ 842  48DC 22 9A 38 ED  GENB    LD (FSTFRC),HL,(FSTFRC+2),DE
+ 842  48E0 53 9C 38
+ 843  48E3
+ 844  48E3 7C 4D                LD A,H,C,L
+ 845  48E5 2A 6D 51             LD HL,(GARY)
+ 846  48E8 71                   LD (HL),C
+ 846  48E9 23            INC HL
+ 847  48EA 77                   LD (HL),A
+ 847  48EB 23            INC HL
+ 848  48EC 73                   LD (HL),E
+ 848  48ED 23            INC HL
+ 849  48EE 72                   LD (HL),D
+ 849  48EF 23            INC HL
+ 850  48F0 22 6D 51             LD (GARY),HL
+ 851  48F3 AF                   XOR A
+ 852  48F4 C9                   RET
+ 853  48F5              ;-------
+ 854  48F5 CD 67 44     SGENB2  CALL SRHFC
+ 854  48F8 D8            RET C
+ 855  48F9 18 E1                JR GENB
+ 856  48FB              ;-------
+ 857  48FB 2A BC 38     PREPFC  LD HL,(CLCNT)
+ 857  48FE 2B            DEC HL
+ 858  48FF 22 BC 38             LD (CLCNT),HL
+ 859  4902 7C                   LD A,H
+ 859  4903 B5            OR L
+ 859  4904 28 2D         JR Z,EOFG
+ 860  4906
+ 861  4906 D9           AMM     EXX
+ 862  4907 7C                   LD A,H
+ 862  4908 FE 32         CP high SECBE
+ 863  490A 38 06                JR C,ARM
+ 864  490C CD 67 44             CALL SRHFC
+ 864  490F D8            RET C
+ 865  4910 18 03                JR AR2
+ 866  4912 CD 72 44     ARM     CALL FC
+ 867  4915 22 9A 38 ED  AR2     LD (FSTFRC),HL,(FSTFRC+2),DE
+ 867  4919 53 9C 38
+ 868  491C              ;-------
+ 869  491C 7C 4D                LD A,H,C,L
+ 870  491E 2A 6D 51             LD HL,(GARY)
+ 871  4921 71                   LD (HL),C
+ 871  4922 23            INC HL
+ 872  4923 77                   LD (HL),A
+ 872  4924 23            INC HL
+ 873  4925 73                   LD (HL),E
+ 873  4926 23            INC HL
+ 874  4927 72                   LD (HL),D
+ 874  4928 23            INC HL
+ 875  4929 7C                   LD A,H
+ 875  492A FE 20         CP high GENBE
+ 875  492C D0            RET NC
+ 876  492D 22 6D 51             LD (GARY),HL
+ 877  4930 C3 FB 48             JP PREPFC
+ 878  4933              ;-------
+ 879  4933 2A BE 38     EOFG    LD HL,(CLCNT+2)
+ 880  4936 7C                   LD A,H
+ 880  4937 B5            OR L
+ 880  4938 20 12         JR NZ,AmM
+ 881  493A
+ 882  493A 11 FF 0F             LD DE,#0FFF
+ 883  493D 2A 6D 51             LD HL,(GARY)
+ 884  4940 73                   LD (HL),E
+ 884  4941 23            INC HL
+ 885  4942 73                   LD (HL),E
+ 885  4943 23            INC HL
+ 886  4944 73                   LD (HL),E
+ 886  4945 23            INC HL
+ 887  4946 72                   LD (HL),D
+ 887  4947 23            INC HL
+ 888  4948 22 6D 51             LD (GARY),HL
+ 889  494B C9                   RET
+ 890  494C              ;-------
+ 891  494C 2B           AmM     DEC HL
+ 891  494D 22 BE 38      LD (CLCNT+2),HL
+ 891  4950 18 B4         JR AMM
+ 892  4952              ;---------------------------------------
+ 893  4952 21 00 00     BUtoFAT LD HL,GENBU
+ 894  4955 4E           GENFC   LD C,(HL)
+ 894  4956 23            INC HL
+ 895  4957 46                   LD B,(HL)
+ 895  4958 23            INC HL
+ 896  4959 5E                   LD E,(HL)
+ 896  495A 23            INC HL
+ 897  495B 56                   LD D,(HL)
+ 897  495C 23            INC HL
+ 898  495D              ;-------
+ 899  495D E5                   PUSH HL
+ 900  495E 60 69                LD HL,BC
+ 900  4960 CD C5 44      CALL CURIT
+ 900  4963 EB            EX DE,HL
+ 901  4964 E1                   POP HL
+ 902  4965
+ 903  4965 22 B8 38     GNFC    LD (UUHL),HL
+ 904  4968 01 04 00             LD BC,4
+ 904  496B ED B0         LDIR
+ 905  496D
+ 906  496D 2B                   DEC HL
+ 906  496E 7E            LD A,(HL)
+ 906  496F FE 0F         CP #0F
+ 906  4971 28 4F         JR Z,LSTSR
+ 907  4973 23                   INC HL
+ 907  4974 7C            LD A,H
+ 907  4975 FE 20         CP high GENBE
+ 907  4977 30 53         JR NC,LSTsr
+ 908  4979
+ 909  4979 2A B8 38             LD HL,(UUHL)
+ 910  497C 4E                   LD C,(HL)
+ 910  497D 23            INC HL
+ 911  497E 46                   LD B,(HL)
+ 911  497F 23            INC HL
+ 912  4980 5E                   LD E,(HL)
+ 912  4981 23            INC HL
+ 913  4982 56                   LD D,(HL)
+ 913  4983 23            INC HL
+ 914  4984 22 BA 38             LD (BUHL),HL
+ 915  4987
+ 916  4987 60 69                LD HL,BC
+ 916  4989 CD 72 50      CALL DEL128
+ 917  498C ED 4B 52 38          LD BC,(LSTSE)
+ 918  4990 B7                   OR A
+ 918  4991 ED 42         SBC HL,BC
+ 918  4993 20 0A         JR NZ,GGC
+ 919  4995 EB                   EX DE,HL
+ 919  4996 ED 4B 54 38   LD BC,(LSTSE+2)
+ 920  499A B7                   OR A
+ 920  499B ED 42         SBC HL,BC
+ 920  499D 28 0E         JR Z,GFC
+ 921  499F
+ 922  499F 21 00 30 3E  GGC     LD HL,SECBU,A,1
+ 922  49A3 01
+ 922  49A4 CD 12 38      CALL SDDSE
+ 923  49A7 2A B8 38             LD HL,(UUHL)
+ 924  49AA C3 55 49             JP GENFC
+ 925  49AD
+ 926  49AD 26 00 6F     GFC     LD H,0,L,A
+ 927  49B0               DUP 2
+ 928  49B0 CB 25       >         SLA L
+ 928  49B2 CB 14       > RL H
+ 928  49B4 CB 25       >         SLA L
+ 928  49B6 CB 14       > RL H
+ 929  49B8               EDUP
+ 930  49B8 01 00 30             LD BC,SECBU
+ 930  49BB 09            ADD HL,BC
+ 931  49BC EB                   EX DE,HL
+ 932  49BD 2A BA 38             LD HL,(BUHL)
+ 933  49C0 18 A3                JR GNFC
+ 934  49C2              ;-------
+ 935  49C2 21 00 30     LSTSR   LD HL,SECBU
+ 935  49C5 3E 01         LD A,1
+ 935  49C7 CD 12 38      CALL SDDSE
+ 936  49CA              ;CALL RFRH
+ 937  49CA AF                   XOR A
+ 938  49CB C9                   RET
+ 939  49CC              ;-------
+ 940  49CC CD C2 49     LSTsr   CALL LSTSR
+ 941  49CF 2A B8 38 11          LD HL,(UUHL),DE,GENBU,BC,4
+ 941  49D3 00 00 01 04
+ 941  49D7 00
+ 941  49D8 ED B0         LDIR
+ 942  49DA ED 53 6D 51          LD (GARY),DE
+ 943  49DE
+ 944  49DE AF                   XOR A
+ 944  49DF 3C            INC A
+ 945  49E0 C9                   RET
+ 946  49E1
+ 947  49E1              ;-----Delete Chain from FAT:------------
+ 948  49E1              DLSG    ;i:HL(4) - Cluster number
+ 949  49E1
+ 950  49E1 11 00 32 01          LD DE,LOBU,BC,4
+ 950  49E5 04 00
+ 950  49E7 ED B0         LDIR
+ 951  49E9 21 00 00             LD HL,0
+ 952  49EC 22 9A 38             LD (FSTFRC),HL
+ 953  49EF 22 9C 38             LD (FSTFRC+2),HL
+ 954  49F2 2A 00 32 ED  LWT     LD HL,(LOBU),DE,(LOBU+2)
+ 954  49F6 5B 02 32
+ 955  49F9 7A                   LD A,D
+ 955  49FA FE 0F         CP #0F
+ 955  49FC C8            RET Z
+ 956  49FD B3 B4 B5             OR E,H,L
+ 956  4A00 C8            RET Z
+ 957  4A01
+ 958  4A01 CD C5 44             CALL CURIT
+ 958  4A04 D8            RET C
+ 959  4A05 11 00 32 0E  GOCE    LD DE,LOBU,C,0
+ 959  4A09 00
+ 960  4A0A               DUP 3
+ 961  4A0A 7E 71 12    >         LD A,(HL),(HL),C,(DE),A
+ 961  4A0D 2C 1C       > INC L,E
+ 961  4A0F 7E 71 12    >         LD A,(HL),(HL),C,(DE),A
+ 961  4A12 2C 1C       > INC L,E
+ 961  4A14 7E 71 12    >         LD A,(HL),(HL),C,(DE),A
+ 961  4A17 2C 1C       > INC L,E
+ 962  4A19               EDUP
+ 963  4A19 7E 71 12             LD A,(HL),(HL),C,(DE),A
+ 964  4A1C
+ 965  4A1C 2A 00 32 ED          LD HL,(LOBU),DE,(LOBU+2)
+ 965  4A20 5B 02 32
+ 966  4A23 7A                   LD A,D
+ 966  4A24 FE 0F         CP #0F
+ 966  4A26 28 33         JR Z,Ne
+ 967  4A28 CD 72 50             CALL DEL128
+ 968  4A2B ED 4B 52 38          LD BC,(LSTSE)
+ 969  4A2F B7                   OR A
+ 969  4A30 ED 42         SBC HL,BC
+ 969  4A32 20 1C         JR NZ,NE
+ 969  4A34 EB            EX DE,HL
+ 970  4A35 ED 4B 54 38          LD BC,(LSTSE+2)
+ 971  4A39 B7                   OR A
+ 971  4A3A ED 42         SBC HL,BC
+ 971  4A3C 20 12         JR NZ,NE
+ 972  4A3E
+ 973  4A3E 26 00 6F             LD H,0,L,A
+ 974  4A41               DUP 2
+ 975  4A41 CB 25       >         SLA L
+ 975  4A43 CB 14       > RL H
+ 975  4A45 CB 25       >         SLA L
+ 975  4A47 CB 14       > RL H
+ 976  4A49               EDUP
+ 977  4A49 01 00 30             LD BC,SECBU
+ 977  4A4C 09            ADD HL,BC
+ 978  4A4D C3 05 4A             JP GOCE
+ 979  4A50
+ 980  4A50 21 00 30 3E  NE      LD HL,SECBU,A,1
+ 980  4A54 01
+ 980  4A55 CD 12 38      CALL SDDSE
+ 981  4A58 C3 F2 49             JP LWT
+ 982  4A5B 21 00 30 3E  Ne      LD HL,SECBU,A,1
+ 982  4A5F 01
+ 982  4A60 C3 12 38      JP SDDSE
+ 983  4A63
+ 984  4A63              ;-----Searching ENTRY in Active DIR:----
+ 985  4A63              SRHDRN  ;i:LSTCAT(4) - Active DIR
+ 986  4A63              ;          HL - Buffer with Name
+ 987  4A63              ;               [flag(1),name(1-255),0]
+ 988  4A63              ;        o: Z: NOT FOUNT
+ 989  4A63              ;          NZ: ENTRY(32)
+ 990  4A63              ;              [DE,HL] - Cluster Number
+ 991  4A63              ;              BC - Address in LOBU/LOB2
+ 992  4A63
+ 993  4A63 22 F8 37             LD (CGDE),HL
+ 993  4A66 CD E6 4A      CALL LNLNG
+ 993  4A69 C8            RET Z
+ 994  4A6A
+ 995  4A6A 21 C8 38 11  FNDSN   LD HL,LSTCAT,DE,CUHL,BC,4
+ 995  4A6E A8 38 01 04
+ 995  4A72 00
+ 995  4A73 ED B0         LDIR
+ 996  4A75 CD 3D 51             CALL TOS
+ 997  4A78
+ 998  4A78 21 00 32 06          LD HL,LOBU,B,1
+ 998  4A7C 01
+ 998  4A7D CD BF 43      CALL LOAD512
+ 999  4A80
+1000  4A80 21 00 32             LD HL,LOBU
+1001  4A83 CD 86 4B     ANNA    CALL ENTCH
+1001  4A86 28 3A         JR Z,FND
+1002  4A88 01 20 00             LD BC,32
+1002  4A8B 09            ADD HL,BC
+1003  4A8C 7C                   LD A,H
+1003  4A8D FE 34         CP high LOBU2
+1003  4A8F 38 F2         JR C,ANNA
+1004  4A91
+1005  4A91 3A 49 38     HDR     LD A,(EOC)
+1005  4A94 FE 0F         CP #0F
+1005  4A96 C8            RET Z
+1006  4A97 E5                   PUSH HL
+1007  4A98 21 00 34 06          LD HL,LOBU2,B,1
+1007  4A9C 01
+1007  4A9D CD BF 43      CALL LOAD512
+1008  4AA0 E1                   POP HL
+1009  4AA1 CD 86 4B     AnnA    CALL ENTCH
+1009  4AA4 28 1C         JR Z,FND
+1010  4AA6 01 20 00             LD BC,32
+1010  4AA9 09            ADD HL,BC
+1011  4AAA 7C                   LD A,H
+1011  4AAB FE 36         CP high LOBE2
+1011  4AAD 38 F2         JR C,AnnA
+1012  4AAF
+1013  4AAF D9                   EXX
+1014  4AB0 21 00 34 11          LD HL,LOBU2,DE,LOBU,BC,512
+1014  4AB4 00 32 01 00
+1014  4AB8 02
+1014  4AB9 ED B0         LDIR
+1015  4ABB D9                   EXX
+1015  4ABC 01 00 FE      LD BC,0-512
+1015  4ABF 09            ADD HL,BC
+1016  4AC0 18 CF                JR HDR
+1017  4AC2
+1018  4AC2 B7           FND     OR A
+1018  4AC3 C8            RET Z
+1019  4AC4 2A 82 38             LD HL,(CLSHL)
+1020  4AC7 ED 5B 7C 38          LD DE,(CLSDE)
+1021  4ACB AF                   XOR A
+1021  4ACC 3C            INC A
+1022  4ACD C9                   RET
+1023  4ACE              ;-------
+1024  4ACE 3E 20 12     NOP32   LD A," ",(DE),A
+1024  4AD1 13            INC DE
+1024  4AD2 10 FC         DJNZ $-2
+1025  4AD4 C9                   RET
+1026  4AD5 AF           LNe     XOR A
+1026  4AD6 C9            RET
+1027  4AD7 3E C9 32 91  LNLNGcs LD A,#C9,(ACS),A
+1027  4ADB 4C
+1028  4ADC CD E6 4A             CALL LNLNG
+1029  4ADF 08                   EXA
+1029  4AE0 AF            XOR A
+1029  4AE1 32 91 4C      LD (ACS),A
+1030  4AE4 08                   EXA
+1031  4AE5 C9                   RET
+1032  4AE6 7E           LNLNG   LD A,(HL)
+1032  4AE7 23            INC HL
+1033  4AE8 E6 EF                AND %11101111
+1033  4AEA 20 E9         JR NZ,LNe
+1034  4AEC
+1035  4AEC 01 00 01             LD BC,256
+1035  4AEF AF            XOR A
+1035  4AF0 ED B1         CPIR
+1035  4AF2 20 E1         JR NZ,LNe
+1036  4AF4 3E FF                LD A,256-1
+1036  4AF6 91            SUB C
+1036  4AF7 28 DC         JR Z,LNe
+1037  4AF9
+1038  4AF9 2A F8 37             LD HL,(CGDE)
+1039  4AFC CB 66                BIT 4,(HL)
+1039  4AFE 20 51         JR NZ,KAT
+1040  4B00
+1041  4B00 0E 0D        MURMUR  LD C,12+1
+1041  4B02 91            SUB C
+1041  4B03 30 7A         JR NC,NESN
+1042  4B05 81                   ADD A,C
+1043  4B06 4F                   LD C,A
+1043  4B07 09            ADD HL,BC
+1044  4B08
+1045  4B08 08                   EXA
+1046  4B09 06 04 11 70          LD B,4,DE,ENTRY+8
+1046  4B0D 38
+1047  4B0E 7E           FEL     LD A,(HL)
+1047  4B0F 0D            DEC C
+1047  4B10 28 07         JR Z,FEL4
+1048  4B12 FE 2E                CP "."
+1048  4B14 28 2B         JR Z,FELE
+1049  4B16 2B                   DEC HL
+1049  4B17 10 F5         DJNZ FEL
+1050  4B19 08           FEL4    EXA
+1051  4B1A 4F                   LD C,A
+1052  4B1B 06 03                LD B,3
+1053  4B1D CD CE 4A     FEL3    CALL NOP32
+1054  4B20 11 68 38     FEL2    LD DE,ENTRY
+1055  4B23 79                   LD A,C
+1055  4B24 FE 09         CP 8+1
+1055  4B26 30 57         JR NC,NESN
+1056  4B28
+1057  4B28 47 3E 08             LD B,A,A,8
+1057  4B2B 90            SUB B
+1057  4B2C 4F            LD C,A
+1058  4B2D 2A F8 37             LD HL,(CGDE)
+1059  4B30 23           FEEL    INC HL
+1059  4B31 7E            LD A,(HL)
+1059  4B32 CD 91 4C      CALL ACS
+1060  4B35 12                   LD (DE),A
+1060  4B36 13            INC DE
+1060  4B37 10 F7         DJNZ FEEL
+1061  4B39
+1062  4B39 41 78                LD B,C,A,B
+1062  4B3B B7            OR A
+1062  4B3C C4 CE 4A      CALL NZ,NOP32
+1063  4B3F 18 42                JR ENTch
+1064  4B41
+1065  4B41 06 03        FELE    LD B,3
+1066  4B43 23           FEL5    INC HL
+1066  4B44 7E            LD A,(HL)
+1066  4B45 B7            OR A
+1066  4B46 28 D5         JR Z,FEL3
+1067  4B48 CD 91 4C             CALL ACS
+1068  4B4B 12                   LD (DE),A
+1068  4B4C 13            INC DE
+1069  4B4D 10 F4                DJNZ FEL5
+1070  4B4F 18 CF                JR FEL2
+1071  4B51              ;-------
+1072  4B51 FE 04        KAT     CP 3+1
+1072  4B53 30 AB         JR NC,MURMUR
+1073  4B55 4F                   LD C,A
+1074  4B56 23                   INC HL
+1074  4B57 7E            LD A,(HL)
+1074  4B58 FE 2E         CP "."
+1075  4B5A 2B                   DEC HL
+1075  4B5B 79            LD A,C
+1075  4B5C 20 A2         JR NZ,MURMUR
+1076  4B5E 23 23                INC HL,HL
+1076  4B60 7E            LD A,(HL)
+1076  4B61 FE 2E         CP "."
+1077  4B63 2B 2B                DEC HL,HL
+1077  4B65 79            LD A,C
+1077  4B66 20 98         JR NZ,MURMUR
+1078  4B68
+1079  4B68              ;LD C,8+1:SUB C:JR NC,NESN
+1080  4B68              ;ADD A,C
+1081  4B68
+1082  4B68 11 68 38             LD DE,ENTRY
+1083  4B6B 47 3E 0B             LD B,A,A,11
+1083  4B6E 90            SUB B
+1083  4B6F 4F            LD C,A
+1084  4B70 23           KaT     INC HL
+1084  4B71 7E            LD A,(HL)
+1084  4B72 CD 91 4C      CALL ACS
+1085  4B75 12                   LD (DE),A
+1085  4B76 13            INC DE
+1085  4B77 10 F7         DJNZ KaT
+1086  4B79
+1087  4B79 41                   LD B,C
+1087  4B7A CD CE 4A      CALL NOP32
+1088  4B7D 18 04                JR ENTch
+1089  4B7F
+1090  4B7F AF           NESN    XOR A
+1090  4B80 32 68 38      LD (ENTRY),A
+1091  4B83 AF           ENTch   XOR A
+1091  4B84 3C            INC A
+1091  4B85 C9            RET
+1092  4B86              ;-------
+1093  4B86 7E           ENTCH   LD A,(HL)
+1094  4B87 B7                   OR A
+1094  4B88 C8            RET Z
+1095  4B89 FE E5                CP #E5
+1095  4B8B 28 F6         JR Z,ENTch
+1096  4B8D
+1097  4B8D 7D                   LD A,L
+1097  4B8E C6 0B         ADD A,11
+1097  4B90 6F            LD L,A
+1098  4B91 CB 5E                BIT 3,(HL)
+1098  4B93 C2 50 4C      JP NZ,ENTCHe
+1099  4B96
+1100  4B96 ED 5B F8 37          LD DE,(CGDE)
+1101  4B9A 7E                   LD A,(HL)
+1101  4B9B E6 10         AND #10
+1101  4B9D 47            LD B,A
+1102  4B9E 1A                   LD A,(DE)
+1102  4B9F B8            CP B
+1102  4BA0 C2 50 4C      JP NZ,ENTCHe
+1103  4BA3
+1104  4BA3 3A 68 38             LD A,(ENTRY)
+1104  4BA6 B7            OR A
+1104  4BA7 28 14         JR Z,LNEB
+1105  4BA9 7D                   LD A,L
+1105  4BAA E6 F0         AND #F0
+1105  4BAC 6F            LD L,A
+1106  4BAD 06 0B 11 68          LD B,11,DE,ENTRY
+1106  4BB1 38
+1107  4BB2 1A           SNCH    LD A,(DE)
+1107  4BB3 BE            CP (HL)
+1107  4BB4 20 07         JR NZ,LNEB
+1108  4BB6 13 2C                INC DE,L
+1108  4BB8 10 F8         DJNZ SNCH
+1109  4BBA C3 5E 4C             JP ENTFND
+1110  4BBD
+1111  4BBD 7D           LNEB    LD A,L
+1111  4BBE E6 F0         AND #F0
+1111  4BC0 6F            LD L,A
+1112  4BC1 CD 14 43             CALL LNCRC
+1113  4BC4 22 FA 37             LD (CGHL),HL
+1114  4BC7
+1115  4BC7 01 E2 FF             LD BC,0-30
+1115  4BCA 09            ADD HL,BC
+1116  4BCB BE                   CP (HL)
+1116  4BCC 20 7F         JR NZ,ENTCHE
+1117  4BCE 7C                   LD A,H
+1117  4BCF FE 32         CP high LOBU
+1117  4BD1 38 7A         JR C,ENTCHE
+1118  4BD3               DUP 2
+1119  4BD3 2D          >         DEC L
+1119  4BD4 2D          >         DEC L
+1120  4BD5               EDUP
+1121  4BD5 7E                   LD A,(HL)
+1121  4BD6 FE 0F         CP #0F
+1121  4BD8 20 73         JR NZ,ENTCHE
+1122  4BDA
+1123  4BDA ED 5B F8 37          LD DE,(CGDE)
+1123  4BDE 13            INC DE
+1124  4BDF 7D                   LD A,L
+1124  4BE0 E6 F0         AND #F0
+1124  4BE2 6F            LD L,A
+1125  4BE3
+1126  4BE3 06 01                LD B,1
+1127  4BE5 7E           LNPARZ  LD A,(HL)
+1128  4BE6 CB 77                BIT 6,A
+1128  4BE8 28 02         JR Z,$+4
+1128  4BEA CB F0         SET 6,B
+1129  4BEC B8                   CP B
+1129  4BED 20 5E         JR NZ,ENTCHE
+1129  4BEF 04            INC B
+1130  4BF0
+1131  4BF0 2C                   INC L
+1132  4BF1               DUP 5
+1133  4BF1 CD 70 4C    >         CALL ULNP
+1133  4BF4 30 55       > JR NC,ENTST
+1133  4BF6 CD 70 4C    >         CALL ULNP
+1133  4BF9 30 50       > JR NC,ENTST
+1133  4BFB CD 70 4C    >         CALL ULNP
+1133  4BFE 30 4B       > JR NC,ENTST
+1133  4C00 CD 70 4C    >         CALL ULNP
+1133  4C03 30 46       > JR NC,ENTST
+1133  4C05 CD 70 4C    >         CALL ULNP
+1133  4C08 30 41       > JR NC,ENTST
+1134  4C0A               EDUP
+1135  4C0A               DUP 3
+1136  4C0A 2C          >         INC L
+1136  4C0B 2C          >         INC L
+1136  4C0C 2C          >         INC L
+1137  4C0D               EDUP
+1138  4C0D               DUP 6
+1139  4C0D CD 70 4C    >         CALL ULNP
+1139  4C10 30 39       > JR NC,ENTST
+1139  4C12 CD 70 4C    >         CALL ULNP
+1139  4C15 30 34       > JR NC,ENTST
+1139  4C17 CD 70 4C    >         CALL ULNP
+1139  4C1A 30 2F       > JR NC,ENTST
+1139  4C1C CD 70 4C    >         CALL ULNP
+1139  4C1F 30 2A       > JR NC,ENTST
+1139  4C21 CD 70 4C    >         CALL ULNP
+1139  4C24 30 25       > JR NC,ENTST
+1139  4C26 CD 70 4C    >         CALL ULNP
+1139  4C29 30 20       > JR NC,ENTST
+1140  4C2B               EDUP
+1141  4C2B               DUP 2
+1142  4C2B 2C          >         INC L
+1142  4C2C 2C          >         INC L
+1143  4C2D               EDUP
+1144  4C2D               DUP 2
+1145  4C2D CD 70 4C    >         CALL ULNP
+1145  4C30 30 19       > JR NC,ENTST
+1145  4C32 CD 70 4C    >         CALL ULNP
+1145  4C35 30 14       > JR NC,ENTST
+1146  4C37               EDUP
+1147  4C37 2D                   DEC L
+1148  4C38
+1149  4C38 78                   LD A,B
+1149  4C39 FE 40         CP #40
+1149  4C3B D2 57 4C      JP NC,ENTFNDx
+1150  4C3E
+1151  4C3E 01 C1 FF             LD BC,0-(64-1)
+1151  4C41 09            ADD HL,BC
+1151  4C42 47            LD B,A
+1152  4C43 7C                   LD A,H
+1152  4C44 FE 32         CP high LOBU
+1152  4C46 38 05         JR C,ENTCHE
+1153  4C48 C3 E5 4B             JP LNPARZ
+1154  4C4B              ;-------
+1155  4C4B 20 0E        ENTST   JR NZ,ENTFNDL
+1156  4C4D 2A FA 37     ENTCHE  LD HL,(CGHL)
+1157  4C50 7D           ENTCHe  LD A,L
+1157  4C51 E6 F0         AND #F0
+1157  4C53 6F            LD L,A
+1158  4C54 AF                   XOR A
+1158  4C55 3C            INC A
+1159  4C56 C9                   RET
+1160  4C57
+1161  4C57 1A           ENTFNDx LD A,(DE)
+1161  4C58 B7            OR A
+1161  4C59 20 F2         JR NZ,ENTCHE
+1162  4C5B 2A FA 37     ENTFNDL LD HL,(CGHL)
+1163  4C5E 7D           ENTFND  LD A,L
+1163  4C5F E6 F0         AND #F0
+1163  4C61 6F            LD L,A
+1164  4C62 E5                   PUSH HL
+1164  4C63 11 68 38 01   LD DE,ENTRY,BC,32
+1164  4C67 20 00
+1164  4C69 ED B0         LDIR
+1165  4C6B C1                   POP BC
+1166  4C6C AF                   XOR A
+1166  4C6D 3E 01         LD A,1
+1167  4C6F C9                   RET
+1168  4C70              ;-------
+1169  4C70 1A           ULNP    LD A,(DE)
+1169  4C71 13            INC DE
+1169  4C72 B7            OR A
+1169  4C73 28 13         JR Z,UlnP
+1170  4C75 CD 91 4C             CALL ACS
+1170  4C78 4F            LD C,A
+1171  4C79 CD BA 4C             CALL UCS
+1171  4C7C B7            OR A
+1171  4C7D C8            RET Z
+1172  4C7E CD 91 4C             CALL ACS
+1172  4C81 B9            CP C
+1172  4C82 28 02         JR Z,ULNp
+1173  4C84 AF           ULNz    XOR A
+1173  4C85 C9            RET
+1174  4C86 37           ULNp    SCF
+1174  4C87 C9            RET
+1175  4C88 CD BA 4C     UlnP    CALL UCS
+1175  4C8B 3C            INC A
+1175  4C8C 20 F6         JR NZ,ULNz
+1176  4C8E AF                   XOR A
+1176  4C8F 3C            INC A
+1177  4C90 C9                   RET
+1178  4C91              ;-------
+1179  4C91 00           ACS     NOP
+1180  4C92 FE 80                CP #80
+1180  4C94 30 09         JR NC,RUS
+1181  4C96 FE 61                CP #60+1
+1181  4C98 D8            RET C
+1182  4C99 FE 7B                CP #7B
+1182  4C9B D0            RET NC
+1183  4C9C CB AF                RES 5,A
+1184  4C9E C9                   RET
+1185  4C9F FE A0        RUS     CP #A0
+1185  4CA1 D8            RET C
+1186  4CA2 FE B0                CP #B0
+1186  4CA4 30 03         JR NC,RU2
+1187  4CA6 CB AF                RES 5,A
+1188  4CA8 C9                   RET
+1189  4CA9 FE E0        RU2     CP #E0
+1189  4CAB D8            RET C
+1190  4CAC FE F2                CP #F2
+1190  4CAE D0            RET NC
+1191  4CAF FE F1                CP #F1
+1191  4CB1 20 01         JR NZ,$+3
+1191  4CB3 3D            DEC A
+1192  4CB4 FE F0                CP #F0
+1192  4CB6 C8            RET Z
+1193  4CB7 D6 50                SUB #50
+1194  4CB9 C9                   RET
+1195  4CBA              ;-------
+1196  4CBA 2C           UCS     INC L
+1197  4CBB 7E                   LD A,(HL)
+1197  4CBC B7            OR A
+1197  4CBD 20 0F         JR NZ,UCSX
+1198  4CBF 2D                   DEC L
+1198  4CC0 7E            LD A,(HL)
+1198  4CC1 2C 2C         INC L,L
+1199  4CC3 B7                   OR A
+1199  4CC4 28 05         JR Z,UCSE
+1200  4CC6 FE 80                CP #80
+1200  4CC8 D8            RET C
+1201  4CC9 AF           UCS_    XOR A
+1201  4CCA C9            RET
+1202  4CCB 3E FF        UCSE    LD A,#FF
+1202  4CCD C9            RET
+1203  4CCE
+1204  4CCE FE 04        UCSX    CP 4
+1204  4CD0 20 F7         JR NZ,UCS_
+1205  4CD2 2D                   DEC L
+1205  4CD3 7E            LD A,(HL)
+1205  4CD4 2C 2C         INC L,L
+1206  4CD6 FE 01                CP #01
+1206  4CD8 28 18         JR Z,Hyo
+1207  4CDA FE 10                CP #10
+1207  4CDC 38 EB         JR C,UCS_
+1208  4CDE FE 40                CP #3F+1
+1208  4CE0 38 0A         JR C,Dgg
+1209  4CE2 FE 50                CP #4F+1
+1209  4CE4 38 09         JR C,Dee
+1210  4CE6 FE 51                CP #51
+1210  4CE8 28 0B         JR Z,Lyo
+1211  4CEA 18 DD                JR UCS_
+1212  4CEC C6 70        Dgg     ADD A,#70
+1212  4CEE C9            RET
+1213  4CEF C6 A0        Dee     ADD A,#A0
+1213  4CF1 C9            RET
+1214  4CF2 3E F0        Hyo     LD A,#F0
+1214  4CF4 C9            RET
+1215  4CF5 3E F1        Lyo     LD A,#F1
+1215  4CF7 C9            RET
+1216  4CF8
+1217  4CF8              ;---------------------------------------
+1218  4CF8              ;DELETE FILE/DIR:
+1219  4CF8              DELFL   ;i:HL - flag(1),name(1-255),0
+1220  4CF8              ;        o: Z - not found
+1221  4CF8              ;          NZ - file deleted
+1222  4CF8
+1223  4CF8 CD 05 4D             CALL DELEN
+1223  4CFB C8            RET Z
+1224  4CFC F5           DELCHA  PUSH AF
+1224  4CFD 21 C0 38      LD HL,FCTS
+1224  4D00 CD E1 49      CALL DLSG
+1225  4D03 F1                   POP AF
+1226  4D04 C9                   RET
+1227  4D05
+1228  4D05 CD 63 4A     DELEN   CALL SRHDRN
+1228  4D08 3E 08         LD A,8
+1228  4D0A C8            RET Z
+1229  4D0B
+1230  4D0B 22 C0 38             LD (FCTS+0),HL
+1231  4D0E ED 53 C2 38          LD (FCTS+2),DE
+1232  4D12
+1233  4D12 3E E5 02             LD A,#E5,(BC),A
+1234  4D15 60 2E 00             LD H,B,L,0
+1234  4D18 CB 84         RES 0,H
+1234  4D1A CD 20 4D      CALL STAMP
+1235  4D1D AF                   XOR A
+1235  4D1E 3C            INC A
+1236  4D1F C9                   RET
+1237  4D20              ;-------
+1238  4D20 E5           STAMP   PUSH HL
+1239  4D21 2A 60 38 ED          LD HL,(LLHL),DE,(LLHL+2)
+1239  4D25 5B 62 38
+1240  4D28 CD 0C 38             CALL PROZ
+1241  4D2B E1                   POP HL
+1242  4D2C
+1243  4D2C 3E 01                LD A,1
+1243  4D2E C3 12 38      JP SDDSE
+1244  4D31              ;---------------------------------------
+1245  4D31              ;RENAME ENTRY:
+1246  4D31              RENAME  ;i:HL - flag(1),oldname(1-255),0
+1247  4D31              ;          DE - newname(1-255),0
+1248  4D31              ;        o: Z - not found
+1249  4D31              ;          NZ - success
+1250  4D31
+1251  4D31 E5 D5                PUSH HL,DE
+1252  4D33 CD 63 4A             CALL SRHDRN
+1252  4D36 3E 08         LD A,8
+1253  4D38 22 C0 38             LD (FCTS+0),HL
+1254  4D3B ED 53 C2 38          LD (FCTS+2),DE
+1255  4D3F E1 D1                POP HL,DE
+1255  4D41 C8            RET Z
+1256  4D42
+1257  4D42 D5                   PUSH DE
+1257  4D43 CD 74 45      CALL SVHDFL
+1258  4D46 E1                   POP HL
+1258  4D47 20 07         JR NZ,ZIR
+1259  4D49
+1260  4D49 CD 05 4D             CALL DELEN
+1260  4D4C C8            RET Z
+1261  4D4D
+1262  4D4D AF                   XOR A
+1262  4D4E 3C            INC A
+1262  4D4F C9            RET
+1263  4D50 BF           ZIR     CP A
+1263  4D51 C9            RET
+1264  4D52              ;---------------------------------------
+1265  4D52              ;MAKE NEW FILE:
+1266  4D52              MKFILE  ;i:HL - flag(1),ln(4),name,0
+1267  4D52
+1268  4D52 7E 32 73 38          LD A,(HL),(EFLG),A
+1268  4D56 23            INC HL
+1269  4D57 11 84 38 01          LD DE,SIZIK,BC,4
+1269  4D5B 04 00
+1269  4D5D ED B0         LDIR
+1270  4D5F 22 FA 37             LD (CGHL),HL
+1271  4D62
+1272  4D62 2A 84 38 ED          LD HL,(SIZIK),DE,(SIZIK+2)
+1272  4D66 5B 86 38
+1273  4D69 CD A6 48             CALL MKSG
+1273  4D6C C0            RET NZ
+1274  4D6D 2A FA 37             LD HL,(CGHL)
+1275  4D70 CD 74 45             CALL SVHDFL
+1275  4D73 C2 FC 4C      JP NZ,DELCHA
+1276  4D76 AF                   XOR A
+1277  4D77 C9                   RET
+1278  4D78
+1279  4D78              ;---------------------------------------
+1280  4D78              ;MAKE NEW DIRECTORY:
+1281  4D78              MKDIR   ;i:HL - DirName(1-255),0
+1282  4D78
+1283  4D78 22 FA 37             LD (CGHL),HL
+1284  4D7B 21 00 00 22          LD HL,0,(SIZIK),HL,(SIZIK+2),HL
+1284  4D7F 84 38 22 86
+1284  4D83 38
+1285  4D84 3E 10 32 73          LD A,#10,(EFLG),A
+1285  4D88 38
+1286  4D89 11 00 00 21          LD DE,0,HL,512
+1286  4D8D 00 02
+1287  4D8F CD A6 48             CALL MKSG
+1287  4D92 C0            RET NZ
+1288  4D93 2A FA 37             LD HL,(CGHL)
+1289  4D96 CD 74 45             CALL SVHDFL
+1289  4D99 C2 FC 4C      JP NZ,DELCHA
+1290  4D9C 21 C0 38             LD HL,FCTS
+1291  4D9F CD 0F 45             CALL GIPAG
+1292  4DA2
+1293  4DA2 21 68 38             LD HL,ENTRY
+1294  4DA5 36 2E                LD (HL),"."
+1294  4DA7 23            INC HL
+1295  4DA8 36 20                LD (HL),#20
+1295  4DAA 23            INC HL
+1296  4DAB 3E 20 06 09          LD A,32,B,9
+1296  4DAF CD 68 51      CALL NOPING+1
+1297  4DB2 2A A8 38 22          LD HL,(CUHL),(CLSHL),HL
+1297  4DB6 82 38
+1298  4DB8 2A AA 38 22          LD HL,(CUDE),(CLSDE),HL
+1298  4DBC 7C 38
+1299  4DBE 21 68 38 11          LD HL,ENTRY,DE,LOBU,BC,32
+1299  4DC2 00 32 01 20
+1299  4DC6 00
+1299  4DC7 ED B0         LDIR
+1300  4DC9
+1301  4DC9 21 69 38             LD HL,ENTRY+1
+1302  4DCC 36 2E                LD (HL),"."
+1303  4DCE 2A C8 38 22          LD HL,(LSTCAT),(CLSHL),HL
+1303  4DD2 82 38
+1304  4DD4 2A CA 38 22          LD HL,(LSTCAT+2),(CLSDE),HL
+1304  4DD8 7C 38
+1305  4DDA 21 68 38 01          LD HL,ENTRY,BC,32
+1305  4DDE 20 00
+1305  4DE0 ED B0         LDIR
+1306  4DE2
+1307  4DE2 62 6B                LD HL,DE
+1307  4DE4 13            INC DE
+1308  4DE5 01 00 02             LD BC,512;-64-1
+1309  4DE8 36 00                LD (HL),0
+1310  4DEA ED B0                LDIR
+1311  4DEC 21 00 32             LD HL,LOBU
+1312  4DEF 3E 01                LD A,1
+1312  4DF1 CD 12 38      CALL SDDSE
+1313  4DF4
+1314  4DF4 3A 94 38             LD A,(BSECPC)
+1315  4DF7 21 40 32             LD HL,LOBU+64
+1316  4DFA CD 45 51             CALL NOPCLA
+1317  4DFD AF                   XOR A
+1318  4DFE C9                   RET
+1319  4DFF
+1320  4DFF 2A 8B 38 ED  RFRH    LD HL,(FSINF),DE,(FSINF+2)
+1320  4E03 5B 8D 38
+1321  4E06 CD 09 38             CALL XPOZI
+1322  4E09 21 00 32             LD HL,LOBU
+1323  4E0C 3E 01                LD A,1
+1323  4E0E CD 0F 38      CALL RDDSE
+1324  4E11 21 9A 38 11          LD HL,FSTFRC,DE,LOBU+492,BC,4
+1324  4E15 EC 33 01 04
+1324  4E19 00
+1325  4E1A ED B0                LDIR
+1326  4E1C 21 00 32             LD HL,LOBU
+1327  4E1F 3E 01                LD A,1
+1327  4E21 C3 12 38      JP SDDSE
+1328  4E24              ;---------------------------------------
+1329  4E24              ;CHAIN->SECTORS:
+1330  4E24              CHTOSE  ;i:HL(4) - First Cluster number
+1331  4E24              ;             DE - BUFFER Address
+1332  4E24              ;             BC - End Of BUFFER
+1333  4E24
+1334  4E24 ED 43 6F 51          LD (DABC),BC
+1335  4E28 ED 53 73 51          LD (DADE),DE
+1336  4E2C 22 71 51     CKAGO   LD (DAHL),HL
+1337  4E2F
+1338  4E2F CD 6E 4E             CALL GIPP
+1338  4E32 C8            RET Z
+1339  4E33 CD 4F 4E             CALL CLUSSEC
+1340  4E36 ED 5B 6F 51          LD DE,(DABC)
+1341  4E3A B7                   OR A
+1341  4E3B ED 52         SBC HL,DE
+1341  4E3D D0            RET NC
+1342  4E3E
+1343  4E3E 2A 71 51             LD HL,(DAHL)
+1344  4E41 5E                   LD E,(HL)
+1344  4E42 23            INC HL
+1345  4E43 56                   LD D,(HL)
+1345  4E44 23            INC HL
+1346  4E45 7E                   LD A,(HL)
+1346  4E46 23            INC HL
+1347  4E47 66 6F                LD H,(HL),L,A
+1347  4E49 EB            EX DE,HL
+1348  4E4A
+1349  4E4A CD C5 44             CALL CURIT
+1350  4E4D 18 DD                JR CKAGO
+1351  4E4F
+1352  4E4F              ;-------
+1353  4E4F              CLUSSEC ;i:  (DADE) - Buffer Address
+1354  4E4F              ;          (BSECPC) - Sectors per CLUS
+1355  4E4F              ;           [DE,HL] - Sector number
+1356  4E4F              ;
+1357  4E4F              ;        o:  (DADE) - New Value
+1358  4E4F
+1359  4E4F 44 4D                LD BC,HL
+1360  4E51 3A 94 38             LD A,(BSECPC)
+1361  4E54 2A 73 51             LD HL,(DADE)
+1362  4E57 71           USS     LD (HL),C
+1362  4E58 23            INC HL
+1363  4E59 70                   LD (HL),B
+1363  4E5A 23            INC HL
+1364  4E5B 73                   LD (HL),E
+1364  4E5C 23            INC HL
+1365  4E5D 72                   LD (HL),D
+1365  4E5E 23            INC HL
+1366  4E5F 22 73 51             LD (DADE),HL
+1366  4E62 3D            DEC A
+1366  4E63 C8            RET Z
+1367  4E64
+1368  4E64 03                   INC BC
+1369  4E65 08                   EXA
+1369  4E66 78            LD A,B
+1369  4E67 B1            OR C
+1369  4E68 20 01         JR NZ,$+3
+1369  4E6A 13            INC DE
+1370  4E6B 08                   EXA
+1371  4E6C 18 E9                JR USS
+1372  4E6E
+1373  4E6E              ;-------
+1374  4E6E              GIPP    ;i:  HL(4) - Cluster number
+1375  4E6E              ;        o:[DE,HL] - Sector number
+1376  4E6E              ;                Z - EndOfChain
+1377  4E6E
+1378  4E6E 5E                   LD E,(HL)
+1378  4E6F 23            INC HL
+1379  4E70 56                   LD D,(HL)
+1379  4E71 23            INC HL
+1380  4E72 7E                   LD A,(HL)
+1380  4E73 23            INC HL
+1381  4E74 66 6F                LD H,(HL),L,A
+1381  4E76 B4 B3 B2      OR H,E,D
+1381  4E79 C8            RET Z
+1382  4E7A 7C                   LD A,H
+1382  4E7B FE 0F         CP #0F
+1382  4E7D C8            RET Z
+1383  4E7E EB                   EX DE,HL
+1384  4E7F
+1385  4E7F 01 02 00             LD BC,2
+1385  4E82 B7            OR A
+1385  4E83 ED 42         SBC HL,BC
+1385  4E85 30 01         JR NC,$+3
+1385  4E87 1B            DEC DE
+1386  4E88
+1387  4E88 3A 94 38             LD A,(BSECPC)
+1387  4E8B CD B8 50      CALL UMNOX2
+1388  4E8E ED 4B A4 38          LD BC,(SDFAT)
+1388  4E92 CD B4 50      CALL ADD4B
+1389  4E95 EB                   EX DE,HL
+1390  4E96 ED 4B A6 38          LD BC,(SDFAT+2)
+1390  4E9A 09            ADD HL,BC
+1391  4E9B EB                   EX DE,HL
+1392  4E9C CD 61 45             CALL XSPOZ
+1393  4E9F
+1394  4E9F AF                   XOR A
+1394  4EA0 3C            INC A
+1395  4EA1 C9                   RET
+1396  4EA2
+1397  4EA2              ;---------------------------------------
+1398  4EA2              ;SEARCH PARTITION:
+1399  4EA2              HDD     ;i:none
+1400  4EA2              ;        o:NZ - FAT32 not found
+1401  4EA2              ;           Z - all FAT32 vars are
+1402  4EA2              ;               initialized
+1403  4EA2
+1404  4EA2 21 00 00 54          LD HL,0,DE,HL
+1404  4EA6 5D
+1405  4EA7 22 A8 38 22          LD (CUHL),HL,(CUDE),HL
+1405  4EAB AA 38
+1406  4EAD 22 71 51 22          LD (DAHL),HL,(DADE),HL
+1406  4EB1 73 51
+1407  4EB3 22 B3 38 22          LD (DUHL),HL,(DUDE),HL
+1407  4EB7 B5 38
+1408  4EB9 CD 09 38             CALL XPOZI
+1409  4EBC 21 00 32 3E          LD HL,LOBU,A,1
+1409  4EC0 01
+1409  4EC1 CD 0F 38      CALL RDDSE
+1410  4EC4
+1411  4EC4 3E 03 32 B2          LD A,3,(COUNT),A,(ZES),A
+1411  4EC8 38 32 75 51
+1412  4ECC
+1413  4ECC 21 C2 33 11          LD HL,LOBU+446+4,DE,16,B,4
+1413  4ED0 10 00 06 04
+1414  4ED4 7E           KKO     LD A,(HL)
+1415  4ED5 FE 05                CP #05
+1415  4ED7 28 72         JR Z,OKK
+1416  4ED9 FE 0B                CP #0B
+1416  4EDB 28 6E         JR Z,OKK
+1417  4EDD FE 0C                CP #0C
+1417  4EDF 28 6A         JR Z,OKK
+1418  4EE1 FE 0F                CP #0F
+1418  4EE3 28 66         JR Z,OKK
+1419  4EE5 19                   ADD HL,DE
+1420  4EE6 10 EC                DJNZ KKO
+1421  4EE8
+1422  4EE8 3A 75 51     FHDD    LD A,(ZES)
+1422  4EEB B7            OR A
+1422  4EEC CA 2D 42      JP Z,Nhdd
+1423  4EEF
+1424  4EEF ED 5B 73 51          LD DE,(DADE),HL,(DAHL)
+1424  4EF3 2A 71 51
+1425  4EF6 CD 09 38             CALL XPOZI
+1426  4EF9
+1427  4EF9 21 00 32             LD HL,LOBU
+1427  4EFC 3E 01         LD A,1
+1427  4EFE CD 0F 38      CALL RDDSE
+1428  4F01
+1429  4F01 21 B2 38             LD HL,COUNT
+1429  4F04 35            DEC (HL)
+1429  4F05 CA 2D 50      JP Z,NHDD
+1430  4F08
+1431  4F08 21 CE 33 06          LD HL,LOBU+446+16,B,16
+1431  4F0C 10
+1432  4F0D AF                   XOR A
+1432  4F0E B6            OR (HL)
+1432  4F0F 23            INC HL
+1432  4F10 10 FC         DJNZ $-2
+1433  4F12 C2 2D 50             JP NZ,NHDD
+1434  4F15
+1435  4F15 2A D6 33             LD HL,(LOBU+446+16+8)
+1436  4F18 ED 5B D8 33          LD DE,(LOBU+446+16+8+2)
+1437  4F1C 22 5C 38 ED          LD (CLHL),HL,(CLDE),DE
+1437  4F20 53 5E 38
+1438  4F23 2A 71 51 ED          LD HL,(DAHL),DE,(DADE)
+1438  4F27 5B 73 51
+1439  4F2A CD E4 50             CALL ADD4BF
+1440  4F2D ED 53 73 51          LD (DADE),DE,(DAHL),HL
+1440  4F31 22 71 51
+1441  4F34 CD 09 38             CALL XPOZI
+1442  4F37
+1443  4F37 21 00 32 3E          LD HL,LOBU,A,1
+1443  4F3B 01
+1443  4F3C CD 0F 38      CALL RDDSE
+1444  4F3F
+1445  4F3F 2A C6 33             LD HL,(LOBU+446+8)
+1446  4F42 ED 5B C8 33          LD DE,(LOBU+446+8+2)
+1447  4F46 CD E4 50             CALL ADD4BF
+1448  4F49 18 0D                JR LDBPB
+1449  4F4B
+1450  4F4B 23 23 23 23  OKK     INC HL,HL,HL,HL
+1451  4F4F 5E                   LD E,(HL)
+1451  4F50 23            INC HL
+1452  4F51 56                   LD D,(HL)
+1452  4F52 23            INC HL
+1453  4F53 7E                   LD A,(HL)
+1453  4F54 23            INC HL
+1454  4F55 66 6F                LD H,(HL),L,A
+1455  4F57 EB                   EX DE,HL
+1456  4F58
+1457  4F58 22 9E 38 ED  LDBPB   LD (ADDTOP),HL,(ADDTOP+2),DE
+1457  4F5C 53 A0 38
+1458  4F5F CD 09 38             CALL XPOZI
+1459  4F62
+1460  4F62 21 00 32             LD HL,LOBU;LOAD BPB SECTOR
+1461  4F65 3E 01                LD A,1
+1461  4F67 CD 0F 38      CALL RDDSE
+1462  4F6A
+1463  4F6A 2A 0B 32             LD HL,(LOBU+11)
+1464  4F6D 7C                   LD A,H
+1464  4F6E 3D 3D         DEC A,A
+1464  4F70 B5            OR L
+1464  4F71 C2 E8 4E      JP NZ,FHDD
+1465  4F74 3A 0D 32             LD A,(LOBU+13)
+1465  4F77 B7            OR A
+1465  4F78 CA E8 4E      JP Z,FHDD
+1466  4F7B 3A 0E 32             LD A,(LOBU+14)
+1466  4F7E B7            OR A
+1466  4F7F CA E8 4E      JP Z,FHDD
+1467  4F82 3A 10 32             LD A,(LOBU+16)
+1467  4F85 B7            OR A
+1467  4F86 CA E8 4E      JP Z,FHDD
+1468  4F89
+1469  4F89 2A 11 32 7C          LD HL,(LOBU+17),A,H
+1469  4F8D B5            OR L
+1470  4F8E 2A 16 32             LD HL,(LOBU+22)
+1470  4F91 B4 B5         OR H,L
+1471  4F93 C2 E8 4E             JP NZ,FHDD
+1472  4F96 2A 24 32             LD HL,(LOBU+36)
+1472  4F99 B4 B5         OR H,L
+1473  4F9B 2A 26 32             LD HL,(LOBU+36+2)
+1473  4F9E B4 B5         OR H,L
+1474  4FA0 CA E8 4E             JP Z,FHDD
+1475  4FA3
+1476  4FA3 3A 0D 32 32          LD A,(LOBU+13),(BSECPC),A
+1476  4FA7 94 38
+1477  4FA9 06 08                LD B,8
+1477  4FAB CB 3F         SRL A
+1477  4FAD 38 04         JR C,NER
+1477  4FAF 10 FA         DJNZ $-4
+1477  4FB1 3E 01         LD A,1
+1478  4FB3 B7           NER     OR A
+1478  4FB4 C2 E8 4E      JP NZ,FHDD
+1479  4FB7 2A 0E 32 22          LD HL,(LOBU+14),(BREZS),HL
+1479  4FBB 89 38
+1480  4FBD 2A 30 32 11          LD HL,(LOBU+48),DE,0
+1480  4FC1 00 00
+1481  4FC3 CD 61 45             CALL XSPOZ
+1482  4FC6 22 8B 38 ED          LD (FSINF),HL,(FSINF+2),DE
+1482  4FCA 53 8D 38
+1483  4FCD
+1484  4FCD 3A 10 32 32          LD A,(LOBU+16),(BFATS),A
+1484  4FD1 8F 38
+1485  4FD3 2A 24 32 22          LD HL,(LOBU+36),(BFTSZ),HL
+1485  4FD7 90 38
+1486  4FD9 2A 26 32 22          LD HL,(LOBU+36+2),(BFTSZ+2),HL
+1486  4FDD 92 38
+1487  4FDF 2A 2C 32 22          LD HL,(LOBU+44),(BROOTC),HL
+1487  4FE3 96 38
+1488  4FE5 2A 2E 32 22          LD HL,(LOBU+44+2),(BROOTC+2),HL
+1488  4FE9 98 38
+1489  4FEB
+1490  4FEB 2A 90 38 ED          LD HL,(BFTSZ),DE,(BFTSZ+2)
+1490  4FEF 5B 92 38
+1491  4FF2 ED 4B 8F 38          LD BC,(BFATS),B,0
+1491  4FF6 06 00
+1492  4FF8 CD FB 50             CALL UMN4B
+1493  4FFB E5 D5                PUSH HL,DE
+1494  4FFD 2A 89 38             LD HL,(BREZS)
+1495  5000 22 A2 38             LD (SFAT),HL
+1496  5003 D1 C1                POP DE,BC
+1497  5005 CD B4 50             CALL ADD4B
+1498  5008 22 A4 38 ED          LD (SDFAT),HL,(SDFAT+2),DE
+1498  500C 53 A6 38
+1499  500F
+1500  500F 21 00 00             LD HL,0
+1501  5012 22 A8 38             LD (CUHL),HL
+1502  5015 22 AA 38             LD (CUDE),HL
+1503  5018 22 C8 38             LD (LSTCAT),HL
+1504  501B 22 CA 38             LD (LSTCAT+2),HL
+1505  501E 22 FE 37             LD (CGFL),HL;4 NXTETY
+1506  5021
+1507  5021              ;LD HL,(FSINF),DE,(FSINF+2)
+1508  5021              ;CALL XPOZI
+1509  5021              ;LD HL,LOBU
+1510  5021              ;LD A,1:CALL RDDSE
+1511  5021              ;LD HL,LOBU+492,DE,FSTFRC
+1512  5021              ;LD BC,4:LDIR
+1513  5021 21 9A 38 06          LD HL,FSTFRC,B,4
+1513  5025 04
+1513  5026 CD 67 51      CALL NOPING
+1514  5029
+1515  5029 CD 3D 51             CALL TOS
+1516  502C              ;XOR A
+1517  502C C9                   RET
+1518  502D
+1519  502D 2A B3 38 ED  NHDD    LD HL,(DUHL),DE,(DUDE)
+1519  5031 5B B5 38
+1520  5034 AF                   XOR A
+1520  5035 32 75 51      LD (ZES),A
+1521  5038 C3 58 4F             JP LDBPB
+1522  503B
+1523  503B              ;---------------------------------------
+1524  503B              ;ACTIVATE DRIVER:
+1525  503B              DOS_SWP ;i:A - device number
+1526  503B              ;              0 - IDE NemoMaster
+1527  503B              ;              1 - SD ZC
+1528  503B              ;              2 - SD NGS
+1529  503B              ;              3 - IDE SmucMaster
+1530  503B              ;              4 - IDE SmucSlave
+1531  503B              ;              5 - IDE NemoSlave
+1532  503B              ;              6 - SD2 ZC
+1533  503B
+1534  503B 06 00                LD B,0
+1535  503D 21 76 51             LD HL,DR1
+1535  5040 B7            OR A
+1535  5041 28 1F         JR Z,DRR;  0
+1536  5043 21 5D 53             LD HL,DR2
+1536  5046 3D            DEC A
+1536  5047 28 19         JR Z,DRR; 1
+1537  5049 21 01 56             LD HL,DR3
+1537  504C 3D            DEC A
+1537  504D 28 13         JR Z,DRR; 2
+1538  504F 21 33 59             LD HL,DR4
+1538  5052 3D            DEC A
+1538  5053 28 0D         JR Z,DRR; 3
+1539  5055 04                   INC B
+1539  5056 3D            DEC A
+1539  5057 28 09         JR Z,DRR;     4
+1540  5059 21 76 51             LD HL,DR1
+1540  505C 3D            DEC A
+1540  505D 28 03         JR Z,DRR; 5
+1541  505F 21 5D 53             LD HL,DR2;                6
+1542  5062
+1543  5062 DD E5        DRR     PUSH IX
+1544  5064 11 00 38             LD DE,DRVR
+1545  5067 C5                   PUSH BC
+1545  5068 CD AA 5A      CALL DEHR
+1546  506B F1                   POP AF
+1546  506C CD 00 38      CALL SELDEV
+1547  506F DD E1                POP IX
+1548  5071 C9                   RET
+1549  5072
+1550  5072              ;---------------------------------------
+1551  5072              ;ARITHMETICS BLOCK:
+1552  5072              DEL128  ;i:[DE,HL]/128
+1553  5072              ;        o:[DE,HL]
+1554  5072              ;          BC - Remainder
+1555  5072
+1556  5072 7D                   LD A,L
+1556  5073 08            EXA
+1557  5074 7D 6C 63 5A          LD A,L,L,H,H,E,E,D,D,0
+1557  5078 16 00
+1558  507A 17                   RLA
+1559  507B CB 15 CB 14          RL L,H,E,D
+1559  507F CB 13 CB 12
+1560  5083 08                   EXA
+1561  5084 E6 7F                AND 127
+1562  5086 06 00 4F             LD B,0,C,A
+1563  5089 C9                   RET
+1564  508A
+1565  508A              DEL512  ;i:[DE,HL]/512
+1566  508A 7D 6C 63 5A          LD A,L,L,H,H,E,E,D,D,0
+1566  508E 16 00
+1567  5090 01 01 00             LD BC,1
+1567  5093 B7            OR A
+1567  5094 C4 B4 50      CALL NZ,ADD4B
+1568  5097 3E 02                LD A,2
+1569  5099
+1570  5099              DELITX2 ;i:[DE,HL]/A
+1571  5099              ;                A - Power of Two
+1572  5099              ;        o:[DE,HL]
+1573  5099
+1574  5099 FE 02                CP 2
+1574  509B D8            RET C
+1575  509C 0E 00                LD C,0
+1576  509E CB 3F                SRL A
+1577  50A0 CB 3A        L33T    SRL D
+1577  50A2 CB 1B CB 1C   RR E,H,L,C
+1577  50A6 CB 1D CB 19
+1578  50AA CB 3F                SRL A
+1578  50AC 30 F2         JR NC,L33T
+1579  50AE
+1580  50AE 79                   LD A,C
+1580  50AF B7            OR A
+1580  50B0 C8            RET Z
+1581  50B1 01 01 00             LD BC,1
+1582  50B4
+1583  50B4 09           ADD4B   ADD HL,BC
+1583  50B5 D0            RET NC
+1583  50B6 13            INC DE
+1584  50B7 C9                   RET
+1585  50B8
+1586  50B8              UMNOX2  ;i:[DE,HL]*A
+1587  50B8              ;                A - Power of Two
+1588  50B8              ;        o:[DE,HL]
+1589  50B8
+1590  50B8 FE 02                CP 2
+1590  50BA D8            RET C
+1591  50BB CB 3F                SRL A
+1592  50BD CB 25        L33t    SLA L
+1592  50BF CB 14 CB 13   RL H,E,D
+1592  50C3 CB 12
+1593  50C5 CB 3F                SRL A
+1593  50C7 30 F4         JR NC,L33t
+1594  50C9 C9                   RET
+1595  50CA
+1596  50CA              UMNOG   ;HL*BC=HL DEdest
+1597  50CA 54 5D                LD DE,HL
+1598  50CC 78 41 4F             LD A,B,B,C,C,A
+1598  50CF 0C            INC C
+1599  50D0 AF                   XOR A
+1599  50D1 05            DEC B
+1599  50D2 28 03         JR Z,ODN
+1600  50D4 19           BSR     ADD HL,DE
+1601  50D5 10 FD                DJNZ BSR
+1602  50D7 47           ODN     LD B,A
+1603  50D8 0D                   DEC C
+1604  50D9 20 F9                JR NZ,BSR
+1605  50DB C9                   RET
+1606  50DC
+1607  50DC 06 04        INC4b   LD B,4
+1608  50DE 34           EkE     INC (HL)
+1608  50DF C0            RET NZ
+1608  50E0 23            INC HL
+1608  50E1 10 FB         DJNZ EkE
+1609  50E3 C9                   RET
+1610  50E4
+1611  50E4              ADD4BF  ;i:[DE,HL]+[CLDE,CLHL]
+1612  50E4              ;        o:[DE,HL]
+1613  50E4 EB                   EX DE,HL
+1614  50E5 ED 4B 5E 38          LD BC,(CLDE)
+1615  50E9 09                   ADD HL,BC
+1616  50EA EB                   EX DE,HL
+1617  50EB ED 4B 5C 38          LD BC,(CLHL)
+1618  50EF 09                   ADD HL,BC
+1618  50F0 30 01         JR NC,KNH
+1619  50F2 13                   INC DE
+1620  50F3 22 5C 38     KNH     LD (CLHL),HL
+1621  50F6 ED 53 5E 38          LD (CLDE),DE
+1622  50FA C9                   RET
+1623  50FB
+1624  50FB              UMN4B   ;i:[DE,HL]*BC o:[DE,HL]
+1625  50FB 78 41 4F             LD A,B,B,C,C,A
+1625  50FE 0C            INC C
+1626  50FF B7                   OR A
+1626  5100 20 04         JR NZ,TEKNO
+1627  5102 05                   DEC B
+1627  5103 28 2C         JR Z,UMN1
+1628  5105 04                   INC B
+1629  5106 AF           TEKNO   XOR A
+1630  5107 B8                   CP B
+1630  5108 20 01         JR NZ,TYS
+1631  510A 0D                   DEC C
+1632  510B 05           TYS     DEC B
+1633  510C E5 C5                PUSH HL,BC
+1634  510E 62 6B                LD HL,DE
+1635  5110 B8                   CP B
+1635  5111 28 04         JR Z,NEGRY
+1636  5113 19           EFRO    ADD HL,DE
+1637  5114 10 FD                DJNZ EFRO
+1638  5116 47                   LD B,A
+1639  5117 0D           NEGRY   DEC C
+1639  5118 20 F9         JR NZ,EFRO
+1640  511A 22 56 38             LD (REZDE),HL
+1641  511D C1 E1                POP BC,HL
+1642  511F 54 5D                LD DE,HL
+1643  5121 B8                   CP B
+1643  5122 28 06         JR Z,NEGRA
+1644  5124 19           OFER    ADD HL,DE
+1645  5125 38 0B                JR C,INCDE
+1646  5127 10 FB        ENJO    DJNZ OFER
+1647  5129 47                   LD B,A
+1648  512A 0D           NEGRA   DEC C
+1648  512B 20 F7         JR NZ,OFER
+1649  512D ED 5B 56 38          LD DE,(REZDE)
+1650  5131 C9           UMN1    RET
+1651  5132 D9           INCDE   EXX
+1652  5133 2A 56 38             LD HL,(REZDE)
+1653  5136 23                   INC HL
+1654  5137 22 56 38             LD (REZDE),HL
+1655  513A D9                   EXX
+1656  513B 18 EA                JR ENJO
+1657  513D              ;---------------------------------------
+1658  513D AF           TOS     XOR A
+1658  513E 32 48 38 32   LD (NSDC),A,(EOC),A
+1658  5142 49 38
+1659  5144 C9                   RET
+1660  5145
+1661  5145 22 5D 51     NOPCLA  LD (NOPCA+1),HL
+1662  5148 3D           NOPC    DEC A
+1662  5149 C8            RET Z
+1663  514A F5                   PUSH AF
+1664  514B 2A 64 38 ED          LD HL,(LTHL),DE,(LTDE)
+1664  514F 5B 66 38
+1665  5152 01 01 00             LD BC,1
+1665  5155 09            ADD HL,BC
+1666  5156 30 01                JR NC,$+3
+1666  5158 13            INC DE
+1667  5159 CD 09 38             CALL XPOZI
+1668  515C
+1669  515C 21 00 00 3E  NOPCA   LD HL,0,A,1
+1669  5160 01
+1669  5161 CD 12 38      CALL SDDSE
+1670  5164 F1                   POP AF
+1671  5165 18 E1                JR NOPC
+1672  5167
+1673  5167 AF           NOPING  XOR A
+1673  5168 77            LD (HL),A
+1673  5169 23            INC HL
+1673  516A 10 FC         DJNZ $-2
+1674  516C C9                   RET
+1675  516D              ;---------------------------------------
+1676  516D 00 00        GARY    DS 2;see MKSG
+1677  516F
+1678  516F 00 00        DABC    DS 2;see CHTOSE
+1679  5171 00 00        DAHL    DS 2;see HDD proc.
+1680  5173 00 00        DADE    DS 2; /
+1681  5175 00           ZES     NOP ;/
+1682  5176
+1683  5176              DR1     INCBIN "../../source/WDOSFC35.CCB",#1182,#01E7
+1684  535D              DR2     INCBIN "../../source/WDOSFC35.CCB",#1369,#02A4
+1685  5601              DR3     INCBIN "../../source/WDOSFC35.CCB",#160D,#0332
+1686  5933              DR4     INCBIN "../../source/WDOSFC35.CCB",#193F,#0177
+1687  5AAA              DEHR    INCLUDE "../../source/DEHR2.ASM"
+# file opened: DEHR2.ASM
+   1+ 5AAA              ; DEHR2 — распаковщик драйверов WildDOS из Hrust-подобного контейнера.
+   2+ 5AAA              ; Физический адрес в boot.$C: #DAB6; рабочий адрес после копирования: #5AAA.
+   3+ 5AAA              ;
+   4+ 5AAA              ; Основные этапы:
+   5+ 5AAA              ;   DEHR_UNPACK_DRIVER          — прочитать размеры и подготовить размещение;
+   6+ 5AAA              ;   DEHR_MOVE_OVERLAPPED_STREAM — безопасно перенести перекрывающийся поток;
+   7+ 5AAA              ;   DEHR_SAVE_LAST_6_BYTES      — сохранить хвост результата из заголовка;
+   8+ 5AAA              ;   DEHR_TOKEN_LOOP             — основной цикл литералов и LZ-совпадений;
+   9+ 5AAA              ;   DEHR_DECODE_MATCH_LENGTH    — декодировать длину совпадения;
+  10+ 5AAA              ;   DEHR_DECODE_MATCH_OFFSET    — декодировать отрицательное смещение;
+  11+ 5AAA              ;   DEHR_COPY_MATCH             — скопировать ранее распакованные байты;
+  12+ 5AAA              ;   DEHR_EXTENDED_COMMAND       — длинные команды и терминатор;
+  13+ 5AAA              ;   DEHR_APPEND_LAST_6_BYTES    — дописать сохранённый хвост;
+  14+ 5AAA              ;   DEHR_REFILL_16_BITS         — пополнить 16-битный битовый резервуар.
+  15+ 5AAA              ;
+  16+ 5AAA              ; Вход:
+  17+ 5AAA              ;   HL — начало упакованного блока с сигнатурой "HR";
+  18+ 5AAA              ;   DE — начало области результата (DOS_SWP передаёт #3800).
+  19+ 5AAA              ; Выход:
+  20+ 5AAA              ;   распакованный драйвер записан начиная с исходного DE;
+  21+ 5AAA              ;   отдельного кода состояния нет.
+  22+ 5AAA              ; Разрушаются:
+  23+ 5AAA              ;   AF, BC, DE, HL, альтернативный набор регистров и IX.
+  24+ 5AAA              ;
+  25+ 5AAA              ; Формат блока, доказанный кодом ниже и четырьмя встроенными драйверами:
+  26+ 5AAA              ;   +0..+1  48 52, сигнатура "HR";
+  27+ 5AAA              ;   +2..+3  размер результата, little-endian;
+  28+ 5AAA              ;   +4..+5  полный размер упакованного блока, little-endian;
+  29+ 5AAA              ;   +6..+11 последние шесть байт результата;
+  30+ 5AAA              ;   +12..   поток команд и литералов.
+  31+ 5AAA              ; Сигнатура "HR" самой процедурой не проверяется: первые два байта просто
+  32+ 5AAA              ; пропускаются. Контрольной суммы, проверки границ и кода ошибки нет;
+  33+ 5AAA              ; вызывающая сторона обязана передать корректные размеры и поток с терминатором.
+  34+ 5AAA              ;
+  35+ 5AAA              ; Физически процедура лежит в boot.$C по #DAB6, но после установки WildDOS
+  36+ 5AAA              ; исполняется по #5AAA. Поэтому BOOT_DISASM.ASM включает этот исходник внутри
+  37+ 5AAA              ; DISP #5AAA: абсолютные CALL должны вычисляться относительно рабочего адреса.
+  38+ 5AAA              DEHR_UNPACK_DRIVER:
+  39+ 5AAA D5           DEHRUST PUSH DE            ; Сохранить адрес начала результата.
+  40+ 5AAB E5                   PUSH HL
+  41+ 5AAC 23                   INC HL
+  42+ 5AAD 23                   INC HL
+  43+ 5AAE 4E                   LD C,(HL)          ; BC = размер распакованного результата (+2).
+  44+ 5AAF 23                   INC HL
+  45+ 5AB0 46                   LD B,(HL)
+  46+ 5AB1 23                   INC HL
+  47+ 5AB2 0B                   DEC BC
+  48+ 5AB3 EB                   EX DE,HL
+  49+ 5AB4 09                   ADD HL,BC          ; DE = адрес последнего байта результата.
+  50+ 5AB5 EB                   EX DE,HL
+  51+ 5AB6 4E                   LD C,(HL)          ; BC = полный размер упакованного блока (+4).
+  52+ 5AB7 23                   INC HL
+  53+ 5AB8 46                   LD B,(HL)
+  54+ 5AB9 0B                   DEC BC
+  55+ 5ABA E1                   POP HL
+  56+ 5ABB 09                   ADD HL,BC          ; HL = последний байт упакованного блока.
+  57+ 5ABC ED 52                SBC HL,DE
+  58+ 5ABE 19                   ADD HL,DE
+  59+ 5ABF 38 02                JR C,LL4019
+  60+ 5AC1 54                   LD D,H
+  61+ 5AC2 5D                   LD E,L
+  62+ 5AC3              ; Если вход пересекается с будущим результатом, поток переносится с конца.
+  63+ 5AC3              ; Направление LDDR не позволяет ещё не прочитанным байтам быть затёртыми.
+  64+ 5AC3              DEHR_MOVE_OVERLAPPED_STREAM:
+  65+ 5AC3 ED B8        LL4019  LDDR
+  66+ 5AC5 EB                   EX DE,HL
+  67+ 5AC6 D1                   POP DE
+  68+ 5AC7 0E 0C                LD C,#0C           ; Пропустить 12-байтовую служебную часть.
+  69+ 5AC9 09                   ADD HL,BC
+  70+ 5ACA E5                   PUSH HL
+  71+ 5ACB DD E1                POP IX             ; IX указывает на первый байт потока.
+  72+ 5ACD 3E 03                LD A,#03
+  73+ 5ACF              ; Три слова из +6..+11 временно сохраняются на стеке. При завершении они
+  74+ 5ACF              ; дописываются как последние шесть байт результата.
+  75+ 5ACF              DEHR_SAVE_LAST_6_BYTES:
+  76+ 5ACF 2B           LL4025  DEC HL
+  77+ 5AD0 46                   LD B,(HL)
+  78+ 5AD1 2B                   DEC HL
+  79+ 5AD2 4E                   LD C,(HL)
+  80+ 5AD3 C5                   PUSH BC
+  81+ 5AD4 3D                   DEC A
+  82+ 5AD5 20 F8                JR NZ,LL4025
+  83+ 5AD7 47                   LD B,A
+  84+ 5AD8 D9                   EXX
+  85+ 5AD9 16 BF                LD D,#BF           ; Адаптивное состояние кодирования смещения.
+  86+ 5ADB 0E 10                LD C,#10           ; Пополнение битового резервуара идёт по 16 бит.
+  87+ 5ADD CD BB 5B             CALL LL4115
+  88+ 5AE0              ; Литеральный токен: один байт копируется из потока непосредственно в DE.
+  89+ 5AE0              DEHR_OUTPUT_LITERAL:
+  90+ 5AE0 DD 7E 00     LL4036  LD A,(IX+#00)
+  91+ 5AE3 DD 23                INC IX
+  92+ 5AE5 D9                   EXX
+  93+ 5AE6 12           LL403C  LD (DE),A
+  94+ 5AE7 13                   INC DE
+  95+ 5AE8              ; Основной цикл токенов. HL' — битовый резервуар, B' — число доступных битов.
+  96+ 5AE8              DEHR_TOKEN_LOOP:
+  97+ 5AE8 D9           LL403E  EXX
+  98+ 5AE9              DEHR_READ_TOKEN_BIT:
+  99+ 5AE9 29           LL403F  ADD HL,HL
+ 100+ 5AEA 10 03                DJNZ LL4045
+ 101+ 5AEC CD BB 5B             CALL LL4115
+ 102+ 5AEF 38 EF        LL4045  JR C,LL4036
+ 103+ 5AF1 1E 01                LD E,#01
+ 104+ 5AF3              ; Декодирование длины совпадения переменным префиксным кодом.
+ 105+ 5AF3              DEHR_DECODE_MATCH_LENGTH:
+ 106+ 5AF3 3E 80        LL4049  LD A,#80
+ 107+ 5AF5 29           LL404B  ADD HL,HL
+ 108+ 5AF6 10 03                DJNZ LL4051
+ 109+ 5AF8 CD BB 5B             CALL LL4115
+ 110+ 5AFB 17           LL4051  RLA
+ 111+ 5AFC 38 F7                JR C,LL404B
+ 112+ 5AFE FE 03                CP #03
+ 113+ 5B00 38 05                JR C,LL405D
+ 114+ 5B02 83                   ADD A,E
+ 115+ 5B03 5F                   LD E,A
+ 116+ 5B04 A9                   XOR C
+ 117+ 5B05 20 EC                JR NZ,LL4049
+ 118+ 5B07 83           LL405D  ADD A,E
+ 119+ 5B08 FE 04                CP #04
+ 120+ 5B0A 28 62                JR Z,LL40C4
+ 121+ 5B0C CE FF                ADC A,#FF
+ 122+ 5B0E FE 02                CP #02
+ 123+ 5B10 D9                   EXX
+ 124+ 5B11              DEHR_STORE_MATCH_LENGTH:
+ 125+ 5B11 4F           LL4067  LD C,A
+ 126+ 5B12 D9           LL4068  EXX
+ 127+ 5B13 3E BF                LD A,#BF
+ 128+ 5B15 38 15                JR C,LL4082
+ 129+ 5B17              ; Декодирование отрицательного смещения до уже выведенных данных.
+ 130+ 5B17              DEHR_DECODE_MATCH_OFFSET:
+ 131+ 5B17 29           LL406D  ADD HL,HL
+ 132+ 5B18 10 03                DJNZ LL4073
+ 133+ 5B1A CD BB 5B             CALL LL4115
+ 134+ 5B1D 17           LL4073  RLA
+ 135+ 5B1E 38 F7                JR C,LL406D
+ 136+ 5B20 28 05                JR Z,LL407D
+ 137+ 5B22 3C                   INC A
+ 138+ 5B23 82                   ADD A,D
+ 139+ 5B24 30 08                JR NC,LL4084
+ 140+ 5B26 92                   SUB D
+ 141+ 5B27 3C           LL407D  INC A
+ 142+ 5B28 20 0D                JR NZ,LL408D
+ 143+ 5B2A 3E EF                LD A,#EF
+ 144+ 5B2C 0F           LL4082  RRCA
+ 145+ 5B2D BF                   CP A
+ 146+ 5B2E 29           LL4084  ADD HL,HL
+ 147+ 5B2F 10 03                DJNZ LL408A
+ 148+ 5B31 CD BB 5B             CALL LL4115
+ 149+ 5B34 17           LL408A  RLA
+ 150+ 5B35 38 F7                JR C,LL4084
+ 151+ 5B37              DEHR_BUILD_MATCH_OFFSET:
+ 152+ 5B37 D9           LL408D  EXX
+ 153+ 5B38 26 FF                LD H,#FF
+ 154+ 5B3A 28 09                JR Z,LL409B
+ 155+ 5B3C 67                   LD H,A
+ 156+ 5B3D 3C                   INC A
+ 157+ 5B3E DD 7E 00             LD A,(IX+#00)
+ 158+ 5B41 DD 23                INC IX
+ 159+ 5B43 28 0B                JR Z,LL40A6
+ 160+ 5B45              ; HL = DE + отрицательное смещение; BC содержит длину совпадения.
+ 161+ 5B45              DEHR_COPY_MATCH:
+ 162+ 5B45 6F           LL409B  LD L,A
+ 163+ 5B46 19                   ADD HL,DE
+ 164+ 5B47 ED B0                LDIR
+ 165+ 5B49 18 9D        LL409F  JR LL403E
+ 166+ 5B4B              DEHR_CHANGE_OFFSET_CONTEXT:
+ 167+ 5B4B D9           LL40A1  EXX
+ 168+ 5B4C CB 0A                RRC D
+ 169+ 5B4E 18 99                JR LL403F
+ 170+ 5B50              ; Специальные коды коротких и контекстных смещений.
+ 171+ 5B50              DEHR_SPECIAL_OFFSET_CODE:
+ 172+ 5B50 FE E0        LL40A6  CP #E0
+ 173+ 5B52 38 F1                JR C,LL409B
+ 174+ 5B54 07                   RLCA
+ 175+ 5B55 A9                   XOR C
+ 176+ 5B56 3C                   INC A
+ 177+ 5B57 28 F2                JR Z,LL40A1
+ 178+ 5B59 D6 10                SUB #10
+ 179+ 5B5B              ; Короткое совпадение с последующим литералом.
+ 180+ 5B5B              DEHR_SHORT_MATCH_WITH_LITERAL:
+ 181+ 5B5B 6F           LL40B1  LD L,A
+ 182+ 5B5C 4F                   LD C,A
+ 183+ 5B5D 26 FF                LD H,#FF
+ 184+ 5B5F 19                   ADD HL,DE
+ 185+ 5B60 ED A0                LDI
+ 186+ 5B62 DD 7E 00             LD A,(IX+#00)
+ 187+ 5B65 DD 23                INC IX
+ 188+ 5B67 12                   LD (DE),A
+ 189+ 5B68 23                   INC HL
+ 190+ 5B69 13                   INC DE
+ 191+ 5B6A 7E                   LD A,(HL)
+ 192+ 5B6B C3 E6 5A             JP LL403C
+ 193+ 5B6E              ; Расширенная команда: длинное совпадение, блок литералов либо конец потока.
+ 194+ 5B6E              DEHR_EXTENDED_COMMAND:
+ 195+ 5B6E 3E 80        LL40C4  LD A,#80
+ 196+ 5B70 29           LL40C6  ADD HL,HL
+ 197+ 5B71 10 03                DJNZ LL40CC
+ 198+ 5B73 CD BB 5B             CALL LL4115
+ 199+ 5B76 8F           LL40CC  ADC A,A
+ 200+ 5B77 20 20                JR NZ,LL40F3
+ 201+ 5B79 38 F5                JR C,LL40C6
+ 202+ 5B7B 3E FC                LD A,#FC
+ 203+ 5B7D 18 1D                JR LL40F6
+ 204+ 5B7F              DEHR_LENGTH_FROM_STREAM_BYTE:
+ 205+ 5B7F 47           LL40D5  LD B,A
+ 206+ 5B80 DD 4E 00             LD C,(IX+#00)
+ 207+ 5B83 DD 23                INC IX
+ 208+ 5B85 3F                   CCF
+ 209+ 5B86 18 8A                JR LL4068
+ 210+ 5B88              DEHR_CHECK_END_MARKER:
+ 211+ 5B88 FE 0F        LL40DE  CP #0F
+ 212+ 5B8A 38 F3                JR C,LL40D5
+ 213+ 5B8C 20 83                JR NZ,LL4067
+ 214+ 5B8E 06 03                LD B,#03
+ 215+ 5B90 EB                   EX DE,HL
+ 216+ 5B91              ; Терминатор #0F: восстановить три сохранённых слова и дописать хвост.
+ 217+ 5B91              DEHR_APPEND_LAST_6_BYTES:
+ 218+ 5B91 D1           LL40E7  POP DE
+ 219+ 5B92 73                   LD (HL),E
+ 220+ 5B93 23                   INC HL
+ 221+ 5B94 72                   LD (HL),D
+ 222+ 5B95 23                   INC HL
+ 223+ 5B96 10 F9                DJNZ LL40E7
+ 224+ 5B98 C9                   RET
+ 225+ 5B99              ;-------
+ 226+ 5B99              DEHR_EXTENDED_PREFIX:
+ 227+ 5B99 9F           LL40F3  SBC A,A
+ 228+ 5B9A 3E EF                LD A,#EF
+ 229+ 5B9C 29           LL40F6  ADD HL,HL
+ 230+ 5B9D 10 03                DJNZ LL40FC
+ 231+ 5B9F CD BB 5B             CALL LL4115
+ 232+ 5BA2 17           LL40FC  RLA
+ 233+ 5BA3 38 F7                JR C,LL40F6
+ 234+ 5BA5 D9                   EXX
+ 235+ 5BA6 20 B3                JR NZ,LL40B1
+ 236+ 5BA8 CB 7F                BIT 7,A
+ 237+ 5BAA 28 DC                JR Z,LL40DE
+ 238+ 5BAC D6 EA                SUB #EA
+ 239+ 5BAE 87                   ADD A,A
+ 240+ 5BAF 47                   LD B,A
+ 241+ 5BB0              ; Блок несжатых литералов; B задаёт число копируемых байтов.
+ 242+ 5BB0              DEHR_COPY_LITERAL_RUN:
+ 243+ 5BB0 DD 7E 00     LL410A  LD A,(IX+#00)
+ 244+ 5BB3 DD 23                INC IX
+ 245+ 5BB5 12                   LD (DE),A
+ 246+ 5BB6 13                   INC DE
+ 247+ 5BB7 10 F7                DJNZ LL410A
+ 248+ 5BB9 18 8E                JR LL409F
+ 249+ 5BBB              ; Пополнить битовый резервуар следующим 16-битным словом потока.
+ 250+ 5BBB              DEHR_REFILL_16_BITS:
+ 251+ 5BBB 41           LL4115  LD B,C
+ 252+ 5BBC DD 6E 00             LD L,(IX+#00)
+ 253+ 5BBF DD 23                INC IX
+ 254+ 5BC1 DD 66 00             LD H,(IX+#00)
+ 255+ 5BC4 DD 23                INC IX
+ 256+ 5BC6 C9                   RET
+ 257+ 5BC7              LCODE   EQU $-DEHRUST      ; Размер процедуры: #011D (285 байт).
+ 258+ 5BC7
+# file closed: DEHR2.ASM
+1688  5BC7                      ASSERT DR1 == #5176
+1689  5BC7                      ASSERT DR2 == #535D
+1690  5BC7                      ASSERT DR3 == #5601
+1691  5BC7                      ASSERT DR4 == #5933
+1692  5BC7                      ASSERT DEHR == #5AAA
+1693  5BC7                      ASSERT $ == #5BC7
+1694  5BC7              END
+1695  5BC7
+# file closed: CORE32_EXACT_TEST.ASM

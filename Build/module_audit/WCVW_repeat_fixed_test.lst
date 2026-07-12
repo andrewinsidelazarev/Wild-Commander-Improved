@@ -1,0 +1,2592 @@
+# file opened: WCVW_repeat_fixed_test.ASM
+   1  0000                      ORG #9149
+   2  9149
+   3  9149              HEI     EQU #600E
+   4  9149              F3ENTFL EQU #6017
+   5  9149              LOBU    EQU #B000
+   6  9149              LOBULO  EQU #B200
+   7  9149              LOBUL2  EQU #B400
+   8  9149              PLHPG   EQU #60
+   9  9149              PLGPG   EQU #61
+  10  9149              PLEPG   EQU #A0
+  11  9149              PLGOV   EQU #02
+  12  9149              PLGCV   EQU #10
+  13  9149              MAXOP   EQU 8
+  14  9149              BASIC48 EQU #03
+  15  9149              MTXPG   EQU #00
+  16  9149              DBPG    EQU #F4
+  17  9149              D5PG    EQU #F5
+  18  9149              D2PG    EQU #F6
+  19  9149              MLZ4    EQU #FE00
+  20  9149              DEHR1   EQU #FEE9
+  21  9149              Vmod    EQU #00AF
+  22  9149              Vpag    EQU #01AF
+  23  9149              PW0     EQU #10AF
+  24  9149              PW1     EQU #11AF
+  25  9149              PW2     EQU #12AF
+  26  9149              PW4     EQU #13AF
+  27  9149              PE0     EQU #21AF
+  28  9149              DMASL   EQU #1AAF
+  29  9149              DMASH   EQU #1BAF
+  30  9149              DMASX   EQU #1CAF
+  31  9149              DMADL   EQU #1DAF
+  32  9149              DMADH   EQU #1EAF
+  33  9149              DMADX   EQU #1FAF
+  34  9149              DMA_N   EQU #26AF
+  35  9149              DMA_C   EQU #27AF
+  36  9149              DMA_T   EQU #28AF
+  37  9149              STS     EQU #27AF
+  38  9149              GED     EQU #699F
+  39  9149              MNG8    EQU #68B1
+  40  9149              MNGC    EQU #68C1
+  41  9149              MNGC_PL EQU #68F9
+  42  9149              NOPING  EQU #6999
+  43  9149              BOF     EQU #6A8F
+  44  9149              NYAU    EQU #709D
+  45  9149              NYAA    EQU #70A3
+  46  9149              ENV     EQU #7106
+  47  9149              RAJT    EQU #70C1
+  48  9149              AJT     EQU #70C3
+  49  9149              CrDN    EQU #6285
+  50  9149              CrUP    EQU #628E
+  51  9149              CrPU    EQU #6296
+  52  9149              CrPD    EQU #629F
+  53  9149              YN      EQU #6673
+  54  9149              ESC     EQU #749A
+  55  9149              PRWOW   EQU #792C
+  56  9149              RRESB   EQU #7ACE
+  57  9149              GIPAG   EQU #4012
+  58  9149              LOAD512 EQU #4015
+  59  9149              SEXY    EQU #8D39
+  60  9149              DLME    EQU #902F
+  61  9149              ERR0    EQU #90DE
+  62  9149              SRHSQ   EQU #9DC9
+  63  9149              TXT2PR  EQU #A219
+  64  9149              EDTPR   EQU #A226
+  65  9149              SUU     EQU #A308
+  66  9149              RAZ     EQU #A72B
+  67  9149              IDNT    EQU #AB24
+  68  9149              IDNT2   EQU #AB30
+  69  9149
+  70  9149                      INCLUDE "WCVW_repeat_fixed.ASM"
+# file opened: WCVW_repeat_fixed.ASM
+   1+ 9149              ;-------
+   2+ 9149 CD 1C 62 CD  NXTFL   CALL CRDN,STATUS
+   2+ 914D 47 87
+   2+ 914F C3 BA 92      JP VIEW
+   3+ 9152 CD 61 62 CD  PRVFL   CALL CRUP,STATUS
+   3+ 9156 47 87
+   3+ 9158 C3 BA 92      JP VIEW
+   4+ 915B              ;---------------------------------------
+   5+ 915B CD FE 62     EXTZEL  CALL GETEN
+   5+ 915E C8            RET Z
+   6+ 915F 7C                   LD A,H
+   6+ 9160 B5            OR L
+   6+ 9161 C8            RET Z
+   7+ 9162 CD 3E 91             CALL TOBUX
+   8+ 9165 21 28 7F             LD HL,BRRR
+   8+ 9168 CD 12 40      CALL GIPAG
+   9+ 916B
+  10+ 916B CD 9F 69     EXTSEL  CALL GED
+  11+ 916E
+  12+ 916E DD 7E 02             LD A,(IX+2)
+  12+ 9171 C6 02         ADD A,2
+  13+ 9173 32 9A 80             LD (GRWND+2),A
+  14+ 9176
+  15+ 9176 DD 7E 03             LD A,(IX+3)
+  16+ 9179 DD 86 0C             ADD A,(IX+12)
+  17+ 917C C6 02                ADD A,2;SUB 3:JR NC,$+3:XOR A
+  18+ 917E 32 9B 80             LD (GRWND+3),A
+  19+ 9181
+  20+ 9181 DD E5                PUSH IX
+  21+ 9183 3A 19 7F 0E          LD A,(PHED+1),C,0
+  21+ 9187 00
+  22+ 9188 FE C2                CP #C2
+  22+ 918A 38 43         JR C,GEE
+  23+ 918C
+  24+ 918C 3E 60                LD A,PLHPG
+  24+ 918E CD C1 68      CALL MNGC
+  25+ 9191 21 C5 C0 11          LD HL,#C000+197,DE,LOBU
+  25+ 9195 00 B0
+  26+ 9197
+  27+ 9197 7E           ZkL2    LD A,(HL)
+  28+ 9198 FE 04                CP #04
+  28+ 919A 28 0D         JR Z,GREEGO
+  29+ 919C FE 05                CP #05
+  29+ 919E 28 09         JR Z,GREEGO
+  30+ 91A0 FE 15                CP #15
+  30+ 91A2 28 05         JR Z,GREEGO
+  31+ 91A4 01 00 02             LD BC,512
+  31+ 91A7 18 0B         JR GREE
+  32+ 91A9 01 07 00     GREEGO  LD BC,7
+  32+ 91AC 09            ADD HL,BC
+  32+ 91AD 0E 18         LD C,24
+  32+ 91AF ED B0         LDIR
+  33+ 91B1 01 E1 01             LD BC,512-24-7
+  34+ 91B4 09           GREE    ADD HL,BC
+  35+ 91B5 3A 19 7F             LD A,(PHED+1)
+  35+ 91B8 BC            CP H
+  35+ 91B9 20 DC         JR NZ,ZkL2
+  36+ 91BB
+  37+ 91BB AF                   XOR A
+  38+ 91BC EB                   EX DE,HL
+  38+ 91BD 77            LD (HL),A
+  39+ 91BE
+  40+ 91BE 21 00 B0 11          LD HL,LOBU,DE,24,BC,MAXOP*256
+  40+ 91C2 18 00 01 00
+  40+ 91C6 08
+  41+ 91C7 7E           GREEOP  LD A,(HL)
+  41+ 91C8 B7            OR A
+  41+ 91C9 28 04         JR Z,GEE
+  42+ 91CB 19                   ADD HL,DE
+  42+ 91CC 0C            INC C
+  42+ 91CD 10 F8         DJNZ GREEOP
+  43+ 91CF
+  44+ 91CF 79           GEE     LD A,C
+  45+ 91D0 DD 21 98 80          LD IX,GRWND
+  46+ 91D4 F5                   PUSH AF
+  47+ 91D5 C6 00                ADD A,BASEOP
+  47+ 91D7 DD 77 0D      LD (IX+13),A
+  48+ 91DA DD BE 0C             CP (IX+12)
+  48+ 91DD 30 04         JR NC,W850
+  49+ 91DF DD 36 0C 01          LD (IX+12),1
+  50+ 91E3 C6 02        W850    ADD A,2
+  50+ 91E5 DD 77 05      LD (IX+5),A
+  51+ 91E8 DD 7E 03             LD A,(IX+3)
+  51+ 91EB DD 86 05      ADD A,(IX+5)
+  52+ 91EE ED 4B 0E 60          LD BC,(HEI)
+  52+ 91F2 B9            CP C
+  52+ 91F3 38 0B         JR C,W85
+  53+ 91F5 DD 7E 03             LD A,(IX+3)
+  53+ 91F8 DD 96 05 D6   SUB (IX+5),3
+  53+ 91FC 03
+  54+ 91FD DD 77 03             LD (IX+3),A
+  55+ 9200 CD 2C 79     W85     CALL PRWOW
+  56+ 9203 C1                   POP BC
+  57+ 9204
+  58+ 9204 78                   LD A,B
+  58+ 9205 B7            OR A
+  58+ 9206 28 19         JR Z,ET
+  59+ 9208 21 00 B0 11          LD HL,LOBU,DE,#01+(BASEOP+1)*256
+  59+ 920C 01 01
+  60+ 920E C5           SPIG2   PUSH BC
+  61+ 920F E5 D5                PUSH HL,DE
+  61+ 9211 01 18 00      LD BC,24
+  61+ 9214 CD 25 7D      CALL PRSRW
+  62+ 9217 D1 E1                POP DE,HL
+  63+ 9219 01 18 00             LD BC,24
+  63+ 921C 09            ADD HL,BC
+  63+ 921D 14            INC D
+  64+ 921E C1                   POP BC
+  64+ 921F 10 ED         DJNZ SPIG2
+  65+ 9221
+  66+ 9221 FB           ET      EI
+  66+ 9222 76            HALT
+  66+ 9223 CD D5 7C      CALL CURSOR
+  67+ 9226 CD 53 74 C4          CALL UPPP,NZ,CrUP
+  67+ 922A 8E 62
+  68+ 922C CD 59 74 C4          CALL DWWW,NZ,CrDN
+  68+ 9230 85 62
+  69+ 9232
+  70+ 9232 CD 77 74             CALL ENKE
+  70+ 9235 20 0B         JR NZ,ES
+  71+ 9237 CD 9A 74             CALL ESC
+  71+ 923A 28 E5         JR Z,ET
+  72+ 923C
+  73+ 923C CD CE 7A             CALL RRESB
+  74+ 923F DD E1                POP IX
+  75+ 9241 C9                   RET
+  76+ 9242              ;-------
+  77+ 9242 CD CE 7A     ES      CALL RRESB
+  78+ 9245 DD E1                POP IX
+  79+ 9247
+  80+ 9247 3A A4 80             LD A,(GRWND+12)
+  81+ 924A F5                   PUSH AF
+  81+ 924B 3E 60         LD A,PLHPG
+  81+ 924D CD C1 68      CALL MNGC
+  82+ 9250 C1                   POP BC
+  83+ 9251 11 C5 BE             LD DE,#C000+197-512
+  84+ 9254 2A 18 7F     ESLG    LD HL,(PHED)
+  85+ 9257 B7                   OR A
+  85+ 9258 ED 52         SBC HL,DE
+  85+ 925A D8            RET C
+  86+ 925B 21 00 02             LD HL,512
+  86+ 925E 19            ADD HL,DE
+  87+ 925F 7E                   LD A,(HL)
+  87+ 9260 EB            EX DE,HL
+  88+ 9261 FE 04                CP #04
+  88+ 9263 28 08         JR Z,DSL
+  89+ 9265 FE 05                CP #05
+  89+ 9267 28 04         JR Z,DSL
+  90+ 9269 FE 15                CP #15
+  90+ 926B 20 E7         JR NZ,ESLG
+  91+ 926D 10 E5        DSL     DJNZ ESLG
+  92+ 926F
+  93+ 926F 01 3B FF             LD BC,0-197
+  94+ 9272 3E 04 32 A3          LD A,#04,(NYAA),A
+  94+ 9276 70
+  94+ 9277 CD 01 9B      CALL PLGE
+  95+ 927A AF                   XOR A
+  95+ 927B 32 A3 70      LD (NYAA),A
+  96+ 927E C3 9F 69             JP GED
+  97+ 9281              ;-------
+  98+ 9281 1A           CHEXT   LD A,(DE)
+  98+ 9282 B7            OR A
+  98+ 9283 C8            RET Z
+  99+ 9284 BE                   CP (HL)
+  99+ 9285 20 10         JR NZ,HE
+ 100+ 9287 23 13                INC HL,DE
+ 101+ 9289 1A                   LD A,(DE)
+ 101+ 928A BE            CP (HL)
+ 101+ 928B 20 08         JR NZ,H2
+ 102+ 928D 23 13                INC HL,DE
+ 103+ 928F 1A                   LD A,(DE)
+ 103+ 9290 BE            CP (HL)
+ 103+ 9291 28 0B         JR Z,S7
+ 104+ 9293 2B 1B                DEC HL,DE
+ 105+ 9295 2B 1B        H2      DEC HL,DE
+ 106+ 9297 13 13 13 13  HE      INC DE,DE,DE,DE,DE
+ 106+ 929B 13
+ 107+ 929C 18 E3                JR CHEXT
+ 108+ 929E
+ 109+ 929E 13           S7      INC DE
+ 109+ 929F 1A 6F         LD A,(DE),L,A
+ 110+ 92A1 13                   INC DE
+ 110+ 92A2 1A 67         LD A,(DE),H,A
+ 111+ 92A4 3E 01                LD A,1
+ 111+ 92A6 B7            OR A
+ 112+ 92A7 C9                   RET
+ 113+ 92A8
+ 114+ 92A8 01 00 00 ED  CHext   LD BC,0,(HE),BC
+ 114+ 92AC 43 97 92
+ 115+ 92AF CD 81 92             CALL CHEXT
+ 116+ 92B2 01 13 13 ED          LD BC,#1313,(HE),BC
+ 116+ 92B6 43 97 92
+ 117+ 92B9 C9                   RET
+ 118+ 92BA              ;-------
+ 119+ 92BA              ;by F3:
+ 120+ 92BA CD FE 62     VIEW    CALL GETEN
+ 120+ 92BD CA 9F 69      JP Z,GED
+ 121+ 92C0 7C                   LD A,H
+ 121+ 92C1 B5            OR L
+ 121+ 92C2 CA 9F 69      JP Z,GED
+ 122+ 92C5 3E 01                LD A,1
+ 123+ 92C7 18 01                JR EXEcute
+ 124+ 92C9
+ 125+ 92C9              ;by ENTER:
+ 126+ 92C9 AF           VIE     XOR A
+ 127+ 92CA 32 17 60     EXEcute LD (F3ENTFL),A
+ 128+ 92CD CD 3E 91             CALL TOBUX
+ 129+ 92D0 21 28 7F             LD HL,BRRR
+ 129+ 92D3 CD 12 40      CALL GIPAG
+ 130+ 92D6
+ 131+ 92D6 CD BE 9A             CALL GOPLG
+ 132+ 92D9 B7                   OR A
+ 132+ 92DA CA 9F 69      JP Z,GED
+ 133+ 92DD 3D                   DEC A
+ 133+ 92DE 28 09         JR Z,VIK
+ 134+ 92E0 3D                   DEC A
+ 134+ 92E1 CA 49 91      JP Z,NXTFL
+ 135+ 92E4 3D                   DEC A;sets A=0 after GOPLG
+ 136+ 92E5 3D                   DEC A
+ 136+ 92E6 CA 52 91      JP Z,PRVFL
+ 137+ 92E9
+ 138+ 92E9 3A 17 60     VIK     LD A,(F3ENTFL)
+ 138+ 92EC B7            OR A
+ 138+ 92ED C2 6B 91      JP NZ,EXTSEL
+ 139+ 92F0 21 73 7F             LD HL,ENTRY+8
+ 140+ 92F3 11 F5 80             LD DE,EXTZ
+ 141+ 92F6 CD 81 92             CALL CHEXT
+ 141+ 92F9 CA 6B 91 E9   JP Z,EXTSEL,(HL)
+ 142+ 92FD              ;-------
+ 143+ 92FD 0E 0D        SER13D  LD C,13
+ 144+ 92FF 7E           SER     LD A,(HL)
+ 145+ 9300 B7                   OR A
+ 145+ 9301 C8            RET Z
+ 145+ 9302 23            INC HL
+ 146+ 9303 B9                   CP C
+ 146+ 9304 C8            RET Z
+ 147+ 9305 C3 FF 92             JP SER
+ 148+ 9308              ;---------------------------------------
+ 149+ 9308 CD 9F 69     FSM     CALL GED
+ 150+ 930B
+ 151+ 930B DD E5                PUSH IX
+ 152+ 930D DD 21 AE 80          LD IX,FRWND
+ 152+ 9311 CD 2C 79      CALL PRWOW
+ 153+ 9314
+ 154+ 9314 3E 01                LD A,1
+ 154+ 9316 CD 73 66      CALL YN
+ 155+ 9319 FB           MSPG    EI
+ 155+ 931A 76            HALT
+ 155+ 931B CD D5 7C      CALL CURSOR
+ 156+ 931E AF                   XOR A
+ 156+ 931F CD 73 66      CALL YN
+ 157+ 9322
+ 158+ 9322 CD 53 74 C4          CALL UPPP,NZ,CrUP
+ 158+ 9326 8E 62
+ 159+ 9328 CD 59 74 C4          CALL DWWW,NZ,CrDN
+ 159+ 932C 85 62
+ 160+ 932E
+ 161+ 932E CD 9A 74             CALL ESC
+ 161+ 9331 20 2D         JR NZ,CSPG
+ 162+ 9333 CD 77 74             CALL ENKE
+ 162+ 9336 28 E1         JR Z,MSPG
+ 163+ 9338              ;-------
+ 164+ 9338 3E FF                LD A,#FF
+ 164+ 933A CD 73 66      CALL YN
+ 164+ 933D 20 21         JR NZ,CSPG
+ 165+ 933F
+ 166+ 933F DD 7E 0C             LD A,(IX+12)
+ 167+ 9342 0E 00                LD C,0
+ 168+ 9344 3D                   DEC A
+ 168+ 9345 28 0C         JR Z,AS
+ 169+ 9347 0E 01                LD C,1
+ 170+ 9349 3D                   DEC A
+ 170+ 934A 28 07         JR Z,AS
+ 171+ 934C 0E 02                LD C,2
+ 172+ 934E 3D                   DEC A
+ 172+ 934F 28 02         JR Z,AS
+ 173+ 9351 0E 03                LD C,3
+ 174+ 9353 79 32 8F 6A  AS      LD A,C,(BOF),A
+ 175+ 9357
+ 176+ 9357 CD CE 7A             CALL RRESB
+ 177+ 935A DD E1                POP IX
+ 178+ 935C
+ 179+ 935C 3E 01                LD A,1
+ 179+ 935E B7            OR A
+ 180+ 935F C9                   RET
+ 181+ 9360              ;-------
+ 182+ 9360 CD CE 7A     CSPG    CALL RRESB
+ 183+ 9363 DD E1                POP IX
+ 184+ 9365 AF                   XOR A
+ 185+ 9366 C9                   RET
+ 186+ 9367              ;---------------------------------------
+ 187+ 9367 CD 08 93     RUNHOB  CALL FSM
+ 187+ 936A C8            RET Z
+ 188+ 936B
+ 189+ 936B 21 00 02 06          LD HL,#0200,B,1
+ 189+ 936F 01
+ 189+ 9370 CD 15 40      CALL LOAD512
+ 190+ 9373 2A 0B 02 7C          LD HL,(#020B),A,H
+ 190+ 9377 FE A0         CP #A0
+ 190+ 9379 D0            RET NC
+ 191+ 937A ED 5B 09 02          LD DE,(#0209),A,D
+ 191+ 937E 7A
+ 191+ 937F FE 60         CP #60
+ 191+ 9381 D8            RET C
+ 192+ 9382
+ 193+ 9382 D9                   EXX
+ 194+ 9383 3E 20 32 57          LD A,%00100000,(VVmod),A
+ 194+ 9387 7F
+ 195+ 9388 CD 21 A7             CALL DINT
+ 196+ 938B AF                   XOR A
+ 196+ 938C CD C1 68 CD   CALL MNGC,TURBOof
+ 196+ 9390 88 6A
+ 197+ 9392 21 B1 93 11          LD HL,HOBAT,DE,#5B00,BC,96
+ 197+ 9396 00 5B 01 60
+ 197+ 939A 00
+ 197+ 939B ED B0         LDIR
+ 198+ 939D 21 85 68 11          LD HL,MNG0D,DE,#5B60,BC,32
+ 198+ 93A1 60 5B 01 20
+ 198+ 93A5 00
+ 198+ 93A6 ED B0         LDIR
+ 199+ 93A8 D9                   EXX
+ 200+ 93A9
+ 201+ 93A9 21 EF 01             LD HL,512-17
+ 201+ 93AC 19            ADD HL,DE
+ 202+ 93AD D5                   PUSH DE
+ 203+ 93AE C3 00 5B             JP #5B00
+ 204+ 93B1
+ 205+ 93B1 D5           HOBAT   PUSH DE
+ 206+ 93B2 7C           THG     LD A,H
+ 206+ 93B3 FE 60         CP #60
+ 206+ 93B5 38 09         JR C,THg
+ 207+ 93B7 06 01                LD B,1
+ 207+ 93B9 CD 15 40      CALL LOAD512
+ 208+ 93BC FE 0F                CP #0F
+ 208+ 93BE 20 F2         JR NZ,THG
+ 209+ 93C0 D1           THg     POP DE
+ 210+ 93C1 21 11 02 01          LD HL,#0200+17,BC,512-17
+ 210+ 93C5 EF 01
+ 210+ 93C7 ED B0         LDIR
+ 211+ 93C9
+ 212+ 93C9 F3                   DI
+ 213+ 93CA 3E 3F ED 47          LD A,63,I,A
+ 213+ 93CE ED 56         IM 1
+ 214+ 93D0 FD 21 3A 5C          LD IY,#5C3A
+ 215+ 93D4
+ 216+ 93D4 21 00 58 54          LD HL,#5800,DE,HL
+ 216+ 93D8 5D
+ 216+ 93D9 13            INC DE
+ 217+ 93DA 01 FF 02 75          LD BC,#0300-1,(HL),L
+ 217+ 93DE ED B0         LDIR
+ 218+ 93E0
+ 219+ 93E0 01 AF 00             LD BC,Vmod
+ 219+ 93E3 AF            XOR A
+ 219+ 93E4 ED 79         OUT (C),A
+ 220+ 93E6 CD 60 5B             CALL #5B60
+ 221+ 93E9 01 FD 7F 3E          LD BC,#7FFD,A,16
+ 221+ 93ED 10
+ 221+ 93EE ED 79         OUT (C),A
+ 222+ 93F0 C9                   RET
+ 223+ 93F1              ;---------------------------------------
+ 224+ 93F1              K       EQU #0000
+ 225+ 93F1              MLZP    EQU #0D00
+ 226+ 93F1              HRSP    EQU #0E00
+ 227+ 93F1              LOB3    EQU #1000
+ 228+ 93F1              ;-------
+ 229+ 93F1              SPG1    ;SPGv1.0
+ 230+ 93F1 FE 10                CP #10
+ 230+ 93F3 C2 9F 69      JP NZ,GED
+ 231+ 93F6
+ 232+ 93F6 3E 20 32 57          LD A,%00100000,(VVmod),A
+ 232+ 93FA 7F
+ 233+ 93FB CD 21 A7             CALL DINT
+ 234+ 93FE
+ 235+ 93FE 3E F5                LD A,D5PG
+ 235+ 9400 CD C1 68      CALL MNGC
+ 236+ 9403 21 00 C0 54          LD HL,#C000,DE,HL
+ 236+ 9407 5D
+ 236+ 9408 13            INC DE
+ 237+ 9409 75 01 FF 3F          LD (HL),L,BC,#4000-1
+ 237+ 940D ED B0         LDIR
+ 238+ 940F
+ 239+ 940F 2A 30 B0 22          LD HL,(LOB2+#30),(SPG_SA+1),HL
+ 239+ 9413 64 95
+ 240+ 9415 2A 32 B0 22          LD HL,(LOB2+#32),(SPG_SP+1),HL
+ 240+ 9419 67 95
+ 241+ 941B 2A 38 B0 22          LD HL,(LOB2+#38),(SPG_RZ+1),HL
+ 241+ 941F 6A 95
+ 242+ 9421
+ 243+ 9421 3A 34 B0 32          LD A,(LOB2+#34),(SPG_PG+1),A
+ 243+ 9425 37 95
+ 244+ 9427 3A 35 B0             LD A,(LOB2+#35)
+ 245+ 942A 4F                   LD C,A
+ 246+ 942B E6 03                AND %00000011
+ 246+ 942D 32 8F 6A      LD (BOF),A
+ 247+ 9430
+ 248+ 9430 79                   LD A,C
+ 248+ 9431 E6 04         AND %00000100
+ 249+ 9433 3E F3                LD A,#F3
+ 249+ 9435 28 02         JR Z,$+4
+ 249+ 9437 3E FB         LD A,#FB;EI
+ 250+ 9439 32 79 95             LD (SPG_IT),A
+ 251+ 943C
+ 252+ 943C 21 00 B0 11          LD HL,LOB2,DE,LOB3,BC,1024
+ 252+ 9440 00 10 01 00
+ 252+ 9444 04
+ 252+ 9445 ED B0         LDIR
+ 253+ 9447 21 70 94 11          LD HL,SPGRZ,DE,K,BC,Y-SPGRZ
+ 253+ 944B 00 00 01 0B
+ 253+ 944F 01
+ 253+ 9450 ED B0         LDIR
+ 254+ 9452
+ 255+ 9452 3E 01                LD A,MTXPG+1
+ 255+ 9454 CD C1 68      CALL MNGC
+ 256+ 9457 21 00 FE 11          LD HL,MLZ4,DE,MLZP,BC,256
+ 256+ 945B 00 0D 01 00
+ 256+ 945F 01
+ 256+ 9460 ED B0         LDIR
+ 257+ 9462 21 E9 FE 11          LD HL,DEHR1,DE,HRSP,BC,512
+ 257+ 9466 00 0E 01 00
+ 257+ 946A 02
+ 257+ 946B ED B0         LDIR
+ 258+ 946D C3 00 00             JP K
+ 259+ 9470              ;-------
+ 260+ 9470 DD 21 00 11  SPGRZ   LD IX,LOB3+256
+ 261+ 9474 3E F4                LD A,DBPG
+ 261+ 9476 CD B1 68      CALL MNG8
+ 262+ 9479
+ 263+ 9479 06 00                LD B,0
+ 264+ 947B DD 7E 00     KOVR    LD A,(IX)
+ 264+ 947E DD 23         INC IX
+ 265+ 9480 4F                   LD C,A
+ 266+ 9481 E6 1F                AND %00011111
+ 266+ 9483 87 C6 C0      ADD A,A,A,#C0
+ 267+ 9486 67                   LD H,A
+ 268+ 9487 2E 00                LD L,0
+ 269+ 9489 DD 23                INC IX
+ 270+ 948B DD 7E 00             LD A,(IX)
+ 270+ 948E DD 23         INC IX
+ 271+ 9490 FE 02                CP #02
+ 271+ 9492 20 02         JR NZ,$+4
+ 271+ 9494 3E F6         LD A,D2PG
+ 272+ 9496 FE 05                CP #05
+ 272+ 9498 20 02         JR NZ,$+4
+ 272+ 949A 3E F5         LD A,D5PG
+ 273+ 949C CD C1 68             CALL MNGC
+ 274+ 949F
+ 275+ 949F DD 7E FE             LD A,(IX-2)
+ 276+ 94A2 5F                   LD E,A
+ 276+ 94A3 E6 C0         AND %11000000
+ 277+ 94A5 07          > RLCA
+ 277+ 94A6 07          > RLCA
+ 278+ 94A7 57                   LD D,A
+ 279+ 94A8
+ 280+ 94A8 7B                   LD A,E
+ 280+ 94A9 E6 1F         AND %00011111
+ 280+ 94AB 3C            INC A
+ 281+ 94AC C5 DD E5             PUSH BC,IX
+ 282+ 94AF 47                   LD B,A
+ 283+ 94B0 7A                   LD A,D
+ 283+ 94B1 B7            OR A
+ 283+ 94B2 20 0F         JR NZ,SPGPKD
+ 284+ 94B4 CD 15 40             CALL LOAD512
+ 285+ 94B7 DD E1 C1     PKDE    POP IX,BC
+ 286+ 94BA 79                   LD A,C
+ 287+ 94BB E6 80                AND %10000000
+ 287+ 94BD 20 36         JR NZ,ARBLKZ
+ 288+ 94BF 10 BA                DJNZ KOVR
+ 289+ 94C1 18 32                JR ARBLKZ
+ 290+ 94C3              ;-------
+ 291+ 94C3 3D           SPGPKD  DEC A
+ 291+ 94C4 28 1A         JR Z,SPGMLZ
+ 292+ 94C6 E5           SPGHRS  PUSH HL
+ 292+ 94C7 21 00 80      LD HL,#8000
+ 292+ 94CA CD 15 40      CALL LOAD512
+ 293+ 94CD D1                   POP DE
+ 294+ 94CE F3                   DI
+ 295+ 94CF ED 73 26 7F          LD (SPBU),SP
+ 296+ 94D3 DD 21 00 80          LD IX,#8000
+ 297+ 94D7 CD 00 0E             CALL HRSP
+ 298+ 94DA ED 7B 26 7F  SPGPE   LD SP,(SPBU)
+ 299+ 94DE 18 D7                JR PKDE
+ 300+ 94E0
+ 301+ 94E0 E5           SPGMLZ  PUSH HL
+ 301+ 94E1 21 00 80      LD HL,#8000
+ 301+ 94E4 CD 15 40      CALL LOAD512
+ 302+ 94E7 D1                   POP DE
+ 303+ 94E8 F3                   DI
+ 304+ 94E9 ED 73 26 7F          LD (SPBU),SP
+ 305+ 94ED 21 00 80             LD HL,#8000
+ 306+ 94F0 CD 00 0D             CALL MLZP
+ 307+ 94F3 18 E5                JR SPGPE
+ 308+ 94F5              ;-------
+ 309+ 94F5 3E F6        ARBLKZ  LD A,D2PG
+ 309+ 94F7 CD B1 68      CALL MNG8
+ 310+ 94FA 3E 02                LD A,2
+ 310+ 94FC CD C1 68      CALL MNGC
+ 311+ 94FF 21 00 80 11          LD HL,#8000,DE,#C000
+ 311+ 9503 00 C0
+ 312+ 9505 01 00 40             LD BC,#4000
+ 312+ 9508 ED B0         LDIR
+ 313+ 950A
+ 314+ 950A F3                   DI
+ 314+ 950B CD 88 6A      CALL TURBOof
+ 315+ 950E
+ 316+ 950E 3E F5                LD A,D5PG
+ 316+ 9510 CD B1 68      CALL MNG8
+ 317+ 9513 3E 05                LD A,5
+ 317+ 9515 CD C1 68      CALL MNGC
+ 318+ 9518 21 00 80 11          LD HL,#8000,DE,#C000
+ 318+ 951C 00 C0
+ 319+ 951E 01 00 40             LD BC,#4000
+ 319+ 9521 ED B0         LDIR
+ 320+ 9523
+ 321+ 9523 01 AF 01 3E          LD BC,Vpag,A,5
+ 321+ 9527 05
+ 321+ 9528 ED 79         OUT (C),A
+ 322+ 952A 01 AF 00             LD BC,Vmod
+ 322+ 952D AF            XOR A
+ 322+ 952E ED 79         OUT (C),A
+ 323+ 9530
+ 324+ 9530 3E 3F ED 47          LD A,63,I,A
+ 324+ 9534 ED 56         IM 1
+ 325+ 9536 3E 00 01 AF  SPG_PG  LD A,0,BC,PW4
+ 325+ 953A 13
+ 325+ 953B ED 79         OUT (C),A
+ 326+ 953D 3E 02 06 12          LD A,2,B,high PW2
+ 326+ 9541 ED 79         OUT (C),A
+ 327+ 9543 3E 05 06 11          LD A,5,B,high PW1
+ 327+ 9547 ED 79         OUT (C),A
+ 328+ 9549
+ 329+ 9549 21 FC 00             LD HL,SPGRZD-SPGRZ+K
+ 330+ 954C ED 5B FA 00          LD DE,(SPG_RZ+1-SPGRZ+K)
+ 331+ 9550 01 10 00             LD BC,16
+ 331+ 9553 ED B0         LDIR
+ 332+ 9555
+ 333+ 9555 21 58 27             LD HL,#2758
+ 333+ 9558 D9            EXX
+ 334+ 9559 FD 21 3A 5C          LD IY,#5C3A
+ 335+ 955D 01 AF 28             LD BC,DMA_T
+ 335+ 9560 AF            XOR A
+ 335+ 9561 ED 79         OUT (C),A
+ 336+ 9563
+ 337+ 9563 21 00 00     SPG_SA  LD HL,0
+ 338+ 9566 31 00 60     SPG_SP  LD SP,#6000
+ 339+ 9569 C3 00 00     SPG_RZ  JP 0
+ 340+ 956C              ;-------
+ 341+ 956C 01 AF 21 3E  SPGRZD  LD BC,PE0,A,%00000001
+ 341+ 9570 01
+ 341+ 9571 ED 79         OUT (C),A
+ 342+ 9573 06 10 3E 03          LD B,high PW0,A,BASIC48
+ 342+ 9577 ED 79         OUT (C),A
+ 343+ 9579 F3           SPG_IT  DI
+ 344+ 957A E9                   JP (HL)
+ 345+ 957B              Y
+ 346+ 957B              ;---------------------------------------
+ 347+ 957B              PAGER   EQU #5300
+ 348+ 957B              LOB2    EQU #B000
+ 349+ 957B              ;-------
+ 350+ 957B 21 00 B0 06  RUNSPG  LD HL,LOB2,B,2
+ 350+ 957F 02
+ 350+ 9580 CD 15 40      CALL LOAD512
+ 351+ 9583 21 20 B0 11          LD HL,LOB2+32,DE,IDNT,B,12
+ 351+ 9587 24 AB 06 0C
+ 352+ 958B CD 2B A7             CALL RAZ
+ 352+ 958E C2 9F 69      JP NZ,GED
+ 353+ 9591
+ 354+ 9591 7E                   LD A,(HL)
+ 354+ 9592 FE 03         CP 3
+ 354+ 9594 D2 F1 93      JP NC,SPG1
+ 355+ 9597 FE 02                CP 2
+ 355+ 9599 38 17         JR C,OF4
+ 356+ 959B              ;SPGv0.2:
+ 357+ 959B 3E 0F 32 3F          LD A,15,(VrS+1),A
+ 357+ 959F 96
+ 358+ 95A0 3E 10 32 E4          LD A,16,(V2A+1),A,(V2F+1),A
+ 358+ 95A4 95 32 D6 96
+ 359+ 95A8 3E 04 32 68          LD A,4,(V2B+1),A
+ 359+ 95AC 96
+ 360+ 95AD 3E 0F 32 AD          LD A,15,(V2C+1),A
+ 360+ 95B1 96
+ 361+ 95B2              ;SPGv0.0/0.1:
+ 362+ 95B2              OF4     ;HL,SPGLOG:CALL SPGLOG
+ 363+ 95B2
+ 364+ 95B2 CD 08 93             CALL FSM
+ 364+ 95B5 C8            RET Z
+ 364+ 95B6 CD 88 6A      CALL TURBOof
+ 365+ 95B9
+ 366+ 95B9 3E 20 32 57          LD A,%00100000,(VVmod),A
+ 366+ 95BD 7F
+ 367+ 95BE CD 21 A7             CALL DINT
+ 368+ 95C1
+ 369+ 95C1 21 00 B4 06          LD HL,LOB2+1024,B,2
+ 369+ 95C5 02
+ 369+ 95C6 CD 15 40      CALL LOAD512
+ 370+ 95C9 21 00 B0 11          LD HL,LOB2,DE,PAGER,BC,#0800
+ 370+ 95CD 00 53 01 00
+ 370+ 95D1 08
+ 371+ 95D2 ED B0                LDIR
+ 372+ 95D4
+ 373+ 95D4 21 0D 97 11          LD HL,MANAG0,DE,PAGER,BC,32
+ 373+ 95D8 00 53 01 20
+ 373+ 95DC 00
+ 373+ 95DD ED B0         LDIR
+ 374+ 95DF AF                   XOR A
+ 374+ 95E0 CD C1 68      CALL MNGC
+ 375+ 95E3              ;-------
+ 376+ 95E3 3E 08 32 43  V2A     LD A,8,(STUS),A;        COUNTER!
+ 376+ 95E7 7F
+ 377+ 95E8 2A 40 53 22          LD HL,(PAGER+64),(SAR+1),HL
+ 377+ 95EC D0 96
+ 378+ 95EE
+ 379+ 95EE 3A 42 53 32          LD A,(PAGER+66),(SPA+1),A
+ 379+ 95F2 AB 96
+ 380+ 95F4 2A 4A 53             LD HL,(PAGER+74)
+ 381+ 95F7 7C                   LD A,H
+ 381+ 95F8 FE 40         CP #40
+ 381+ 95FA 30 03         JR NC,NSPZ
+ 382+ 95FC 2A 26 7F             LD HL,(SPBU)
+ 383+ 95FF 22 CD 96     NSPZ    LD (SSPA+1),HL
+ 384+ 9602
+ 385+ 9602 2A 44 53 22          LD HL,(PAGER+68),(V2E+1),HL
+ 385+ 9606 94 96
+ 386+ 9608
+ 387+ 9608 2A 4C 53             LD HL,(PAGER+76)
+ 388+ 960B 7C                   LD A,H
+ 388+ 960C B5            OR L
+ 388+ 960D 28 03         JR Z,V2Di
+ 389+ 960F 22 A6 96             LD (V2D+1),HL
+ 390+ 9612 ED 4B 4E 53  V2Di    LD BC,(PAGER+78)
+ 391+ 9616 78                   LD A,B
+ 391+ 9617 B1            OR C
+ 391+ 9618 28 0D         JR Z,MAA
+ 392+ 961A 78                   LD A,B
+ 392+ 961B B7            OR A
+ 392+ 961C 28 09         JR Z,MAA
+ 392+ 961E 06 01         LD B,1
+ 393+ 9620 79                   LD A,C
+ 393+ 9621 FE 41         CP #41
+ 393+ 9623 38 02         JR C,MAA
+ 393+ 9625 0E 00         LD C,0
+ 394+ 9627 ED 43 9C 96  MAA     LD (LAA+1),BC
+ 395+ 962B
+ 396+ 962B DD 21 80 53          LD IX,PAGER+128
+ 397+ 962F DD 7E 02     GROP    LD A,(IX+2)
+ 397+ 9632 FE 0E         CP 14
+ 397+ 9634 38 02         JR C,NSPL
+ 398+ 9636 3E 0D                LD A,13
+ 399+ 9638 32 5B 96     NSPL    LD (SPGL+1),A
+ 400+ 963B
+ 401+ 963B              ;LD A,1,(PAUS),A
+ 402+ 963B DD 7E 03             LD A,(IX+3)
+ 403+ 963E E6 07        VrS     AND 7
+ 404+ 9640 CD C1 68             CALL MNGC
+ 405+ 9643
+ 406+ 9643 21 00 55 DD          LD HL,PAGER+512,E,(IX),D,(IX+1)
+ 406+ 9647 5E 00 DD 56
+ 406+ 964B 01
+ 407+ 964C 01 00 06             LD BC,#0600
+ 408+ 964F CD D2 96             CALL LC
+ 409+ 9652 EB                   EX DE,HL
+ 410+ 9653 7C                   LD A,H
+ 410+ 9654 FE A0         CP #A0
+ 410+ 9656 38 1D         JR C,DIPL
+ 411+ 9658 DD E5                PUSH IX
+ 412+ 965A 06 01        SPGL    LD B,1
+ 412+ 965C CB 20 CB 20   SLA B,B
+ 413+ 9660 78                   LD A,B
+ 413+ 9661 B7            OR A
+ 413+ 9662 C4 15 40      CALL NZ,LOAD512
+ 414+ 9665 DD E1                POP IX
+ 415+ 9667
+ 416+ 9667 11 08 00     V2B     LD DE,8
+ 416+ 966A DD 19         ADD IX,DE
+ 417+ 966C
+ 418+ 966C 3A 43 7F             LD A,(STUS)
+ 418+ 966F 3D            DEC A
+ 419+ 9670 32 43 7F             LD (STUS),A
+ 419+ 9673 20 BA         JR NZ,GROP
+ 420+ 9675              ;-------
+ 421+ 9675 F3           DIPL    DI
+ 422+ 9676 3E 3F ED 47          LD A,63,I,A
+ 422+ 967A ED 56         IM 1
+ 423+ 967C FD 21 3A 5C          LD IY,#5C3A
+ 424+ 9680
+ 425+ 9680 01 AF 00             LD BC,Vmod
+ 425+ 9683 AF            XOR A
+ 425+ 9684 ED 79         OUT (C),A
+ 426+ 9686 CD 85 68             CALL MNG0D
+ 427+ 9689 01 FD 7F 3E          LD BC,#7FFD,A,16
+ 427+ 968D 10
+ 427+ 968E ED 79         OUT (C),A
+ 428+ 9690
+ 429+ 9690              ;LD HL,#5800,DE,#5801,BC,#02FF
+ 430+ 9690              ;LD (HL),L
+ 431+ 9690              ;LDIR
+ 432+ 9690
+ 433+ 9690 21 00 53             LD HL,PAGER
+ 434+ 9693 11 00 00     V2E     LD DE,0
+ 435+ 9696 01 20 00             LD BC,32
+ 436+ 9699 ED B0                LDIR
+ 437+ 969B
+ 438+ 969B 01 00 00 78  LAA     LD BC,0,A,B
+ 438+ 969F B1            OR C
+ 438+ 96A0 28 08         JR Z,SPA
+ 439+ 96A2 21 C0 53             LD HL,PAGER+192
+ 440+ 96A5 11 00 5B     V2D     LD DE,#5B00
+ 441+ 96A8 ED B0                LDIR
+ 442+ 96AA
+ 443+ 96AA 3E 00        SPA     LD A,0
+ 444+ 96AC E6 07        V2C     AND 7
+ 445+ 96AE CD 00 53             CALL PAGER
+ 446+ 96B1
+ 447+ 96B1              ;LD A,(PAGER+67)
+ 448+ 96B1              ;CP 1:JR NZ,NNx
+ 449+ 96B1              ;LD A,(DRVE),(#5CF6),A
+ 450+ 96B1
+ 451+ 96B1 3A AD 96     NNx     LD A,(V2C+1)
+ 451+ 96B4 FE 07         CP 7
+ 451+ 96B6 28 14         JR Z,SSPA
+ 452+ 96B8 21 31 53 1E          LD HL,PAGER+49,E,5
+ 452+ 96BC 05
+ 453+ 96BD 4E           OUTZ    LD C,(HL)
+ 453+ 96BE 23            INC HL
+ 454+ 96BF 46                   LD B,(HL)
+ 454+ 96C0 23            INC HL
+ 455+ 96C1 78                   LD A,B
+ 455+ 96C2 B1            OR C
+ 455+ 96C3 28 03         JR Z,OUTz
+ 456+ 96C5 7E                   LD A,(HL)
+ 457+ 96C6 ED 79                OUT (C),A
+ 458+ 96C8 23           OUTz    INC HL
+ 459+ 96C9 1D                   DEC E
+ 459+ 96CA 20 F1         JR NZ,OUTZ
+ 460+ 96CC
+ 461+ 96CC 31 00 00     SSPA    LD SP,0
+ 462+ 96CF C3 00 00     SAR     JP 0
+ 463+ 96D2              ;-------
+ 464+ 96D2 3A 43 7F     LC      LD A,(STUS)
+ 465+ 96D5 FE 08        V2F     CP 8
+ 465+ 96D7 C0            RET NZ
+ 466+ 96D8 7A                   LD A,D
+ 466+ 96D9 FE A0         CP #A0
+ 466+ 96DB 30 1F         JR NC,V01
+ 467+ 96DD
+ 468+ 96DD ED 53 03 97          LD (SREZ+4),DE
+ 469+ 96E1 C6 06                ADD A,6
+ 469+ 96E3 57            LD D,A
+ 470+ 96E4 D5                   PUSH DE
+ 471+ 96E5 2A D0 96 22          LD HL,(SAR+1),(SR1+1),HL
+ 471+ 96E9 0B 97
+ 472+ 96EB 11 20 53 ED          LD DE,PAGER+#20,(SAR+1),DE
+ 472+ 96EF 53 D0 96
+ 473+ 96F2 21 FF 96 01          LD HL,SREZ,BC,16
+ 473+ 96F6 10 00
+ 473+ 96F8 ED B0         LDIR
+ 474+ 96FA D1                   POP DE
+ 475+ 96FB C9                   RET
+ 476+ 96FC ED B0        V01     LDIR
+ 477+ 96FE C9                   RET
+ 478+ 96FF 21 00 55     SREZ    LD HL,PAGER+512
+ 479+ 9702 11 00 00             LD DE,0
+ 480+ 9705 01 00 06             LD BC,#0600
+ 481+ 9708 ED B0                LDIR
+ 482+ 970A C3 00 00     SR1     JP 0
+ 483+ 970D              ;-------
+ 484+ 970D              MANAG0  ;I:A - num of PAGE (VALID: 0-15)
+ 485+ 970D C5                   PUSH BC
+ 486+ 970E 01 AF 13             LD BC,PW4
+ 486+ 9711 ED 79         OUT (C),A
+ 487+ 9713 C1                   POP BC
+ 488+ 9714 C9                   RET
+ 489+ 9715              ;---------------------------------------
+ 490+ 9715 21 A4 83     PLER    LD HL,TER4
+ 490+ 9718 C3 DE 90      JP ERR0
+ 491+ 971B              ;---------------------------------------
+ 492+ 971B 3A 14 7F     RELOAD7 LD A,(PPFR)
+ 492+ 971E B7            OR A
+ 492+ 971F C0            RET NZ
+ 493+ 9720
+ 494+ 9720 E5                   PUSH HL
+ 495+ 9721 21 A9 81 11          LD HL,TXTL,DE,#0100
+ 495+ 9725 00 01
+ 496+ 9727 CD 2F 90             CALL DLME
+ 497+ 972A E1                   POP HL
+ 497+ 972B C8            RET Z
+ 498+ 972C
+ 499+ 972C E5                   PUSH HL
+ 499+ 972D CD 1D 9A      CALL PLGDINI
+ 500+ 9730 E1                   POP HL
+ 501+ 9731 2E 00                LD L,0
+ 501+ 9733 24 24         INC H,H
+ 501+ 9735 CD 2F 9A      CALL PLGDEL
+ 502+ 9738 18 15                JR LDRE
+ 503+ 973A              ;-------
+ 504+ 973A CD 9F 69     LDPLG   CALL GED
+ 504+ 973D AF            XOR A
+ 505+ 973E 32 00 B2             LD (LOBULO),A
+ 506+ 9741 32 14 7F     LDPL2   LD (PPFR),A
+ 507+ 9744
+ 508+ 9744 21 00 B0 06          LD HL,LOBU,B,1
+ 508+ 9748 01
+ 508+ 9749 CD 15 40      CALL LOAD512
+ 509+ 974C CD 83 98             CALL LOPTION
+ 510+ 974F
+ 511+ 974F 3A 20 B0     LDRE    LD A,(LOBU+32)
+ 512+ 9752 FE 02                CP PLGOV
+ 512+ 9754 38 BF         JR C,PLER
+ 513+ 9756 FE 11                CP PLGCV+1
+ 513+ 9758 30 BB         JR NC,PLER
+ 514+ 975A
+ 515+ 975A 21 30 AB 11          LD HL,IDNT2,DE,LOBU+16,B,16
+ 515+ 975E 10 B0 06 10
+ 516+ 9762 CD 2B A7             CALL RAZ
+ 516+ 9765 C0            RET NZ
+ 517+ 9766              ;-------
+ 518+ 9766 3A 16 7F 32          LD A,(PPGM),(PPGP),A,(LOBU),A
+ 518+ 976A 15 7F 32 00
+ 518+ 976E B0
+ 519+ 976F 2A 22 B0             LD HL,(LOBU+34)
+ 519+ 9772 85            ADD A,L
+ 520+ 9773 D8                   RET C
+ 520+ 9774 FE 3F         CP PLEPG-PLGPG
+ 520+ 9776 D0            RET NC
+ 521+ 9777 32 17 7F             LD (PPG2),A
+ 522+ 977A
+ 523+ 977A 3E 60                LD A,PLHPG
+ 523+ 977C CD C1 68      CALL MNGC
+ 524+ 977F
+ 525+ 977F 3A 19 7F             LD A,(PHED+1)
+ 525+ 9782 FE 40         CP #40
+ 525+ 9784 D8            RET C
+ 526+ 9785 CD 41 98             CALL PDCHECK
+ 526+ 9788 DA 1B 97      JP C,RELOAD7
+ 527+ 978B 21 00 B0 ED          LD HL,LOBU,DE,(PHED)
+ 527+ 978F 5B 18 7F
+ 528+ 9792 01 00 02             LD BC,512
+ 528+ 9795 ED B0         LDIR
+ 528+ 9797 ED 53 18 7F   LD (PHED),DE
+ 529+ 979B EB                   EX DE,HL
+ 529+ 979C 06 00         LD B,0
+ 529+ 979E CD 99 69      CALL NOPING
+ 530+ 97A1
+ 531+ 97A1 21 24 B0             LD HL,LOBU+36
+ 532+ 97A4 7E           WALK    LD A,(HL)
+ 532+ 97A5 23            INC HL
+ 532+ 97A6 CD F9 68      CALL MNGC_PL
+ 533+ 97A9 7E                   LD A,(HL)
+ 533+ 97AA 23            INC HL
+ 533+ 97AB B7            OR A
+ 533+ 97AC 28 0B         JR Z,LGW
+ 534+ 97AE E5                   PUSH HL
+ 535+ 97AF 47 21 00 C0          LD B,A,HL,#C000
+ 535+ 97B3 CD 15 40      CALL LOAD512
+ 536+ 97B6 E1                   POP HL
+ 537+ 97B7 18 EB                JR WALK
+ 538+ 97B9
+ 539+ 97B9 3A 17 7F 32  LGW     LD A,(PPG2),(PPGM),A
+ 539+ 97BD 16 7F
+ 540+ 97BF 3A 14 7F 0E          LD A,(PPFR),C,1
+ 540+ 97C3 01
+ 540+ 97C4 B7            OR A
+ 540+ 97C5 20 63         JR NZ,ALPL
+ 541+ 97C7
+ 542+ 97C7 DD E5                PUSH IX
+ 543+ 97C9 DD 21 2A 80          LD IX,LGWND
+ 543+ 97CD CD 2C 79      CALL PRWOW
+ 544+ 97D0
+ 545+ 97D0 21 00 B2 06          LD HL,LOBU+512,B,32
+ 545+ 97D4 20
+ 545+ 97D5 CD 99 69      CALL NOPING
+ 546+ 97D8 21 C4 B0             LD HL,LOBU+165+31
+ 547+ 97DB 06 20 78             LD B,32,A,B
+ 547+ 97DE CD 7D 98      CALL NOMI
+ 548+ 97E1 48                   LD C,B
+ 548+ 97E2 90            SUB B
+ 548+ 97E3 CB 3F         SRL A
+ 548+ 97E5 47            LD B,A
+ 549+ 97E6 11 00 B2 3E          LD DE,LOBU+512,A,31
+ 549+ 97EA 1F
+ 549+ 97EB 90            SUB B
+ 550+ 97EC 5F 06 00             LD E,A,B,0
+ 551+ 97EF 79                   LD A,C
+ 551+ 97F0 B7            OR A
+ 551+ 97F1 28 02         JR Z,$+4
+ 551+ 97F3 ED B8         LDDR
+ 552+ 97F5
+ 553+ 97F5 21 00 B2 11          LD HL,LOBU+512,DE,257,BC,32
+ 553+ 97F9 01 01 01 20
+ 553+ 97FD 00
+ 553+ 97FE CD 25 7D      CALL PRSRW
+ 554+ 9801 3E 71                LD A,%01110001
+ 554+ 9803 CD 39 7D      CALL PRIAT
+ 555+ 9806 21 BE 83 11          LD HL,TEM0,DE,#020D,BC,9
+ 555+ 980A 0D 02 01 09
+ 555+ 980E 00
+ 555+ 980F CD 25 7D      CALL PRSRW
+ 556+ 9812
+ 557+ 9812 CD 4B 74             CALL USPO
+ 558+ 9815 CD 43 74             CALL NUSP
+ 559+ 9818
+ 560+ 9818 CD CE 7A             CALL RRESB
+ 561+ 981B DD E1                POP IX
+ 562+ 981D
+ 563+ 981D DD E5                PUSH IX
+ 563+ 981F DD 21 87 84   LD IX,WND
+ 563+ 9823 CD 19 A2      CALL TXT2PR
+ 564+ 9826 DD E1                POP IX
+ 565+ 9828
+ 566+ 9828 0E FF                LD C,#FF
+ 567+ 982A 3A C5 B0     ALPL    LD A,(LOBU+197)
+ 568+ 982D 21 C6 B0             LD HL,LOBU+198
+ 569+ 9830 B9                   CP C
+ 569+ 9831 C8            RET Z
+ 570+ 9832 FE 11                CP #11
+ 570+ 9834 38 05         JR C,MIMI
+ 571+ 9836 FE 16                CP #16
+ 571+ 9838 DC 26 A2      CALL C,EDTPR
+ 572+ 983B FE 01        MIMI    CP #01
+ 572+ 983D CC C1 70      CALL Z,RAJT
+ 573+ 9840 C9                   RET
+ 574+ 9841              ;-------
+ 575+ 9841 21 A5 C0     PDCHECK LD HL,#C000+165
+ 576+ 9844 ED 4B 18 7F  PDC     LD BC,(PHED)
+ 577+ 9848 B7                   OR A
+ 577+ 9849 ED 42         SBC HL,BC
+ 577+ 984B D0            RET NC
+ 578+ 984C 09                   ADD HL,BC
+ 579+ 984D
+ 580+ 984D E5                   PUSH HL
+ 581+ 984E 11 A5 B0             LD DE,LOBU+165
+ 582+ 9851 06 20                LD B,32
+ 583+ 9853 1A           DCH     LD A,(DE)
+ 583+ 9854 BE            CP (HL)
+ 583+ 9855 20 07         JR NZ,PDCH
+ 584+ 9857 23 13                INC HL,DE
+ 585+ 9859 10 F8                DJNZ DCH
+ 586+ 985B E1                   POP HL
+ 587+ 985C 37                   SCF
+ 588+ 985D C9                   RET
+ 589+ 985E
+ 590+ 985E E1           PDCH    POP HL
+ 591+ 985F 01 00 02             LD BC,512
+ 591+ 9862 09            ADD HL,BC
+ 592+ 9863 18 DF                JR PDC
+ 593+ 9865              ;-------
+ 594+ 9865 3E 60        PLGCL   LD A,PLHPG
+ 594+ 9867 CD C1 68      CALL MNGC
+ 595+ 986A 21 00 C0 22          LD HL,#C000,(PHED),HL
+ 595+ 986E 18 7F
+ 596+ 9870 06 00                LD B,0
+ 596+ 9872 CD 99 69      CALL NOPING
+ 597+ 9875 AF                   XOR A
+ 598+ 9876 32 15 7F             LD (PPGP),A
+ 599+ 9879 32 16 7F             LD (PPGM),A
+ 600+ 987C C9                   RET
+ 601+ 987D              ;-------
+ 602+ 987D BE           NOMI    CP (HL)
+ 602+ 987E C0            RET NZ
+ 602+ 987F 2B            DEC HL
+ 602+ 9880 10 FB         DJNZ $-3
+ 603+ 9882 C9                   RET
+ 604+ 9883              ;---------------------------------------
+ 605+ 9883              PARmaxL EQU 32;Parameter Max Length
+ 606+ 9883              PARmaxC EQU 10;Parameters Max Count
+ 607+ 9883              OPTmaxC EQU 10;Options Max Count
+ 608+ 9883
+ 609+ 9883 21 01 B0 06  LOPTION LD HL,LOBU+1,B,PARmaxC
+ 609+ 9887 0A
+ 610+ 9888 CD 99 69             CALL NOPING
+ 611+ 988B D9                   EXX
+ 611+ 988C 21 01 B0      LD HL,LOBU+1
+ 612+ 988F D9                   EXX
+ 613+ 9890
+ 614+ 9890 11 04 B1             LD DE,LOBU+260
+ 615+ 9893 21 00 B2 7E  LPARS   LD HL,LOBULO,A,(HL)
+ 615+ 9897 B7            OR A
+ 615+ 9898 C8            RET Z
+ 616+ 9899 ED 53 00 99          LD (LcurSPO+1),DE
+ 617+ 989D 1A 32 FD 98          LD A,(DE),(LcurSL+1),A
+ 617+ 98A1 13            INC DE
+ 618+ 98A2 B7                   OR A
+ 618+ 98A3 C8            RET Z
+ 619+ 98A4 FE FC                CP 252
+ 619+ 98A6 D0            RET NC
+ 620+ 98A7 1A 32 F2 98          LD A,(DE),(LdefOP+1),A
+ 620+ 98AB 13            INC DE
+ 621+ 98AC 21 00 B4             LD HL,LOBUL2
+ 622+ 98AF 36 2D                LD (HL),"-"
+ 622+ 98B1 23            INC HL
+ 623+ 98B2 06 20                LD B,PARmaxL
+ 624+ 98B4 1A           LoptCP  LD A,(DE)
+ 625+ 98B5 FE 0B                CP OPTmaxC+1
+ 625+ 98B7 38 06         JR C,LcurOPT
+ 626+ 98B9 77                   LD (HL),A
+ 626+ 98BA 23 13         INC HL,DE
+ 627+ 98BC 10 F6                DJNZ LoptCP
+ 628+ 98BE C9                   RET
+ 629+ 98BF B7           LcurOPT OR A
+ 629+ 98C0 C8            RET Z
+ 630+ 98C1 08                   EXA
+ 630+ 98C2 78            LD A,B
+ 630+ 98C3 FE 20         CP PARmaxL
+ 630+ 98C5 C8            RET Z
+ 631+ 98C6 08                   EXA
+ 631+ 98C7 36 FF         LD (HL),#FF
+ 632+ 98C9 32 DC 98             LD (LoptCNT+2),A
+ 632+ 98CC 13            INC DE
+ 633+ 98CD D5                   PUSH DE
+ 633+ 98CE 21 00 B4 11   LD HL,LOBUL2,DE,LOBULO
+ 633+ 98D2 00 B2
+ 634+ 98D4 CD C9 9D             CALL SRHSQ
+ 635+ 98D7 D1                   POP DE
+ 635+ 98D8 28 17         JR Z,LdefOP
+ 636+ 98DA 01 00 00     LoptCNT LD BC,0
+ 637+ 98DD 7E                   LD A,(HL)
+ 637+ 98DE B7            OR A
+ 637+ 98DF C8            RET Z
+ 638+ 98E0 FE 3D                CP "="
+ 638+ 98E2 20 01         JR NZ,$+3
+ 638+ 98E4 23            INC HL
+ 639+ 98E5 C5           LoCNT   PUSH BC
+ 639+ 98E6 CD 08 A3      CALL SUU
+ 640+ 98E9 C1                   POP BC
+ 640+ 98EA 03            INC BC
+ 640+ 98EB 28 06         JR Z,LnotDEF
+ 641+ 98ED 1B 1B                DEC DE,DE
+ 642+ 98EF 10 F4                DJNZ LoCNT
+ 643+ 98F1 0E 00        LdefOP  LD C,0
+ 644+ 98F3 79           LnotDEF LD A,C
+ 645+ 98F4 D9                   EXX
+ 645+ 98F5 77            LD (HL),A
+ 645+ 98F6 23            INC HL
+ 645+ 98F7 7D            LD A,L
+ 646+ 98F8 D9                   EXX
+ 646+ 98F9 FE 0C         CP PARmaxC+1+1
+ 646+ 98FB D0            RET NC
+ 647+ 98FC 21 00 00     LcurSL  LD HL,0
+ 648+ 98FF 11 00 00     LcurSPO LD DE,0
+ 648+ 9902 19            ADD HL,DE
+ 648+ 9903 EB            EX DE,HL
+ 649+ 9904 18 8D                JR LPARS
+ 650+ 9906              ;---------------------------------------
+ 651+ 9906 DD E5        F11MENU PUSH IX
+ 652+ 9908 3A 19 7F     MNU     LD A,(PHED+1)
+ 652+ 990B FE C2         CP #C2
+ 652+ 990D DA A3 99      JP C,F1E
+ 653+ 9910
+ 654+ 9910 3E 60                LD A,PLHPG
+ 654+ 9912 CD C1 68      CALL MNGC
+ 655+ 9915 21 A5 C0 11          LD HL,#C000+165,DE,LOBU
+ 655+ 9919 00 B0
+ 656+ 991B
+ 657+ 991B 01 20 00     ZkL     LD BC,32
+ 657+ 991E ED B0         LDIR
+ 658+ 9920 01 E0 01             LD BC,512-32
+ 658+ 9923 09            ADD HL,BC
+ 659+ 9924 3A 19 7F             LD A,(PHED+1)
+ 659+ 9927 BC            CP H
+ 659+ 9928 20 F1         JR NZ,ZkL
+ 660+ 992A
+ 661+ 992A EB                   EX DE,HL
+ 661+ 992B 01 00 50      LD BC,0-LOBU
+ 661+ 992E 09            ADD HL,BC
+ 662+ 992F CB 3C                SRL H
+ 662+ 9931 CB 1D         RR L
+ 663+ 9933 CB 3C                SRL H
+ 663+ 9935 CB 1D         RR L
+ 664+ 9937 CB 3C                SRL H
+ 664+ 9939 CB 1D         RR L
+ 665+ 993B CB 3C                SRL H
+ 665+ 993D CB 1D         RR L
+ 666+ 993F CB 3C                SRL H
+ 666+ 9941 CB 1D         RR L
+ 667+ 9943 7D                   LD A,L
+ 668+ 9944
+ 669+ 9944 DD 21 36 80          LD IX,F11WND
+ 670+ 9948 F5                   PUSH AF
+ 671+ 9949 DD 77 0D             LD (IX+13),A
+ 672+ 994C C6 02                ADD A,2
+ 672+ 994E DD 77 05      LD (IX+5),A
+ 672+ 9951 CD 2C 79      CALL PRWOW
+ 673+ 9954 C1                   POP BC
+ 674+ 9955
+ 675+ 9955 21 00 B0 11          LD HL,LOBU,DE,#0101
+ 675+ 9959 01 01
+ 676+ 995B C5           SPIG    PUSH BC
+ 677+ 995C E5 D5                PUSH HL,DE
+ 678+ 995E 01 20 00             LD BC,32
+ 678+ 9961 CD 25 7D      CALL PRSRW
+ 679+ 9964 D1 E1                POP DE,HL
+ 680+ 9966 01 20 00             LD BC,32
+ 680+ 9969 09            ADD HL,BC
+ 680+ 996A 14            INC D
+ 681+ 996B C1                   POP BC
+ 682+ 996C 10 ED                DJNZ SPIG
+ 683+ 996E              ;-------
+ 684+ 996E FB           F11MC   EI
+ 684+ 996F 76            HALT
+ 684+ 9970 CD D5 7C      CALL CURSOR
+ 685+ 9973
+ 686+ 9973 CD 53 74 C4          CALL UPPP,NZ,CrUP
+ 686+ 9977 8E 62
+ 687+ 9979 CD 59 74 C4          CALL DWWW,NZ,CrDN
+ 687+ 997D 85 62
+ 688+ 997F CD 5F 74 C4          CALL LFFF,NZ,CrPU
+ 688+ 9983 96 62
+ 689+ 9985 CD 65 74 C4          CALL RGGG,NZ,CrPD
+ 689+ 9989 9F 62
+ 690+ 998B
+ 691+ 998B CD 90 74 C4          CALL DELE,NZ,PSDEL
+ 691+ 998F F8 99
+ 691+ 9991 C2 08 99      JP NZ,MNU
+ 692+ 9994
+ 693+ 9994 CD 9A 74             CALL ESC
+ 693+ 9997 20 07         JR NZ,F1e
+ 694+ 9999 CD 77 74             CALL ENKE
+ 694+ 999C 20 08         JR NZ,PSEXE
+ 695+ 999E 18 CE                JR F11MC
+ 696+ 99A0              ;-------
+ 697+ 99A0 CD CE 7A     F1e     CALL RRESB
+ 698+ 99A3 DD E1        F1E     POP IX
+ 699+ 99A5 C9                   RET
+ 700+ 99A6              ;---------------------------------------
+ 701+ 99A6 3E 60        PSEXE   LD A,PLHPG
+ 701+ 99A8 CD C1 68      CALL MNGC
+ 702+ 99AB
+ 703+ 99AB DD 7E 0C             LD A,(IX+12)
+ 703+ 99AE 3D            DEC A
+ 704+ 99AF 26 00 6F             LD H,0,L,A
+ 705+ 99B2 29          > ADD HL,HL
+ 705+ 99B3 29          > ADD HL,HL
+ 705+ 99B4 29          > ADD HL,HL
+ 705+ 99B5 29          > ADD HL,HL
+ 705+ 99B6 29          > ADD HL,HL
+ 705+ 99B7 29          > ADD HL,HL
+ 705+ 99B8 29          > ADD HL,HL
+ 705+ 99B9 29          > ADD HL,HL
+ 705+ 99BA 29          > ADD HL,HL
+ 706+ 99BB 01 00 C0             LD BC,#C000
+ 706+ 99BE 09            ADD HL,BC
+ 707+ 99BF 11 00 B0 01          LD DE,LOBU,BC,512
+ 707+ 99C3 00 02
+ 707+ 99C5 ED B0         LDIR
+ 708+ 99C7
+ 709+ 99C7 CD CE 7A             CALL RRESB
+ 710+ 99CA DD E1                POP IX
+ 711+ 99CC
+ 712+ 99CC 3A C5 B0             LD A,(LOBU+197)
+ 713+ 99CF FE 11                CP #11
+ 713+ 99D1 28 14         JR Z,TOAJT
+ 714+ 99D3 FE 13                CP #13
+ 714+ 99D5 28 10         JR Z,TOAJT
+ 715+ 99D7 FE 15                CP #15
+ 715+ 99D9 28 0C         JR Z,TOAJT
+ 716+ 99DB FE 05                CP 5
+ 716+ 99DD 28 08         JR Z,TOAJT
+ 717+ 99DF FE 02                CP 2
+ 717+ 99E1 28 04         JR Z,TOAJT
+ 718+ 99E3 FE 03                CP 3
+ 718+ 99E5 20 0B         JR NZ,PSER
+ 719+ 99E7 3E 03        TOAJT   LD A,3
+ 719+ 99E9 CD C3 70      CALL AJT
+ 720+ 99EC FE 03                CP 3
+ 720+ 99EE CC 39 8D      CALL Z,SEXY
+ 721+ 99F1 C9                   RET
+ 722+ 99F2              ;-------
+ 723+ 99F2 21 7D 83     PSER    LD HL,TER3
+ 723+ 99F5 C3 DE 90      JP ERR0
+ 724+ 99F8              ;---------------------------------------
+ 725+ 99F8 21 99 81 11  PSDEL   LD HL,TXTK,DE,#0100
+ 725+ 99FC 00 01
+ 726+ 99FE CD 2F 90             CALL DLME
+ 726+ 9A01 C8            RET Z
+ 727+ 9A02
+ 728+ 9A02 CD 1D 9A             CALL PLGDINI
+ 729+ 9A05
+ 730+ 9A05 DD 7E 0C             LD A,(IX+12)
+ 731+ 9A08 67 2E 00             LD H,A,L,0
+ 732+ 9A0B 29                   ADD HL,HL
+ 733+ 9A0C 01 00 C0             LD BC,#C000
+ 733+ 9A0F 09            ADD HL,BC
+ 734+ 9A10 CD 2F 9A             CALL PLGDEL
+ 735+ 9A13
+ 736+ 9A13 CD CE 7A             CALL RRESB
+ 737+ 9A16 3E 01 DD 77          LD A,1,(IX+12),A
+ 737+ 9A1A 0C
+ 738+ 9A1B B7                   OR A
+ 739+ 9A1C C9                   RET
+ 740+ 9A1D
+ 741+ 9A1D 3E 60        PLGDINI LD A,PLHPG
+ 741+ 9A1F CD C1 68      CALL MNGC
+ 742+ 9A22 21 00 00 11          LD HL,0,DE,1,BC,512-1
+ 742+ 9A26 01 00 01 FF
+ 742+ 9A2A 01
+ 743+ 9A2B 75                   LD (HL),L
+ 744+ 9A2C ED B0                LDIR
+ 745+ 9A2E C9                   RET
+ 746+ 9A2F 54 5D        PLGDEL  LD DE,HL
+ 746+ 9A31 15 15         DEC D,D
+ 747+ 9A33 1A                   LD A,(DE)
+ 748+ 9A34 D5                   PUSH DE
+ 749+ 9A35 E5                   PUSH HL
+ 750+ 9A36 21 00 00             LD HL,0
+ 750+ 9A39 ED 52         SBC HL,DE
+ 750+ 9A3B 44 4D         LD BC,HL
+ 751+ 9A3D E1                   POP HL
+ 751+ 9A3E ED B0         LDIR
+ 752+ 9A40 2A 18 7F             LD HL,(PHED)
+ 753+ 9A43 01 00 FE             LD BC,0-512
+ 753+ 9A46 09            ADD HL,BC
+ 754+ 9A47 22 18 7F             LD (PHED),HL
+ 755+ 9A4A E1                   POP HL
+ 756+ 9A4B
+ 757+ 9A4B CD 53 9A             CALL PSMOVE
+ 757+ 9A4E 79 32 16 7F   LD A,C,(PPGM),A
+ 758+ 9A52 C9                   RET
+ 759+ 9A53
+ 760+ 9A53              PSMOVE  ;i: A - Page (Logical)
+ 761+ 9A53              ;          HL - Headers to Patching
+ 762+ 9A53
+ 763+ 9A53 4F                   LD C,A
+ 764+ 9A54
+ 765+ 9A54 ED 5B 18 7F  PSM     LD DE,(PHED)
+ 766+ 9A58 B7                   OR A
+ 766+ 9A59 ED 52         SBC HL,DE
+ 766+ 9A5B D0            RET NC
+ 766+ 9A5C 19            ADD HL,DE
+ 767+ 9A5D 7E 71                LD A,(HL),(HL),C
+ 768+ 9A5F E5                   PUSH HL
+ 769+ 9A60 11 22 00             LD DE,34
+ 769+ 9A63 19            ADD HL,DE
+ 770+ 9A64 46                   LD B,(HL)
+ 770+ 9A65 CD 6F 9A      CALL PSMDMA
+ 771+ 9A68 E1                   POP HL
+ 772+ 9A69 11 00 02             LD DE,512
+ 772+ 9A6C 19            ADD HL,DE
+ 773+ 9A6D 18 E5                JR PSM
+ 774+ 9A6F
+ 775+ 9A6F              PSMDMA  ;i: A - Source (Logical)
+ 776+ 9A6F              ;           C - Dest (Logical)
+ 777+ 9A6F              ;           B - Ln (Pages)
+ 778+ 9A6F              ;        o: C - Dest (Logical)
+ 779+ 9A6F
+ 780+ 9A6F C6 61                ADD A,PLGPG
+ 780+ 9A71 5F            LD E,A
+ 781+ 9A72 79                   LD A,C
+ 781+ 9A73 C6 61         ADD A,PLGPG
+ 782+ 9A75 57                   LD D,A
+ 783+ 9A76 CD 7C 9A             CALL DMAPG
+ 783+ 9A79 10 FB         DJNZ $-3
+ 784+ 9A7B C9                   RET
+ 785+ 9A7C
+ 786+ 9A7C C5           DMAPG   PUSH BC
+ 787+ 9A7D 21 00 00             LD HL,0
+ 788+ 9A80 01 AF 27             LD BC,STS
+ 788+ 9A83 ED 70         INF
+ 788+ 9A85 FA 83 9A      JP M,$-2
+ 789+ 9A88 06 1A                LD B,high DMASL
+ 789+ 9A8A ED 69         OUT (C),L
+ 790+ 9A8C 06 1B                LD B,high DMASH
+ 790+ 9A8E ED 61         OUT (C),H
+ 791+ 9A90 06 1C                LD B,high DMASX
+ 791+ 9A92 ED 59         OUT (C),E
+ 792+ 9A94 06 1D                LD B,high DMADL
+ 792+ 9A96 ED 69         OUT (C),L
+ 793+ 9A98 06 1E                LD B,high DMADH
+ 793+ 9A9A ED 61         OUT (C),H
+ 794+ 9A9C 06 1F                LD B,high DMADX
+ 794+ 9A9E ED 51         OUT (C),D
+ 795+ 9AA0
+ 796+ 9AA0 06 28 3E 1F          LD B,high DMA_T,A,31
+ 796+ 9AA4 ED 79         OUT (C),A
+ 797+ 9AA6 06 26 3E FF          LD B,high DMA_N,A,255
+ 797+ 9AAA ED 79         OUT (C),A
+ 798+ 9AAC 06 27 3E 01          LD B,high DMA_C,A,%00000001
+ 798+ 9AB0 ED 79         OUT (C),A
+ 799+ 9AB2 06 27                LD B,high STS
+ 799+ 9AB4 ED 70         INF
+ 799+ 9AB6 FA B4 9A      JP M,$-2
+ 800+ 9AB9 C1                   POP BC
+ 800+ 9ABA 0C 14 1C      INC C,D,E
+ 801+ 9ABD C9                   RET
+ 802+ 9ABE              ;---------------------------------------
+ 803+ 9ABE 3E 60        GOPLG   LD A,PLHPG
+ 803+ 9AC0 CD C1 68      CALL MNGC
+ 804+ 9AC3
+ 805+ 9AC3 11 40 BE             LD DE,#C000+64-512
+ 806+ 9AC6 2A 18 7F     PLG     LD HL,(PHED)
+ 807+ 9AC9 B7                   OR A
+ 807+ 9ACA ED 52         SBC HL,DE
+ 807+ 9ACC 38 65         JR C,PF
+ 808+ 9ACE
+ 809+ 9ACE 21 FF 01             LD HL,511
+ 809+ 9AD1 19            ADD HL,DE
+ 810+ 9AD2 7E                   LD A,(HL)
+ 810+ 9AD3 23            INC HL
+ 810+ 9AD4 EB            EX DE,HL
+ 811+ 9AD5 B7                   OR A
+ 811+ 9AD6 28 0C         JR Z,OLDPLG
+ 812+ 9AD8 CB 3F                SRL A
+ 812+ 9ADA E6 01         AND %00000001
+ 813+ 9ADC 2A 17 60             LD HL,(F3ENTFL)
+ 814+ 9ADF BD                   CP L
+ 814+ 9AE0 28 02         JR Z,OLDPLG
+ 815+ 9AE2 18 E2                JR PLG
+ 816+ 9AE4
+ 817+ 9AE4 21 73 7F     OLDPLG  LD HL,ENTRY+8
+ 818+ 9AE7 D5                   PUSH DE
+ 818+ 9AE8 CD A8 92      CALL CHext
+ 818+ 9AEB EB            EX DE,HL
+ 819+ 9AEC D1                   POP DE
+ 819+ 9AED 28 D7         JR Z,PLG
+ 820+ 9AEF
+ 821+ 9AEF 37                   SCF
+ 821+ 9AF0 ED 52         SBC HL,DE
+ 822+ 9AF2 7D                   LD A,L
+ 823+ 9AF3 0E FF                LD C,255
+ 823+ 9AF5 0C            INC C
+ 823+ 9AF6 D6 03         SUB 3
+ 823+ 9AF8 20 FB         JR NZ,$-3
+ 824+ 9AFA 79 32 07 71          LD A,C,(ENV+1),A
+ 825+ 9AFE
+ 826+ 9AFE 01 C0 FF             LD BC,0-64
+ 827+ 9B01 EB           PLGE    EX DE,HL
+ 827+ 9B02 09            ADD HL,BC
+ 828+ 9B03 22 1A 7F             LD (PHEP),HL
+ 829+ 9B06 11 00 B0 01          LD DE,LOBU,BC,256
+ 829+ 9B0A 00 01
+ 829+ 9B0C ED B0         LDIR
+ 830+ 9B0E              ;-------
+ 831+ 9B0E ED 4B 2C 7F          LD BC,(ARRR)
+ 832+ 9B12 ED 5B 2E 7F          LD DE,(ARRR+2)
+ 833+ 9B16 2A A3 B0             LD HL,(LOBU+161+2)
+ 834+ 9B19 B7                   OR A
+ 834+ 9B1A ED 52         SBC HL,DE
+ 834+ 9B1C 38 15 20 08   JR C,PF,NZ,Pf
+ 835+ 9B20 2A A1 B0             LD HL,(LOBU+161)
+ 836+ 9B23 B7                   OR A
+ 836+ 9B24 ED 42         SBC HL,BC
+ 836+ 9B26 38 0B         JR C,PF
+ 837+ 9B28
+ 838+ 9B28 CD 9D 70     Pf      CALL NYAU
+ 838+ 9B2B FE 03         CP 3
+ 838+ 9B2D CC 39 8D      CALL Z,SEXY
+ 839+ 9B30
+ 840+ 9B30 FB                   EI
+ 840+ 9B31 76            HALT
+ 841+ 9B32 C9                   RET
+ 842+ 9B33              ;-------
+ 843+ 9B33 3E 01        PF      LD A,1
+ 844+ 9B35 C9                   RET
+ 845+ 9B36              ;-------
+ 846+ 9B36 3E 60        RATM    LD A,PLHPG
+ 846+ 9B38 CD C1 68      CALL MNGC
+ 847+ 9B3B
+ 848+ 9B3B 21 C5 C0 ED          LD HL,#C000+197,DE,(PHED),BC,512
+ 848+ 9B3F 5B 18 7F 01
+ 848+ 9B43 00 02
+ 849+ 9B45
+ 850+ 9B45 B7           RAT     OR A
+ 850+ 9B46 ED 52         SBC HL,DE
+ 850+ 9B48 30 16         JR NC,CAF
+ 851+ 9B4A 19                   ADD HL,DE
+ 852+ 9B4B 7E                   LD A,(HL)
+ 852+ 9B4C 09            ADD HL,BC
+ 853+ 9B4D FE 02                CP 2
+ 853+ 9B4F 20 F4         JR NZ,RAT
+ 854+ 9B51 01 3B FD             LD BC,0-(512+197)
+ 854+ 9B54 09            ADD HL,BC
+ 855+ 9B55 11 00 B0 01          LD DE,LOBU,BC,256
+ 855+ 9B59 00 01
+ 855+ 9B5B ED B0         LDIR
+ 856+ 9B5D CD C3 70             CALL AJT
+ 857+ 9B60 21 00 00     CAF     LD HL,0
+ 858+ 9B63 18 13                JR MAF
+ 859+ 9B65              ;-------
+ 860+ 9B65 CD 43 71     TMAFK   CALL TAB4E
+ 860+ 9B68 20 F6         JR NZ,CAF
+ 861+ 9B6A 2A 5C 7F             LD HL,(TABTM)
+ 861+ 9B6D 23            INC HL
+ 862+ 9B6E ED 5B 5E 7F          LD DE,(AFTM)
+ 863+ 9B72 B7                   OR A
+ 863+ 9B73 ED 52         SBC HL,DE
+ 863+ 9B75 30 BF         JR NC,RATM
+ 864+ 9B77 19                   ADD HL,DE
+ 865+ 9B78 22 5C 7F     MAF     LD (TABTM),HL
+ 866+ 9B7B C9                   RET
+ 867+ 9B7C              ;---------------------------------------
+ 868+ 9B7C
+# file closed: WCVW_repeat_fixed.ASM
+  71  9B7C                      INCLUDE "WCVW_exact_externals.inc"
+# file opened: WCVW_exact_externals.inc
+   1+ 9B7C              LDBD3 EQU #DBD3
+   2+ 9B7C              LB59F EQU #B59F
+   3+ 9B7C              MLZ50F EQU #B4B6
+   4+ 9B7C              LB4B6 EQU #B4B6
+   5+ 9B7C              DEHR1M EQU #B39F
+   6+ 9B7C              LB39F EQU #B39F
+   7+ 9B7C              L9B7C_218 EQU #AB93
+   8+ 9B7C              L9B7C_217 EQU #AB91
+   9+ 9B7C              L9B7C_216 EQU #AB12
+  10+ 9B7C              L9B7C_214 EQU #AAFE
+  11+ 9B7C              L9B7C_213 EQU #AAFD
+  12+ 9B7C              L9B7C_215 EQU #AAFF
+  13+ 9B7C              L9B7C_212 EQU #AAAD
+  14+ 9B7C              L9B7C_211 EQU #AAAB
+  15+ 9B7C              L9B7C_206 EQU #AA89
+  16+ 9B7C              L9B7C_208 EQU #AA92
+  17+ 9B7C              L9B7C_203 EQU #AA6A
+  18+ 9B7C              L9B7C_209 EQU #AA94
+  19+ 9B7C              L9B7C_202 EQU #AA62
+  20+ 9B7C              L9B7C_210 EQU #AA95
+  21+ 9B7C              L9B7C_207 EQU #AA8B
+  22+ 9B7C              L9B7C_197 EQU #AA31
+  23+ 9B7C              L9B7C_205 EQU #AA80
+  24+ 9B7C              L9B7C_199 EQU #AA3F
+  25+ 9B7C              L9B7C_204 EQU #AA7B
+  26+ 9B7C              L9B7C_195 EQU #AA2D
+  27+ 9B7C              L9B7C_200 EQU #AA50
+  28+ 9B7C              L9B7C_192 EQU #A9F4
+  29+ 9B7C              L9B7C_198 EQU #AA33
+  30+ 9B7C              L9B7C_196 EQU #AA2E
+  31+ 9B7C              L9B7C_194 EQU #AA0D
+  32+ 9B7C              L9B7C_193 EQU #A9F7
+  33+ 9B7C              L9B7C_189 EQU #A9D1
+  34+ 9B7C              L9B7C_187 EQU #A9C1
+  35+ 9B7C              L9B7C_190 EQU #A9DF
+  36+ 9B7C              L9B7C_186 EQU #A9A3
+  37+ 9B7C              L9B7C_188 EQU #A9C5
+  38+ 9B7C              L9B7C_184 EQU #A96B
+  39+ 9B7C              L9B7C_185 EQU #A974
+  40+ 9B7C              L9B7C_182 EQU #A952
+  41+ 9B7C              L9B7C_181 EQU #A939
+  42+ 9B7C              L9B7C_179 EQU #A900
+  43+ 9B7C              L9B7C_178 EQU #A8FC
+  44+ 9B7C              L9B7C_177 EQU #A8F2
+  45+ 9B7C              L9B7C_176 EQU #A8E8
+  46+ 9B7C              L9B7C_175 EQU #A8D8
+  47+ 9B7C              L9B7C_174 EQU #A8CF
+  48+ 9B7C              L9B7C_173 EQU #A8B8
+  49+ 9B7C              L9B7C_171 EQU #A81D
+  50+ 9B7C              L9B7C_170 EQU #A816
+  51+ 9B7C              L9B7C_169 EQU #A7FD
+  52+ 9B7C              L9B7C_167 EQU #A7E5
+  53+ 9B7C              L9B7C_166 EQU #A7D8
+  54+ 9B7C              L9B7C_168 EQU #A7E6
+  55+ 9B7C              L9B7C_165 EQU #A7A6
+  56+ 9B7C              DINT EQU #A721
+  57+ 9B7C              L9B7C_161 EQU #A717
+  58+ 9B7C              L9B7C_156 EQU #A6BD
+  59+ 9B7C              L9B7C_155 EQU #A6B2
+  60+ 9B7C              L9B7C_154 EQU #A6A6
+  61+ 9B7C              L9B7C_157 EQU #A6C2
+  62+ 9B7C              L9B7C_159 EQU #A6DA
+  63+ 9B7C              L9B7C_158 EQU #A6CC
+  64+ 9B7C              L9B7C_153 EQU #A688
+  65+ 9B7C              L9B7C_152 EQU #A676
+  66+ 9B7C              L9B7C_149 EQU #A653
+  67+ 9B7C              L9B7C_146 EQU #A636
+  68+ 9B7C              L9B7C_145 EQU #A62E
+  69+ 9B7C              L9B7C_148 EQU #A649
+  70+ 9B7C              L9B7C_150 EQU #A661
+  71+ 9B7C              L9B7C_144 EQU #A625
+  72+ 9B7C              L9B7C_143 EQU #A608
+  73+ 9B7C              L9B7C_142 EQU #A5F6
+  74+ 9B7C              L9B7C_139 EQU #A5D3
+  75+ 9B7C              L9B7C_137 EQU #A5C4
+  76+ 9B7C              L9B7C_136 EQU #A5B9
+  77+ 9B7C              L9B7C_135 EQU #A5AD
+  78+ 9B7C              L9B7C_134 EQU #A5AA
+  79+ 9B7C              L9B7C_133 EQU #A5A3
+  80+ 9B7C              L9B7C_132 EQU #A59D
+  81+ 9B7C              L9B7C_131 EQU #A593
+  82+ 9B7C              L9B7C_138 EQU #A5C9
+  83+ 9B7C              L9B7C_140 EQU #A5E1
+  84+ 9B7C              L9B7C_130 EQU #A589
+  85+ 9B7C              L9B7C_160 EQU #A6EC
+  86+ 9B7C              L9B7C_129 EQU #A561
+  87+ 9B7C              L9B7C_128 EQU #A54F
+  88+ 9B7C              L9B7C_126 EQU #A54A
+  89+ 9B7C              L9B7C_125 EQU #A540
+  90+ 9B7C              L9B7C_124 EQU #A534
+  91+ 9B7C              L9B7C_123 EQU #A515
+  92+ 9B7C              L9B7C_141 EQU #A5F3
+  93+ 9B7C              L9B7C_127 EQU #A54C
+  94+ 9B7C              L9B7C_151 EQU #A673
+  95+ 9B7C              L9B7C_122 EQU #A504
+  96+ 9B7C              SORT EQU #A4F4
+  97+ 9B7C              L9B7C_117 EQU #A4C7
+  98+ 9B7C              L9B7C_118 EQU #A4CA
+  99+ 9B7C              L9B7C_116 EQU #A4BA
+ 100+ 9B7C              L9B7C_112 EQU #A4A6
+ 101+ 9B7C              L9B7C_113 EQU #A4A8
+ 102+ 9B7C              L9B7C_114 EQU #A4AD
+ 103+ 9B7C              L9B7C_111 EQU #A48E
+ 104+ 9B7C              GENNAM EQU #A489
+ 105+ 9B7C              L9B7C_110 EQU #A489
+ 106+ 9B7C              SERNLOD EQU #A46C
+ 107+ 9B7C              L9B7C_108 EQU #A46A
+ 108+ 9B7C              L9B7C_106 EQU #A44A
+ 109+ 9B7C              L9B7C_107 EQU #A44D
+ 110+ 9B7C              L9B7C_105 EQU #A42A
+ 111+ 9B7C              L9B7C_104 EQU #A403
+ 112+ 9B7C              L9B7C_103 EQU #A3FC
+ 113+ 9B7C              L9B7C_102 EQU #A3C9
+ 114+ 9B7C              L9B7C_100 EQU #A3A2
+ 115+ 9B7C              L9B7C_98 EQU #A386
+ 116+ 9B7C              L9B7C_97 EQU #A385
+ 117+ 9B7C              L9B7C_96 EQU #A372
+ 118+ 9B7C              L9B7C_95 EQU #A368
+ 119+ 9B7C              L9B7C_94 EQU #A359
+ 120+ 9B7C              L9B7C_119 EQU #A4CF
+ 121+ 9B7C              L9B7C_109 EQU #A46C
+ 122+ 9B7C              L9B7C_101 EQU #A3C0
+ 123+ 9B7C              L9B7C_93 EQU #A33E
+ 124+ 9B7C              L9B7C_120 EQU #A4E5
+ 125+ 9B7C              L9B7C_164 EQU #A733
+ 126+ 9B7C              L9B7C_92 EQU #A31B
+ 127+ 9B7C              L9B7C_90 EQU #A2FE
+ 128+ 9B7C              L9B7C_89 EQU #A2FA
+ 129+ 9B7C              L9B7C_88 EQU #A2E6
+ 130+ 9B7C              PARSING EQU #A2E3
+ 131+ 9B7C              L9B7C_83 EQU #A2C3
+ 132+ 9B7C              L9B7C_84 EQU #A2C6
+ 133+ 9B7C              L9B7C_81 EQU #A2BD
+ 134+ 9B7C              L9B7C_85 EQU #A2C9
+ 135+ 9B7C              L9B7C_82 EQU #A2C0
+ 136+ 9B7C              L9B7C_80 EQU #A298
+ 137+ 9B7C              L9B7C_86 EQU #A2D8
+ 138+ 9B7C              INILOAD EQU #A285
+ 139+ 9B7C              L9B7C_79 EQU #A285
+ 140+ 9B7C              LINI EQU #A243
+ 141+ 9B7C              L9B7C_77 EQU #A23A
+ 142+ 9B7C              L9B7C_74 EQU #A20E
+ 143+ 9B7C              L9B7C_73 EQU #A1E0
+ 144+ 9B7C              LAB9F EQU #AB9F
+ 145+ 9B7C              L9B7C_72 EQU #A176
+ 146+ 9B7C              VDAC EQU #A13E
+ 147+ 9B7C              L9B7C_70 EQU #A113
+ 148+ 9B7C              IERR EQU #A0EA
+ 149+ 9B7C              L9B7C_87 EQU #A2E3
+ 150+ 9B7C              L9B7C_69 EQU #A0EA
+ 151+ 9B7C              L9B7C_71 EQU #A13E
+ 152+ 9B7C              L9B7C_68 EQU #A0CE
+ 153+ 9B7C              L9B7C_66 EQU #A0BD
+ 154+ 9B7C              L9B7C_67 EQU #A0CB
+ 155+ 9B7C              L9B7C_65 EQU #A0A3
+ 156+ 9B7C              L9B7C_60 EQU #A05D
+ 157+ 9B7C              L9B7C_59 EQU #A051
+ 158+ 9B7C              L9B7C_61 EQU #A060
+ 159+ 9B7C              L9B7C_57 EQU #A041
+ 160+ 9B7C              L9B7C_56 EQU #A038
+ 161+ 9B7C              L9B7C_55 EQU #A034
+ 162+ 9B7C              L9B7C_54 EQU #A02B
+ 163+ 9B7C              L9B7C_53 EQU #A029
+ 164+ 9B7C              L9B7C_58 EQU #A044
+ 165+ 9B7C              L9B7C_48 EQU #9FB7
+ 166+ 9B7C              L9B7C_47 EQU #9FAB
+ 167+ 9B7C              L9B7C_49 EQU #9FF0
+ 168+ 9B7C              L9B7C_46 EQU #9F9E
+ 169+ 9B7C              L9B7C_50 EQU #9FFD
+ 170+ 9B7C              L9B7C_51 EQU #A001
+ 171+ 9B7C              L9B7C_43 EQU #9F45
+ 172+ 9B7C              L9B7C_44 EQU #9F53
+ 173+ 9B7C              L9B7C_41 EQU #9EF7
+ 174+ 9B7C              L9B7C_45 EQU #9F62
+ 175+ 9B7C              L9B7C_40 EQU #9ECE
+ 176+ 9B7C              L9B7C_39 EQU #9EB2
+ 177+ 9B7C              L9B7C_38 EQU #9EA8
+ 178+ 9B7C              L9B7C_37 EQU #9E91
+ 179+ 9B7C              L9B7C_36 EQU #9E7F
+ 180+ 9B7C              L9B7C_35 EQU #9E60
+ 181+ 9B7C              L9B7C_34 EQU #9E5B
+ 182+ 9B7C              L9B7C_33 EQU #9E4D
+ 183+ 9B7C              CURVA EQU #9E44
+ 184+ 9B7C              L9B7C_30 EQU #9E29
+ 185+ 9B7C              L9B7C_29 EQU #9E1C
+ 186+ 9B7C              L9B7C_31 EQU #9E3C
+ 187+ 9B7C              L9B7C_28 EQU #9DFD
+ 188+ 9B7C              L9B7C_27 EQU #9DEA
+ 189+ 9B7C              PRCONF EQU #9DE7
+ 190+ 9B7C              L9B7C_25 EQU #9DE2
+ 191+ 9B7C              L9B7C_24 EQU #9DD2
+ 192+ 9B7C              L9B7C_22 EQU #9DBA
+ 193+ 9B7C              L9B7C_21 EQU #9DA4
+ 194+ 9B7C              GINI EQU #9D1B
+ 195+ 9B7C              MINI EQU #9D11
+ 196+ 9B7C              L9B7C_18 EQU #9D0B
+ 197+ 9B7C              L9B7C_14 EQU #9CBC
+ 198+ 9B7C              L9B7C_15 EQU #9CD0
+ 199+ 9B7C              L9B7C_172 EQU #A897
+ 200+ 9B7C              L9B7C_17 EQU #9CEC
+ 201+ 9B7C              L9B7C_16 EQU #9CD9
+ 202+ 9B7C              L9B7C_19 EQU #9D11
+ 203+ 9B7C              L9B7C_20 EQU #9D1B
+ 204+ 9B7C              L9B7C_78 EQU #A243
+ 205+ 9B7C              L9B7C_183 EQU #A96A
+ 206+ 9B7C              L9B7C_180 EQU #A931
+ 207+ 9B7C              L9B7C_11 EQU #9C39
+ 208+ 9B7C              L9B7C_10 EQU #9C2C
+ 209+ 9B7C              L9B7C_7 EQU #9C1E
+ 210+ 9B7C              L9B7C_8 EQU #9C24
+ 211+ 9B7C              L9B7C_9 EQU #9C27
+ 212+ 9B7C              L9B7C_3 EQU #9BFE
+ 213+ 9B7C              L9B7C_4 EQU #9C04
+ 214+ 9B7C              L9B7C_5 EQU #9C07
+ 215+ 9B7C              L9B7C_12 EQU #9C3C
+ 216+ 9B7C              L9B7C_6 EQU #9C0C
+ 217+ 9B7C              L9B7C_2 EQU #9BEC
+ 218+ 9B7C              L9B7C_1 EQU #9BDB
+ 219+ 9B7C              L9B7C_26 EQU #9DE7
+ 220+ 9B7C              L9B7C_0 EQU #9BA5
+ 221+ 9B7C              L9B7C_32 EQU #9E44
+ 222+ 9B7C              L9B7C_147 EQU #A643
+ 223+ 9B7C              L9B7C EQU #9B7C
+ 224+ 9B7C              L9149_107 EQU #9B65
+ 225+ 9B7C              L9149_108 EQU #9B78
+ 226+ 9B7C              L9149_106 EQU #9B60
+ 227+ 9B7C              L9149_105 EQU #9B45
+ 228+ 9B7C              L9149_104 EQU #9B36
+ 229+ 9B7C              L9149_102 EQU #9B28
+ 230+ 9B7C              L9149_100 EQU #9AF5
+ 231+ 9B7C              L9149_99 EQU #9AE4
+ 232+ 9B7C              L9149_103 EQU #9B33
+ 233+ 9B7C              L9149_98 EQU #9AC6
+ 234+ 9B7C              L9149_96 EQU #9AB4
+ 235+ 9B7C              L9149_95 EQU #9A83
+ 236+ 9B7C              L9149_94 EQU #9A7C
+ 237+ 9B7C              L9149_93 EQU #9A76
+ 238+ 9B7C              L9149_92 EQU #9A6F
+ 239+ 9B7C              L9149_91 EQU #9A54
+ 240+ 9B7C              L9149_90 EQU #9A53
+ 241+ 9B7C              L9149_86 EQU #99F2
+ 242+ 9B7C              L9149_85 EQU #99E7
+ 243+ 9B7C              L9149_84 EQU #99A6
+ 244+ 9B7C              L9149_82 EQU #99A0
+ 245+ 9B7C              L9149_87 EQU #99F8
+ 246+ 9B7C              L9149_81 EQU #996E
+ 247+ 9B7C              L9149_80 EQU #995B
+ 248+ 9B7C              L9149_79 EQU #991B
+ 249+ 9B7C              L9149_83 EQU #99A3
+ 250+ 9B7C              L9149_78 EQU #9908
+ 251+ 9B7C              L9149_77 EQU #9906
+ 252+ 9B7C              L9149_76 EQU #98F3
+ 253+ 9B7C              L9B7C_91 EQU #A308
+ 254+ 9B7C              L9149_74 EQU #98E5
+ 255+ 9B7C              L9149_75 EQU #98F1
+ 256+ 9B7C              L9B7C_23 EQU #9DC9
+ 257+ 9B7C              L9149_73 EQU #98BF
+ 258+ 9B7C              L9149_72 EQU #98B4
+ 259+ 9B7C              L9149_71 EQU #9893
+ 260+ 9B7C              L9149_67 EQU #985E
+ 261+ 9B7C              L9149_66 EQU #9853
+ 262+ 9B7C              L9149_65 EQU #9844
+ 263+ 9B7C              L9B7C_76 EQU #A226
+ 264+ 9B7C              L9149_63 EQU #983B
+ 265+ 9B7C              L9B7C_75 EQU #A219
+ 266+ 9B7C              L9149_61 EQU #97F5
+ 267+ 9B7C              L9149_69 EQU #987D
+ 268+ 9B7C              L9149_62 EQU #982A
+ 269+ 9B7C              L9149_60 EQU #97B9
+ 270+ 9B7C              L9149_59 EQU #97A4
+ 271+ 9B7C              L9149_64 EQU #9841
+ 272+ 9B7C              L9149_70 EQU #9883
+ 273+ 9B7C              L9149_57 EQU #9741
+ 274+ 9B7C              L9149_58 EQU #974F
+ 275+ 9B7C              L9149_89 EQU #9A2F
+ 276+ 9B7C              L9149_88 EQU #9A1D
+ 277+ 9B7C              L9149_56 EQU #971B
+ 278+ 9B7C              L9149_55 EQU #9715
+ 279+ 9B7C              L9149_54 EQU #96FC
+ 280+ 9B7C              L9149_51 EQU #96C8
+ 281+ 9B7C              L9149_50 EQU #96BD
+ 282+ 9B7C              L9149_52 EQU #96CC
+ 283+ 9B7C              L9149_49 EQU #96AA
+ 284+ 9B7C              L9149_48 EQU #9675
+ 285+ 9B7C              L9149_53 EQU #96D2
+ 286+ 9B7C              L9149_47 EQU #9638
+ 287+ 9B7C              L9149_46 EQU #962F
+ 288+ 9B7C              L9149_45 EQU #9627
+ 289+ 9B7C              L9149_44 EQU #9612
+ 290+ 9B7C              L9149_43 EQU #95FF
+ 291+ 9B7C              L9149_42 EQU #95B2
+ 292+ 9B7C              L9B7C_163 EQU #A72B
+ 293+ 9B7C              L9149_39 EQU #94DA
+ 294+ 9B7C              L9149_40 EQU #94E0
+ 295+ 9B7C              L9149_41 EQU #94F5
+ 296+ 9B7C              L9149_37 EQU #94B7
+ 297+ 9B7C              L9149_38 EQU #94C3
+ 298+ 9B7C              L9149_36 EQU #949C
+ 299+ 9B7C              L9149_35 EQU #9496
+ 300+ 9B7C              L9149_34 EQU #947B
+ 301+ 9B7C              L9149_33 EQU #9439
+ 302+ 9B7C              L9149_32 EQU #93F1
+ 303+ 9B7C              L9149_31 EQU #93C0
+ 304+ 9B7C              L9149_30 EQU #93B2
+ 305+ 9B7C              L9B7C_162 EQU #A721
+ 306+ 9B7C              L9149_28 EQU #9353
+ 307+ 9B7C              L9149_29 EQU #9360
+ 308+ 9B7C              L9149_27 EQU #9319
+ 309+ 9B7C              L9149_26 EQU #9308
+ 310+ 9B7C              L9149_25 EQU #92FF
+ 311+ 9B7C              L9149_24 EQU #92FD
+ 312+ 9B7C              L9149_23 EQU #92E9
+ 313+ 9B7C              L9149_97 EQU #9ABE
+ 314+ 9B7C              L9149_22 EQU #92CA
+ 315+ 9B7C              L9149_19 EQU #92A8
+ 316+ 9B7C              L9149_18 EQU #929E
+ 317+ 9B7C              L9149_16 EQU #9295
+ 318+ 9B7C              L9149_17 EQU #9297
+ 319+ 9B7C              L9149_15 EQU #9281
+ 320+ 9B7C              L9149_14 EQU #926D
+ 321+ 9B7C              L9149_13 EQU #9254
+ 322+ 9B7C              L9149_12 EQU #9242
+ 323+ 9B7C              L9149_10 EQU #920E
+ 324+ 9B7C              L9149_11 EQU #9221
+ 325+ 9B7C              L9149_9 EQU #9200
+ 326+ 9B7C              L9149_8 EQU #91E3
+ 327+ 9B7C              L9149_6 EQU #91C7
+ 328+ 9B7C              L9149_5 EQU #91B4
+ 329+ 9B7C              L9149_4 EQU #91A9
+ 330+ 9B7C              L9149_3 EQU #9197
+ 331+ 9B7C              L9149_7 EQU #91CF
+ 332+ 9B7C              L9149_0 EQU #9152
+ 333+ 9B7C              L9149_20 EQU #92BA
+ 334+ 9B7C              L9149 EQU #9149
+ 335+ 9B7C              TOBUX EQU #913E
+ 336+ 9B7C              L9149_101 EQU #9B01
+ 337+ 9B7C              L8531_153 EQU #911B
+ 338+ 9B7C              L8531_154 EQU #913E
+ 339+ 9B7C              L8531_151 EQU #9100
+ 340+ 9B7C              L8531_152 EQU #9113
+ 341+ 9B7C              L8531_150 EQU #90FB
+ 342+ 9B7C              WND EQU #8487
+ 343+ 9B7C              TXTC EQU #8491
+ 344+ 9B7C              BETA EQU #83C7
+ 345+ 9B7C              TEM0 EQU #83BE
+ 346+ 9B7C              TER4 EQU #83A4
+ 347+ 9B7C              TER3 EQU #837D
+ 348+ 9B7C              TERCU EQU #836B
+ 349+ 9B7C              TERD8 EQU #835B
+ 350+ 9B7C              TERD7 EQU #833A
+ 351+ 9B7C              TERC6 EQU #8328
+ 352+ 9B7C              TERC5 EQU #8311
+ 353+ 9B7C              TERC4 EQU #82FA
+ 354+ 9B7C              TERC3 EQU #82E5
+ 355+ 9B7C              TERC2 EQU #82CE
+ 356+ 9B7C              TERC1 EQU #82B9
+ 357+ 9B7C              TER2X EQU #82A7
+ 358+ 9B7C              L9B7C_99 EQU #A390
+ 359+ 9B7C              TER30 EQU #8294
+ 360+ 9B7C              TER2F EQU #8270
+ 361+ 9B7C              TER2D EQU #825A
+ 362+ 9B7C              L9B7C_115 EQU #A4B4
+ 363+ 9B7C              TER2C EQU #823F
+ 364+ 9B7C              TER2B EQU #8226
+ 365+ 9B7C              TER2 EQU #81F8
+ 366+ 9B7C              TER1 EQU #81E6
+ 367+ 9B7C              TER0 EQU #81D3
+ 368+ 9B7C              TCT0 EQU #81CD
+ 369+ 9B7C              TXTL EQU #81A9
+ 370+ 9B7C              TXTK EQU #8199
+ 371+ 9B7C              TXTG EQU #8187
+ 372+ 9B7C              TXTF EQU #817C
+ 373+ 9B7C              TXTE EQU #8161
+ 374+ 9B7C              TXTD EQU #8148
+ 375+ 9B7C              TXTB EQU #813F
+ 376+ 9B7C              TXT10 EQU #812F
+ 377+ 9B7C              TXTD7 EQU #8150
+ 378+ 9B7C              TXT9 EQU #8126
+ 379+ 9B7C              TXT8 EQU #811F
+ 380+ 9B7C              TXT7 EQU #8116
+ 381+ 9B7C              TXT6 EQU #8105
+ 382+ 9B7C              EXTZ EQU #80F5
+ 383+ 9B7C              FREQS EQU #80D3
+ 384+ 9B7C              FRWNDH EQU #80C4
+ 385+ 9B7C              FRWND EQU #80AE
+ 386+ 9B7C              GRWND EQU #8098
+ 387+ 9B7C              BASEOP EQU #0
+ 388+ 9B7C              THDD EQU #8412
+ 389+ 9B7C              TXT4 EQU #8401
+ 390+ 9B7C              DSWND EQU #8082
+ 391+ 9B7C              SORTIP EQU #83F0
+ 392+ 9B7C              SMWND EQU #8070
+ 393+ 9B7C              F11BOT EQU #8059
+ 394+ 9B7C              F11TXT EQU #804C
+ 395+ 9B7C              F11WND EQU #8036
+ 396+ 9B7C              LGWND EQU #802A
+ 397+ 9B7C              ABTXT EQU #83D3
+ 398+ 9B7C              ABHED EQU #83CB
+ 399+ 9B7C              HPWND EQU #8018
+ 400+ 9B7C              ABWND EQU #800C
+ 401+ 9B7C              MDWND EQU #7FF4
+ 402+ 9B7C              PBWND EQU #7FE2
+ 403+ 9B7C              ERSL EQU #7FD2
+ 404+ 9B7C              ERHD EQU #7FC9
+ 405+ 9B7C              ERWND EQU #7FB7
+ 406+ 9B7C              WCINI EQU #7FAF
+ 407+ 9B7C              WCDIR EQU #7FAB
+ 408+ 9B7C              TXT01n EQU #7FA3
+ 409+ 9B7C              TXT00y EQU #7F9B
+ 410+ 9B7C              TXT01 EQU #7F93
+ 411+ 9B7C              TXT00 EQU #7F8B
+ 412+ 9B7C              ENTRY EQU #7F6B
+ 413+ 9B7C              TTM EQU #7F63
+ 414+ 9B7C              TMR EQU #7F60
+ 415+ 9B7C              AFTM EQU #7F5E
+ 416+ 9B7C              TABTM EQU #7F5C
+ 417+ 9B7C              VXofH EQU #7F5B
+ 418+ 9B7C              VXofL EQU #7F5A
+ 419+ 9B7C              VYofH EQU #7F59
+ 420+ 9B7C              VYofL EQU #7F58
+ 421+ 9B7C              VVmod EQU #7F57
+ 422+ 9B7C              VVpag EQU #7F56
+ 423+ 9B7C              LXY EQU #7F54
+ 424+ 9B7C              CLRN EQU #7F53
+ 425+ 9B7C              L9149_68 EQU #9865
+ 426+ 9B7C              TTDE EQU #7F51
+ 427+ 9B7C              TTHL EQU #7F4F
+ 428+ 9B7C              INTPS EQU #7F4E
+ 429+ 9B7C              INTTM EQU #7F4D
+ 430+ 9B7C              INTPL EQU #7F4C
+ 431+ 9B7C              AADE EQU #7F4A
+ 432+ 9B7C              AAHL EQU #7F48
+ 433+ 9B7C              MRRN EQU #7F46
+ 434+ 9B7C              MRCT EQU #7F44
+ 435+ 9B7C              STUS EQU #7F43
+ 436+ 9B7C              RSTA EQU #7F42
+ 437+ 9B7C              PBNOW EQU #7F3E
+ 438+ 9B7C              IXHL EQU #7F3C
+ 439+ 9B7C              ERRR EQU #7F38
+ 440+ 9B7C              DRRR EQU #7F34
+ 441+ 9B7C              CRRR EQU #7F30
+ 442+ 9B7C              ARRR EQU #7F2C
+ 443+ 9B7C              BRRR EQU #7F28
+ 444+ 9B7C              SPBU EQU #7F26
+ 445+ 9B7C              DAS EQU #7F23
+ 446+ 9B7C              DDA EQU #7F22
+ 447+ 9B7C              DSA EQU #7F21
+ 448+ 9B7C              AYZ80 EQU #7F1F
+ 449+ 9B7C              WID EQU #7F1D
+ 450+ 9B7C              LFLT EQU #7F1C
+ 451+ 9B7C              PHEP EQU #7F1A
+ 452+ 9B7C              PHED EQU #7F18
+ 453+ 9B7C              PPG2 EQU #7F17
+ 454+ 9B7C              PPGM EQU #7F16
+ 455+ 9B7C              PPGP EQU #7F15
+ 456+ 9B7C              PPFR EQU #7F14
+ 457+ 9B7C              CNSL EQU #7F13
+ 458+ 9B7C              CSEL EQU #7F12
+ 459+ 9B7C              SFIL EQU #7F0D
+ 460+ 9B7C              SDIR EQU #7F08
+ 461+ 9B7C              PALLIT EQU #7EE8
+ 462+ 9B7C              WINDO2 EQU #7EC4
+ 463+ 9B7C              DRVRS EQU #7
+ 464+ 9B7C              DEFRQ EQU #1
+ 465+ 9B7C              HEIMAX EQU #24
+ 466+ 9B7C              WID2 EQU #5A
+ 467+ 9B7C              WID1 EQU #50
+ 468+ 9B7C              CATMX EQU #9
+ 469+ 9B7C              RRPNL EQU #2000
+ 470+ 9B7C              RLPNL EQU #1000
+ 471+ 9B7C              CPPG2 EQU #1F
+ 472+ 9B7C              CPPG1 EQU #1E
+ 473+ 9B7C              TBG EQU #17
+ 474+ 9B7C              CURclr EQU #58
+ 475+ 9B7C              WNDCLR EQU #1F
+ 476+ 9B7C              CURmsk EQU #7
+ 477+ 9B7C              L7828_99 EQU #7E8E
+ 478+ 9B7C              L7828_100 EQU #7E95
+ 479+ 9B7C              L7828_98 EQU #7E81
+ 480+ 9B7C              L7828_97 EQU #7E6B
+ 481+ 9B7C              L7828_95 EQU #7E47
+ 482+ 9B7C              L7828_90 EQU #7E06
+ 483+ 9B7C              L7828_89 EQU #7E01
+ 484+ 9B7C              L7828_88 EQU #7DFC
+ 485+ 9B7C              L7828_91 EQU #7E08
+ 486+ 9B7C              L7828_86 EQU #7DE4
+ 487+ 9B7C              L7828_87 EQU #7DE8
+ 488+ 9B7C              L7828_92 EQU #7E0C
+ 489+ 9B7C              L7828_96 EQU #7E5A
+ 490+ 9B7C              L7828_94 EQU #7E37
+ 491+ 9B7C              L7828_85 EQU #7DCC
+ 492+ 9B7C              L7828_93 EQU #7E2E
+ 493+ 9B7C              L7828_84 EQU #7DC5
+ 494+ 9B7C              L7828_83 EQU #7DBE
+ 495+ 9B7C              L7828_82 EQU #7DB8
+ 496+ 9B7C              L7828_81 EQU #7D8F
+ 497+ 9B7C              TXTPR EQU #7D81
+ 498+ 9B7C              L7828_79 EQU #7D76
+ 499+ 9B7C              L7828_78 EQU #7D75
+ 500+ 9B7C              L7828_77 EQU #7D6A
+ 501+ 9B7C              GADRW EQU #7D45
+ 502+ 9B7C              L7828_74 EQU #7D40
+ 503+ 9B7C              L7828_76 EQU #7D51
+ 504+ 9B7C              PRIAT EQU #7D39
+ 505+ 9B7C              PRSRW EQU #7D25
+ 506+ 9B7C              L7828_70 EQU #7D00
+ 507+ 9B7C              L7828_71 EQU #7D12
+ 508+ 9B7C              L7828_68 EQU #7CED
+ 509+ 9B7C              L7828_66 EQU #7CCF
+ 510+ 9B7C              L7828_65 EQU #7CAF
+ 511+ 9B7C              CURSORF EQU #7CAF
+ 512+ 9B7C              L7828_63 EQU #7C9C
+ 513+ 9B7C              L7828_62 EQU #7C83
+ 514+ 9B7C              L7828_60 EQU #7C64
+ 515+ 9B7C              L7828_59 EQU #7C55
+ 516+ 9B7C              L7828_58 EQU #7C4F
+ 517+ 9B7C              L7828_57 EQU #7C47
+ 518+ 9B7C              L7828_56 EQU #7C2F
+ 519+ 9B7C              L7828_54 EQU #7C19
+ 520+ 9B7C              L7828_55 EQU #7C1A
+ 521+ 9B7C              L7828_61 EQU #7C69
+ 522+ 9B7C              L7828_53 EQU #7C03
+ 523+ 9B7C              L7828_52 EQU #7BF8
+ 524+ 9B7C              L7828_50 EQU #7BDC
+ 525+ 9B7C              L9149_2 EQU #916B
+ 526+ 9B7C              L7828_49 EQU #7BC3
+ 527+ 9B7C              L7828_47 EQU #7B8D
+ 528+ 9B7C              L7828_51 EQU #7BEC
+ 529+ 9B7C              L7828_64 EQU #7CA6
+ 530+ 9B7C              L7828_46 EQU #7B4A
+ 531+ 9B7C              L7828_48 EQU #7B93
+ 532+ 9B7C              L7828_45 EQU #7B42
+ 533+ 9B7C              L7828_43 EQU #7B25
+ 534+ 9B7C              L7828_42 EQU #7B21
+ 535+ 9B7C              L7828_41 EQU #7B03
+ 536+ 9B7C              L7828_40 EQU #7AF9
+ 537+ 9B7C              L7828_39 EQU #7AE9
+ 538+ 9B7C              L7828_37 EQU #7AB4
+ 539+ 9B7C              L7828_36 EQU #7AAA
+ 540+ 9B7C              L7828_35 EQU #7A9A
+ 541+ 9B7C              L7828_34 EQU #7A7B
+ 542+ 9B7C              L7828_33 EQU #7A69
+ 543+ 9B7C              L7828_31 EQU #7A4B
+ 544+ 9B7C              L7828_29 EQU #7A31
+ 545+ 9B7C              L7828_25 EQU #7A0B
+ 546+ 9B7C              L7828_27 EQU #7A19
+ 547+ 9B7C              L7828_24 EQU #79FE
+ 548+ 9B7C              L7828_26 EQU #7A0E
+ 549+ 9B7C              L7828_30 EQU #7A3F
+ 550+ 9B7C              L7828_22 EQU #79A1
+ 551+ 9B7C              L7828_21 EQU #798E
+ 552+ 9B7C              L7828_19 EQU #796C
+ 553+ 9B7C              L7828_18 EQU #7959
+ 554+ 9B7C              L7828_17 EQU #7946
+ 555+ 9B7C              L7828_20 EQU #797B
+ 556+ 9B7C              L7828_23 EQU #79B0
+ 557+ 9B7C              L7828_16 EQU #7939
+ 558+ 9B7C              L7828_28 EQU #7A27
+ 559+ 9B7C              FONT32L3 EQU #AB9F
+ 560+ 9B7C              L7828_15 EQU #78FF
+ 561+ 9B7C              L7828_14 EQU #78DE
+ 562+ 9B7C              L7828_13 EQU #78D6
+ 563+ 9B7C              L7828_12 EQU #78CB
+ 564+ 9B7C              L7828_11 EQU #78AC
+ 565+ 9B7C              L7828_10 EQU #78A0
+ 566+ 9B7C              L7828_8 EQU #789B
+ 567+ 9B7C              L7828_9 EQU #789E
+ 568+ 9B7C              L7828_7 EQU #7891
+ 569+ 9B7C              L7828_75 EQU #7D45
+ 570+ 9B7C              L7828_6 EQU #787B
+ 571+ 9B7C              L7828_5 EQU #7873
+ 572+ 9B7C              L7828_4 EQU #7869
+ 573+ 9B7C              L7828_3 EQU #785C
+ 574+ 9B7C              PBPRINT EQU #785C
+ 575+ 9B7C              L7828_2 EQU #7854
+ 576+ 9B7C              L7828_1 EQU #784C
+ 577+ 9B7C              L7828_0 EQU #7839
+ 578+ 9B7C              L7828 EQU #7828
+ 579+ 9B7C              BAL EQU #76C1
+ 580+ 9B7C              BPD EQU #76C0
+ 581+ 9B7C              BED EQU #76BF
+ 582+ 9B7C              BPU EQU #76BE
+ 583+ 9B7C              BHM EQU #76BD
+ 584+ 9B7C              BRG EQU #76BC
+ 585+ 9B7C              BDN EQU #76BB
+ 586+ 9B7C              PBINIT EQU #7828
+ 587+ 9B7C              BLF EQU #76BA
+ 588+ 9B7C              BUP EQU #76B9
+ 589+ 9B7C              BFS EQU #76B8
+ 590+ 9B7C              BSS EQU #76B7
+ 591+ 9B7C              BCS EQU #76B6
+ 592+ 9B7C              BCA EQU #76B5
+ 593+ 9B7C              L8531_128 EQU #8FBD
+ 594+ 9B7C              IISP EQU #7826
+ 595+ 9B7C              ICUP EQU #7824
+ 596+ 9B7C              ISAD EQU #7822
+ 597+ 9B7C              IBSZ EQU #7820
+ 598+ 9B7C              IWOF EQU #781E
+ 599+ 9B7C              IWAD EQU #781C
+ 600+ 9B7C              LANG EQU #781A
+ 601+ 9B7C              CLTT EQU #7818
+ 602+ 9B7C              ISI6 EQU #7815
+ 603+ 9B7C              ISI5 EQU #7812
+ 604+ 9B7C              ISI4 EQU #780F
+ 605+ 9B7C              ISI3 EQU #780C
+ 606+ 9B7C              ISI2 EQU #7809
+ 607+ 9B7C              L8531_68 EQU #8ADD
+ 608+ 9B7C              ISI1 EQU #7806
+ 609+ 9B7C              ISIC EQU #7802
+ 610+ 9B7C              ISII EQU #77F8
+ 611+ 9B7C              ISIL EQU #77F4
+ 612+ 9B7C              ISINF EQU #77F2
+ 613+ 9B7C              TAIR2 EQU #77BF
+ 614+ 9B7C              TAIR1 EQU #778C
+ 615+ 9B7C              TAIR0 EQU #777D
+ 616+ 9B7C              TAIE2 EQU #7734
+ 617+ 9B7C              TAIE1 EQU #7701
+ 618+ 9B7C              TAI0 EQU #76CE
+ 619+ 9B7C              E0F EQU #76CD
+ 620+ 9B7C              ARK EQU #76CC
+ 621+ 9B7C              ARR EQU #76CB
+ 622+ 9B7C              WIN EQU #76CA
+ 623+ 9B7C              NXF EQU #76C9
+ 624+ 9B7C              TAB EQU #76B4
+ 625+ 9B7C              L7143_120 EQU #76A1
+ 626+ 9B7C              L7143_121 EQU #76AE
+ 627+ 9B7C              KOF EQU #7685
+ 628+ 9B7C              L9B7C_13 EQU #9CAE
+ 629+ 9B7C              KFF EQU #767A
+ 630+ 9B7C              L7143_117 EQU #767A
+ 631+ 9B7C              L7143_115 EQU #7672
+ 632+ 9B7C              L7143_116 EQU #7677
+ 633+ 9B7C              L7143_114 EQU #766D
+ 634+ 9B7C              L7143_113 EQU #7668
+ 635+ 9B7C              L8531_57 EQU #8A14
+ 636+ 9B7C              L7143_112 EQU #7663
+ 637+ 9B7C              L7143_111 EQU #765E
+ 638+ 9B7C              L7143_110 EQU #7659
+ 639+ 9B7C              L7143_109 EQU #7654
+ 640+ 9B7C              L7143_108 EQU #764F
+ 641+ 9B7C              L7143_106 EQU #7645
+ 642+ 9B7C              L7143_105 EQU #7640
+ 643+ 9B7C              L7143_107 EQU #764A
+ 644+ 9B7C              L7143_104 EQU #75F9
+ 645+ 9B7C              L7143_119 EQU #768A
+ 646+ 9B7C              L7143_118 EQU #7685
+ 647+ 9B7C              PSD EQU #75C9
+ 648+ 9B7C              L7143_102 EQU #75C9
+ 649+ 9B7C              L7143_103 EQU #75D3
+ 650+ 9B7C              L7143_100 EQU #75B3
+ 651+ 9B7C              L7143_99 EQU #75AF
+ 652+ 9B7C              L7143_98 EQU #75A8
+ 653+ 9B7C              L7143_97 EQU #758C
+ 654+ 9B7C              L7143_96 EQU #756E
+ 655+ 9B7C              L7143_95 EQU #7568
+ 656+ 9B7C              L7143_94 EQU #7561
+ 657+ 9B7C              L7143_91 EQU #7554
+ 658+ 9B7C              L7143_86 EQU #7525
+ 659+ 9B7C              L7143_85 EQU #7522
+ 660+ 9B7C              L7143_87 EQU #7527
+ 661+ 9B7C              L7143_84 EQU #74FD
+ 662+ 9B7C              L7143_90 EQU #7551
+ 663+ 9B7C              L7143_82 EQU #74F8
+ 664+ 9B7C              L7143_80 EQU #74ED
+ 665+ 9B7C              L7143_77 EQU #74DC
+ 666+ 9B7C              L7143_92 EQU #7556
+ 667+ 9B7C              L7143_74 EQU #74CB
+ 668+ 9B7C              CAPS_KEY EQU #74C6
+ 669+ 9B7C              L7143_72 EQU #74C2
+ 670+ 9B7C              L7143_71 EQU #74BE
+ 671+ 9B7C              L7143_70 EQU #74BA
+ 672+ 9B7C              L7143_69 EQU #74B6
+ 673+ 9B7C              L7143_68 EQU #74B2
+ 674+ 9B7C              L7143_67 EQU #74AE
+ 675+ 9B7C              L7143_66 EQU #74AA
+ 676+ 9B7C              L7143_65 EQU #74A6
+ 677+ 9B7C              L7143_64 EQU #74A2
+ 678+ 9B7C              L7143_63 EQU #749E
+ 679+ 9B7C              L7143_81 EQU #74F2
+ 680+ 9B7C              L7143_62 EQU #749A
+ 681+ 9B7C              ESC_KEY EQU #749A
+ 682+ 9B7C              L7143_59 EQU #748B
+ 683+ 9B7C              L7143_58 EQU #7486
+ 684+ 9B7C              L7143_56 EQU #747C
+ 685+ 9B7C              L7143_55 EQU #7477
+ 686+ 9B7C              L7143_54 EQU #7471
+ 687+ 9B7C              L7143_53 EQU #746B
+ 688+ 9B7C              L7143_50 EQU #7459
+ 689+ 9B7C              L7143_89 EQU #7539
+ 690+ 9B7C              L7143_49 EQU #7453
+ 691+ 9B7C              USPO EQU #744B
+ 692+ 9B7C              L7143_93 EQU #755B
+ 693+ 9B7C              L7143_47 EQU #7443
+ 694+ 9B7C              NUSP EQU #7443
+ 695+ 9B7C              L7143_46 EQU #743C
+ 696+ 9B7C              L7143_45 EQU #7434
+ 697+ 9B7C              L7143_83 EQU #74FA
+ 698+ 9B7C              L7143_43 EQU #7421
+ 699+ 9B7C              L7143_42 EQU #7415
+ 700+ 9B7C              L7143_40 EQU #7406
+ 701+ 9B7C              L7143_39 EQU #73FC
+ 702+ 9B7C              L7143_38 EQU #73F1
+ 703+ 9B7C              L7143_37 EQU #73E5
+ 704+ 9B7C              L7143_41 EQU #7409
+ 705+ 9B7C              L7143_36 EQU #73D7
+ 706+ 9B7C              L7143_35 EQU #73CF
+ 707+ 9B7C              L7143_88 EQU #752E
+ 708+ 9B7C              L7143_34 EQU #73BD
+ 709+ 9B7C              CLAvA EQU #73BA
+ 710+ 9B7C              L7143_32 EQU #73B8
+ 711+ 9B7C              L7143_31 EQU #73B0
+ 712+ 9B7C              L7828_80 EQU #7D81
+ 713+ 9B7C              L7143_28 EQU #736F
+ 714+ 9B7C              L7143_27 EQU #735B
+ 715+ 9B7C              L7143_26 EQU #7347
+ 716+ 9B7C              L7143_24 EQU #7336
+ 717+ 9B7C              CLST EQU #7819
+ 718+ 9B7C              L7143_73 EQU #74C6
+ 719+ 9B7C              L7143_48 EQU #744B
+ 720+ 9B7C              L7143_75 EQU #74D1
+ 721+ 9B7C              L7143_76 EQU #74D7
+ 722+ 9B7C              L7828_44 EQU #7B30
+ 723+ 9B7C              L7143_16 EQU #72AE
+ 724+ 9B7C              L7143_17 EQU #72C3
+ 725+ 9B7C              L7143_14 EQU #728F
+ 726+ 9B7C              IINIT EQU #7259
+ 727+ 9B7C              L7143_8 EQU #7231
+ 728+ 9B7C              L7143_9 EQU #7234
+ 729+ 9B7C              L7143_6 EQU #7219
+ 730+ 9B7C              L7143_15 EQU #729D
+ 731+ 9B7C              L7143_4 EQU #71EA
+ 732+ 9B7C              L7143_1 EQU #71D5
+ 733+ 9B7C              L7143_19 EQU #72DF
+ 734+ 9B7C              IXBU EQU #7F24
+ 735+ 9B7C              L7143_2 EQU #71D7
+ 736+ 9B7C              INOV EQU #781B
+ 737+ 9B7C              L7143_18 EQU #72CF
+ 738+ 9B7C              L7143_21 EQU #730B
+ 739+ 9B7C              L7143_20 EQU #72F8
+ 740+ 9B7C              L7143_22 EQU #7325
+ 741+ 9B7C              L7143_61 EQU #7495
+ 742+ 9B7C              L7143_5 EQU #7207
+ 743+ 9B7C              L7143_3 EQU #71D8
+ 744+ 9B7C              L7143_10 EQU #7240
+ 745+ 9B7C              L7143_60 EQU #7490
+ 746+ 9B7C              L7143_7 EQU #7224
+ 747+ 9B7C              L7143_57 EQU #7481
+ 748+ 9B7C              L7143_25 EQU #733B
+ 749+ 9B7C              L7143_29 EQU #7381
+ 750+ 9B7C              L7143_12 EQU #7271
+ 751+ 9B7C              L7143_30 EQU #7396
+ 752+ 9B7C              L7143_13 EQU #7278
+ 753+ 9B7C              L7143_23 EQU #732E
+ 754+ 9B7C              L7143_11 EQU #7259
+ 755+ 9B7C              L7143_0 EQU #7176
+ 756+ 9B7C              ISTR EQU #7176
+ 757+ 9B7C              L7143 EQU #7143
+ 758+ 9B7C              TAB4E EQU #7143
+ 759+ 9B7C              L6011_243 EQU #70C3
+ 760+ 9B7C              L6011_242 EQU #70C1
+ 761+ 9B7C              L6011_244 EQU #70D3
+ 762+ 9B7C              L6011_240 EQU #709D
+ 763+ 9B7C              FUX EQU #6FEF
+ 764+ 9B7C              FEX EQU #6FEE
+ 765+ 9B7C              PLUGIN_API_TABLE EQU #6FEF
+ 766+ 9B7C              FUN EQU #6FDD
+ 767+ 9B7C              PLUGIN_API_DISPATCH EQU #6FDD
+ 768+ 9B7C              L6011_237 EQU #6FB3
+ 769+ 9B7C              L6011_236 EQU #6FAF
+ 770+ 9B7C              L6011_235 EQU #6FA9
+ 771+ 9B7C              L6011_234 EQU #6F94
+ 772+ 9B7C              L6011_238 EQU #6FB7
+ 773+ 9B7C              L6011_225 EQU #6F26
+ 774+ 9B7C              L6011_223 EQU #6F16
+ 775+ 9B7C              L6011_222 EQU #6F02
+ 776+ 9B7C              L6011_221 EQU #6F00
+ 777+ 9B7C              L6011_220 EQU #6EFB
+ 778+ 9B7C              L6011_219 EQU #6EDF
+ 779+ 9B7C              L6011_224 EQU #6F20
+ 780+ 9B7C              L6011_226 EQU #6F2C
+ 781+ 9B7C              L6011_218 EQU #6ED4
+ 782+ 9B7C              L6011_216 EQU #6EBF
+ 783+ 9B7C              L6011_215 EQU #6EB1
+ 784+ 9B7C              L6011_214 EQU #6EA0
+ 785+ 9B7C              L6011_213 EQU #6E9D
+ 786+ 9B7C              L6011_212 EQU #6E98
+ 787+ 9B7C              L6011_211 EQU #6E83
+ 788+ 9B7C              L6011_208 EQU #6E45
+ 789+ 9B7C              L6011_207 EQU #6E43
+ 790+ 9B7C              L6011_210 EQU #6E5F
+ 791+ 9B7C              L6011_209 EQU #6E53
+ 792+ 9B7C              L6011_204 EQU #6E06
+ 793+ 9B7C              L6011_206 EQU #6E24
+ 794+ 9B7C              L6011_203 EQU #6DE2
+ 795+ 9B7C              L6011_200 EQU #6DC8
+ 796+ 9B7C              L6011_201 EQU #6DD3
+ 797+ 9B7C              L6011_199 EQU #6DB3
+ 798+ 9B7C              L6011_198 EQU #6DB2
+ 799+ 9B7C              L6011_195 EQU #6DA0
+ 800+ 9B7C              L6011_194 EQU #6D9E
+ 801+ 9B7C              L6011_193 EQU #6D91
+ 802+ 9B7C              L6011_192 EQU #6D86
+ 803+ 9B7C              L6011_191 EQU #6D75
+ 804+ 9B7C              L6011_196 EQU #6DA6
+ 805+ 9B7C              L6011_190 EQU #6D60
+ 806+ 9B7C              L6011_189 EQU #6D5F
+ 807+ 9B7C              L6011_197 EQU #6DAB
+ 808+ 9B7C              L7143_44 EQU #742B
+ 809+ 9B7C              L7143_33 EQU #73BA
+ 810+ 9B7C              L6011_185 EQU #6D2C
+ 811+ 9B7C              TER2A EQU #820B
+ 812+ 9B7C              L6011_186 EQU #6D37
+ 813+ 9B7C              L6011_174 EQU #6CC1
+ 814+ 9B7C              L6011_172 EQU #6CAF
+ 815+ 9B7C              L6011_184 EQU #6D23
+ 816+ 9B7C              L6011_167 EQU #6C8E
+ 817+ 9B7C              L6011_165 EQU #6C7D
+ 818+ 9B7C              L6011_180 EQU #6CEF
+ 819+ 9B7C              L6011_183 EQU #6D16
+ 820+ 9B7C              L6011_182 EQU #6D07
+ 821+ 9B7C              L8531_69 EQU #8B0E
+ 822+ 9B7C              L6011_181 EQU #6CFA
+ 823+ 9B7C              L6011_179 EQU #6CE7
+ 824+ 9B7C              L6011_178 EQU #6CE0
+ 825+ 9B7C              L6011_177 EQU #6CD9
+ 826+ 9B7C              L6011_176 EQU #6CD4
+ 827+ 9B7C              L6011_175 EQU #6CCF
+ 828+ 9B7C              L6011_173 EQU #6CBD
+ 829+ 9B7C              L6011_171 EQU #6CAB
+ 830+ 9B7C              L6011_170 EQU #6CA4
+ 831+ 9B7C              L6011_169 EQU #6C97
+ 832+ 9B7C              L6011_168 EQU #6C91
+ 833+ 9B7C              L6011_164 EQU #6C7A
+ 834+ 9B7C              L6011_166 EQU #6C84
+ 835+ 9B7C              L6011_162 EQU #6C19
+ 836+ 9B7C              L6011_161 EQU #6C15
+ 837+ 9B7C              L6011_160 EQU #6C11
+ 838+ 9B7C              L6011_159 EQU #6C0D
+ 839+ 9B7C              L6011_163 EQU #6C1B
+ 840+ 9B7C              L6011_158 EQU #6C09
+ 841+ 9B7C              CHTOSEP EQU #6C03
+ 842+ 9B7C              TENTRY2 EQU #6BFA
+ 843+ 9B7C              GIPAGPL EQU #6BF4
+ 844+ 9B7C              L6011_152 EQU #6BD2
+ 845+ 9B7C              L6011_151 EQU #6BCD
+ 846+ 9B7C              L6011_153 EQU #6BDF
+ 847+ 9B7C              L6011_154 EQU #6BED
+ 848+ 9B7C              L6011_150 EQU #6BBE
+ 849+ 9B7C              L6011_148 EQU #6BAE
+ 850+ 9B7C              L6011_232 EQU #6F81
+ 851+ 9B7C              L6011_231 EQU #6F7B
+ 852+ 9B7C              L6011_230 EQU #6F5E
+ 853+ 9B7C              L6011_229 EQU #6F58
+ 854+ 9B7C              L6011_228 EQU #6F52
+ 855+ 9B7C              L6011_217 EQU #6ECB
+ 856+ 9B7C              L6011_205 EQU #6E08
+ 857+ 9B7C              L6011_227 EQU #6F46
+ 858+ 9B7C              L6011_202 EQU #6DE1
+ 859+ 9B7C              L6011_188 EQU #6D4B
+ 860+ 9B7C              L6011_187 EQU #6D4A
+ 861+ 9B7C              L6011_157 EQU #6C03
+ 862+ 9B7C              L6011_156 EQU #6BFA
+ 863+ 9B7C              L6011_155 EQU #6BF4
+ 864+ 9B7C              L6011_146 EQU #6B8B
+ 865+ 9B7C              L6011_149 EQU #6BB1
+ 866+ 9B7C              L6011_147 EQU #6B96
+ 867+ 9B7C              L6011_145 EQU #6B7A
+ 868+ 9B7C              L6011_144 EQU #6A9F
+ 869+ 9B7C              GBD EQU #6A9F
+ 870+ 9B7C              TURBO EQU #6A90
+ 871+ 9B7C              L6011_140 EQU #6A88
+ 872+ 9B7C              TURBOof EQU #6A88
+ 873+ 9B7C              L6011_139 EQU #6A7A
+ 874+ 9B7C              L6011_141 EQU #6A90
+ 875+ 9B7C              L6011_138 EQU #6A44
+ 876+ 9B7C              L6011_137 EQU #6A3E
+ 877+ 9B7C              L6011_136 EQU #6A30
+ 878+ 9B7C              L6011_133 EQU #69F7
+ 879+ 9B7C              L6011_132 EQU #69F0
+ 880+ 9B7C              L6011_134 EQU #69FE
+ 881+ 9B7C              L6011_130 EQU #699A
+ 882+ 9B7C              L6011_128 EQU #6987
+ 883+ 9B7C              L6011_127 EQU #6967
+ 884+ 9B7C              L6011_131 EQU #699F
+ 885+ 9B7C              L6011_124 EQU #695D
+ 886+ 9B7C              L6011_125 EQU #6961
+ 887+ 9B7C              L6011_126 EQU #6965
+ 888+ 9B7C              L6011_123 EQU #6922
+ 889+ 9B7C              L6011_122 EQU #690F
+ 890+ 9B7C              L6011_121 EQU #68F9
+ 891+ 9B7C              L6011_117 EQU #68D6
+ 892+ 9B7C              MNGP EQU #68D2
+ 893+ 9B7C              L9B7C_64 EQU #A09B
+ 894+ 9B7C              L6011_112 EQU #68BA
+ 895+ 9B7C              L6011_111 EQU #68B4
+ 896+ 9B7C              L6011_109 EQU #68AE
+ 897+ 9B7C              MNG0 EQU #689C
+ 898+ 9B7C              L6011_107 EQU #6894
+ 899+ 9B7C              MNG0I EQU #6894
+ 900+ 9B7C              L6011_106 EQU #6885
+ 901+ 9B7C              MNG0D EQU #6885
+ 902+ 9B7C              L6011_108 EQU #689C
+ 903+ 9B7C              FRST EQU #687D
+ 904+ 9B7C              L9B7C_62 EQU #A064
+ 905+ 9B7C              DRACT EQU #6868
+ 906+ 9B7C              L6011_103 EQU #6863
+ 907+ 9B7C              L6011_102 EQU #6853
+ 908+ 9B7C              L6011_101 EQU #6832
+ 909+ 9B7C              L6011_100 EQU #67CB
+ 910+ 9B7C              L6011_113 EQU #68BE
+ 911+ 9B7C              L6011_115 EQU #68CC
+ 912+ 9B7C              L6011_99 EQU #67B3
+ 913+ 9B7C              L6011_135 EQU #6A26
+ 914+ 9B7C              L6011_98 EQU #67A6
+ 915+ 9B7C              TIME EQU #6783
+ 916+ 9B7C              ABTF EQU #677D
+ 917+ 9B7C              ENTF EQU #6777
+ 918+ 9B7C              VPRT EQU #675A
+ 919+ 9B7C              L6011_95 EQU #6777
+ 920+ 9B7C              L7143_78 EQU #74E1
+ 921+ 9B7C              L6011_96 EQU #677D
+ 922+ 9B7C              L7143_79 EQU #74E8
+ 923+ 9B7C              L6011_97 EQU #6783
+ 924+ 9B7C              L7143_101 EQU #75B8
+ 925+ 9B7C              L6011_94 EQU #675A
+ 926+ 9B7C              L6011_233 EQU #6F86
+ 927+ 9B7C              I_N_T EQU #6715
+ 928+ 9B7C              L6011_91 EQU #66C5
+ 929+ 9B7C              L6011_93 EQU #6708
+ 930+ 9B7C              L7143_52 EQU #7465
+ 931+ 9B7C              L6011_92 EQU #66FB
+ 932+ 9B7C              L7143_51 EQU #745F
+ 933+ 9B7C              L6011_88 EQU #66AF
+ 934+ 9B7C              L6011_90 EQU #66BF
+ 935+ 9B7C              L6011_89 EQU #66B7
+ 936+ 9B7C              L6011_87 EQU #6673
+ 937+ 9B7C              L6011_86 EQU #664C
+ 938+ 9B7C              L7828_73 EQU #7D39
+ 939+ 9B7C              L7828_72 EQU #7D25
+ 940+ 9B7C              L6011_84 EQU #6613
+ 941+ 9B7C              L6011_83 EQU #660F
+ 942+ 9B7C              TAIE0 EQU #7767
+ 943+ 9B7C              L6011_82 EQU #6606
+ 944+ 9B7C              L6011_81 EQU #65F7
+ 945+ 9B7C              L6011_80 EQU #65EC
+ 946+ 9B7C              L6011_85 EQU #6646
+ 947+ 9B7C              L6011_79 EQU #65DA
+ 948+ 9B7C              WLIT EQU #65BB
+ 949+ 9B7C              L6011_76 EQU #65A2
+ 950+ 9B7C              L6011_75 EQU #6594
+ 951+ 9B7C              L6011_74 EQU #6591
+ 952+ 9B7C              L6011_73 EQU #658B
+ 953+ 9B7C              L6011_77 EQU #65A7
+ 954+ 9B7C              L6011_69 EQU #6555
+ 955+ 9B7C              L6011_68 EQU #6546
+ 956+ 9B7C              L6011_66 EQU #653F
+ 957+ 9B7C              L6011_65 EQU #653D
+ 958+ 9B7C              L6011_67 EQU #6544
+ 959+ 9B7C              L6011_63 EQU #6532
+ 960+ 9B7C              L6011_62 EQU #651F
+ 961+ 9B7C              L6011_70 EQU #655A
+ 962+ 9B7C              L6011_64 EQU #653A
+ 963+ 9B7C              L6011_61 EQU #650A
+ 964+ 9B7C              L6011_142 EQU #6A97
+ 965+ 9B7C              L6011_105 EQU #687D
+ 966+ 9B7C              L9B7C_121 EQU #A4F4
+ 967+ 9B7C              L6011_143 EQU #6A99
+ 968+ 9B7C              L7828_38 EQU #7ACE
+ 969+ 9B7C              L6011_59 EQU #64F8
+ 970+ 9B7C              L6011_58 EQU #64DE
+ 971+ 9B7C              L6011_110 EQU #68B1
+ 972+ 9B7C              L6011_56 EQU #64A2
+ 973+ 9B7C              L6011_55 EQU #6493
+ 974+ 9B7C              L6011_241 EQU #70B2
+ 975+ 9B7C              L6011_54 EQU #6487
+ 976+ 9B7C              L6011_53 EQU #6476
+ 977+ 9B7C              L6011_52 EQU #6468
+ 978+ 9B7C              L6011_51 EQU #6467
+ 979+ 9B7C              F5WND EQU #8000
+ 980+ 9B7C              L6011_50 EQU #644C
+ 981+ 9B7C              L6011_57 EQU #64BF
+ 982+ 9B7C              L6011_72 EQU #656D
+ 983+ 9B7C              L6011_71 EQU #655F
+ 984+ 9B7C              L6011_120 EQU #68F1
+ 985+ 9B7C              L9B7C_63 EQU #A08C
+ 986+ 9B7C              NEWDIR EQU #6407
+ 987+ 9B7C              FOLDER EQU #63FE
+ 988+ 9B7C              DFRQ EQU #7F20
+ 989+ 9B7C              L6011_49 EQU #6407
+ 990+ 9B7C              L6011_47 EQU #63F0
+ 991+ 9B7C              FOLD EQU #63F0
+ 992+ 9B7C              L6011_46 EQU #63ED
+ 993+ 9B7C              L6011_129 EQU #6999
+ 994+ 9B7C              L6011_44 EQU #63CD
+ 995+ 9B7C              L6011_43 EQU #63C8
+ 996+ 9B7C              L6011_45 EQU #63D8
+ 997+ 9B7C              L8531_36 EQU #883F
+ 998+ 9B7C              L8531_149 EQU #90DE
+ 999+ 9B7C              L6011_42 EQU #63B3
+1000+ 9B7C              L6011_41 EQU #63B0
+1001+ 9B7C              L6011_39 EQU #638B
+1002+ 9B7C              L6011_38 EQU #6372
+1003+ 9B7C              L6011_40 EQU #6395
+1004+ 9B7C              L6011_114 EQU #68C1
+1005+ 9B7C              L6011_37 EQU #6355
+1006+ 9B7C              L6011_119 EQU #68E6
+1007+ 9B7C              L6011_118 EQU #68DE
+1008+ 9B7C              L6011_60 EQU #6506
+1009+ 9B7C              L6011_35 EQU #6336
+1010+ 9B7C              GETen EQU #630B
+1011+ 9B7C              GETEN EQU #62FE
+1012+ 9B7C              PANELI EQU #62EB
+1013+ 9B7C              L6011_32 EQU #62EB
+1014+ 9B7C              L6011_31 EQU #62D4
+1015+ 9B7C              L6011_30 EQU #62CD
+1016+ 9B7C              L6011_29 EQU #62AA
+1017+ 9B7C              L6011_28 EQU #629F
+1018+ 9B7C              L6011_27 EQU #6296
+1019+ 9B7C              L6011_26 EQU #628E
+1020+ 9B7C              L6011_25 EQU #6285
+1021+ 9B7C              L6011_22 EQU #6268
+1022+ 9B7C              L6011_24 EQU #6277
+1023+ 9B7C              L6011_21 EQU #6261
+1024+ 9B7C              L6011_20 EQU #6259
+1025+ 9B7C              L6011_19 EQU #6252
+1026+ 9B7C              L7828_67 EQU #7CD5
+1027+ 9B7C              L6011_15 EQU #6224
+1028+ 9B7C              L6011_16 EQU #622C
+1029+ 9B7C              L6011_14 EQU #621C
+1030+ 9B7C              L6011_13 EQU #6210
+1031+ 9B7C              L6011_12 EQU #61FA
+1032+ 9B7C              L6011_17 EQU #6238
+1033+ 9B7C              L6011_11 EQU #61F3
+1034+ 9B7C              L6011_18 EQU #6244
+1035+ 9B7C              L6011_9 EQU #61C9
+1036+ 9B7C              L6011_78 EQU #65BB
+1037+ 9B7C              L6011_36 EQU #634F
+1038+ 9B7C              L6011_8 EQU #61A4
+1039+ 9B7C              L6011_10 EQU #61ED
+1040+ 9B7C              L6011_7 EQU #6195
+1041+ 9B7C              L6011_23 EQU #626E
+1042+ 9B7C              L6011_104 EQU #6868
+1043+ 9B7C              L6011_116 EQU #68D2
+1044+ 9B7C              L6011_6 EQU #6180
+1045+ 9B7C              L6011_5 EQU #6160
+1046+ 9B7C              WINDOW EQU #7EA0
+1047+ 9B7C              L6011_4 EQU #6149
+1048+ 9B7C              L6011_3 EQU #6128
+1049+ 9B7C              L6011_34 EQU #630B
+1050+ 9B7C              L6011_2 EQU #611C
+1051+ 9B7C              L6011_48 EQU #63FE
+1052+ 9B7C              L7828_69 EQU #7CF2
+1053+ 9B7C              L9B7C_52 EQU #A00B
+1054+ 9B7C              L9149_21 EQU #92C9
+1055+ 9B7C              L6011_33 EQU #62FE
+1056+ 9B7C              L6011_1 EQU #6107
+1057+ 9B7C              MarkMUL EQU #8575
+1058+ 9B7C              CLAVA EQU #742B
+1059+ 9B7C              ENTR EQU #6107
+1060+ 9B7C              ENKE EQU #7477
+1061+ 9B7C              SPKE EQU #747C
+1062+ 9B7C              F9STP EQU #9B7C
+1063+ 9B7C              F9_KEY EQU #74BE
+1064+ 9B7C              F8_KEY EQU #74BA
+1065+ 9B7C              MkDir EQU #8CCB
+1066+ 9B7C              L7828_32 EQU #7A57
+1067+ 9B7C              F7_KEY EQU #74B6
+1068+ 9B7C              Move EQU #8D4D
+1069+ 9B7C              F6_KEY EQU #74B2
+1070+ 9B7C              COPY EQU #8983
+1071+ 9B7C              F5_KEY EQU #74AE
+1072+ 9B7C              EDIT EQU #9100
+1073+ 9B7C              F4_KEY EQU #74AA
+1074+ 9B7C              F2MENU EQU #90FB
+1075+ 9B7C              F2_KEY EQU #74A2
+1076+ 9B7C              XPAN EQU #6160
+1077+ 9B7C              TAB_KEY EQU #74DC
+1078+ 9B7C              F10_KEY EQU #74C2
+1079+ 9B7C              F3_KEY EQU #74A6
+1080+ 9B7C              HELP EQU #88AB
+1081+ 9B7C              F1_KEY EQU #749E
+1082+ 9B7C              R2B2 EQU #87F9
+1083+ 9B7C              SHIFT_KEY EQU #74D1
+1084+ 9B7C              BENT EQU #611C
+1085+ 9B7C              BSPC EQU #7481
+1086+ 9B7C              Mark EQU #85B4
+1087+ 9B7C              INS_KEY EQU #7495
+1088+ 9B7C              DelFl EQU #8E40
+1089+ 9B7C              DELE EQU #7490
+1090+ 9B7C              RGGG EQU #7465
+1091+ 9B7C              LFFF EQU #745F
+1092+ 9B7C              PGSED EQU #6195
+1093+ 9B7C              END_KEY EQU #748B
+1094+ 9B7C              PGSHM EQU #6210
+1095+ 9B7C              HOME_KEY EQU #7486
+1096+ 9B7C              PGSDN EQU #61C9
+1097+ 9B7C              PGD EQU #7471
+1098+ 9B7C              PGSUP EQU #61FA
+1099+ 9B7C              PGU EQU #746B
+1100+ 9B7C              CRDN EQU #621C
+1101+ 9B7C              DWWW EQU #7459
+1102+ 9B7C              CRUP EQU #6261
+1103+ 9B7C              UPPP EQU #7453
+1104+ 9B7C              F36 EQU #8531
+1105+ 9B7C              CTRL_KEY EQU #74D7
+1106+ 9B7C              F12 EQU #8809
+1107+ 9B7C              ALT_KEY EQU #74CB
+1108+ 9B7C              CURSOR EQU #7CD5
+1109+ 9B7C              L6011_0 EQU #6049
+1110+ 9B7C              MAIN EQU #6049
+1111+ 9B7C              WC_MAIN_LOOP EQU #6049
+1112+ 9B7C              PLresCP EQU #AB93
+1113+ 9B7C              STATUS EQU #8747
+1114+ 9B7C              Xpan EQU #6149
+1115+ 9B7C              PATH EQU #9EB2
+1116+ 9B7C              DEF EQU #6BED
+1117+ 9B7C              GEDZ EQU #A1E0
+1118+ 9B7C              L8531_41 EQU #88A5
+1119+ 9B7C              FINI EQU #A0CE
+1120+ 9B7C              INIT EQU #6A44
+1121+ 9B7C              L6011 EQU #6011
+1122+ 9B7C              WC_ENTRY EQU #6011
+1123+ 9B7C              LC069_5 EQU #C0D9
+1124+ 9B7C              LC000 EQU #C000
+1125+ 9B7C
+# file closed: WCVW_exact_externals.inc
+  72  9B7C
+# file closed: WCVW_repeat_fixed_test.ASM

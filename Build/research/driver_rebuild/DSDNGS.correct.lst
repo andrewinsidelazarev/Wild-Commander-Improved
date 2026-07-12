@@ -1,0 +1,874 @@
+# file opened: DSDNGS.correct.ASM
+  1   0000              ;SD Card Driver for NGS
+  2   0000              ;(C) BUDDER/MGN 2015
+  3   0000
+  4   0000                      IFNDEF __ALASM_CORG_ACTIVE
+  5   0000                      ORG #6000
+  6   6000                      DISP #3800
+  7   3800                      DEFINE __ALASM_CORG_ACTIVE 1
+  8   3800              __ALASM_CORG_CODE DEFL #6000
+  9   3800              __ALASM_CORG_LOGICAL DEFL #3800
+ 10   3800              __ALASM_CORG_DISP DEFL 1
+ 11   3800                      ELSE
+ 12   3800 ~            __ALASM_CORG_END DEFL __ALASM_CORG_CODE + ($ - __ALASM_CORG_LOGICAL)
+ 13   3800 ~            __ALASM_CORG_NEW DEFL #6000
+ 14   3800 ~                    IF __ALASM_CORG_NEW > __ALASM_CORG_END
+ 15   3800 ~                    DS __ALASM_CORG_NEW - __ALASM_CORG_END,0
+ 16   3800 ~                    ENDIF
+ 17   3800 ~                    IF __ALASM_CORG_DISP
+ 18   3800 ~                    ENT
+ 19   3800 ~                    ENDIF
+ 20   3800 ~                    DISP #3800
+ 21   3800 ~            __ALASM_CORG_CODE DEFL __ALASM_CORG_NEW
+ 22   3800 ~            __ALASM_CORG_LOGICAL DEFL #3800
+ 23   3800 ~            __ALASM_CORG_DISP DEFL 1
+ 24   3800                      ENDIF
+ 25   3800              ;---------------------------------------
+ 26   3800              GSCOM   EQU #BB
+ 27   3800              GSDAT   EQU #B3
+ 28   3800              ;---------------------------------------
+ 29   3800 C3 F1 38     GAFF    JP SELDEV
+ 30   3803 C3 E4 38             JP NGSINI
+ 31   3806 C3 F0 38             JP REINI
+ 32   3809
+ 33   3809 C3 61 39             JP XPOZI
+ 34   380C C3 68 39             JP PROZ
+ 35   380F
+ 36   380F C3 98 39             JP RDDSE
+ 37   3812 C3 D1 39             JP SDDSE
+ 38   3815
+ 39   3815 C3 97 39             JP RDD256
+ 40   3818
+ 41   3818 00 00 00      DS 3
+ 42   381B 00 00 00      DS 3
+ 43   381E 00 00 00      DS 3
+ 44   3821 00 00 00      DS 3
+ 45   3824 00 00 00      DS 3
+ 46   3827 00 00 00      DS 3
+ 47   382A 00 00 00      DS 3
+ 48   382D 00 00 00      DS 3
+ 49   3830 00 00 00      DS 3
+ 50   3833 00 00 00      DS 3
+ 51   3836 00 00 00      DS 3
+ 52   3839 00 00 00      DS 3
+ 53   383C 00 00 00      DS 3
+ 54   383F 00 00 00      DS 3
+ 55   3842 00 00 00      DS 3
+ 56   3845 00 00 00      DS 3
+ 57   3848              ;---------------------------------------
+ 58   3848 00           NSDC    NOP
+ 59   3849 00           EOC     NOP
+ 60   384A
+ 61   384A 00           ABT     NOP
+ 62   384B
+ 63   384B 04           BZN     DB 4
+ 64   384C 04 00        NR0     DW 4
+ 65   384E
+ 66   384E 00 00        CAHL    DS 2
+ 67   3850 00 00        CADE    DS 2
+ 68   3852
+ 69   3852 00 00 00 00  LSTSE   DS 4
+ 70   3856
+ 71   3856 00 00        REZDE   DS 2
+ 72   3858
+ 73   3858 00 00 00 00  PR      DS 4
+ 74   385C
+ 75   385C 00 00        CLHL    DS 2
+ 76   385E 00 00        CLDE    DS 2
+ 77   3860
+ 78   3860 00 00 00 00  LLHL    DS 4
+ 79   3864
+ 80   3864 00 00        LTHL    DS 2;LAST
+ 81   3866 00 00        LTDE    DS 2
+ 82   3868              ;---------------------------------------
+ 83   3868 00 00 00...  ENTRY   DS 11
+ 84   3873 00 00        EFLG    DB 0,0
+ 85   3875 00                   DB #00;ms
+ 86   3876 00 00                DW #0000
+ 86   3878 00 00         DW #0000;time,date
+ 87   387A 00 00                DW #0000;acc date
+ 88   387C 00 00        CLSDE   DS 2
+ 89   387E 00 00                DW #0000
+ 89   3880 00 00         DW #0000;time,date
+ 90   3882 00 00        CLSHL   DS 2
+ 91   3884 00 00 00 00  SIZIK   DS 4
+ 92   3888 00                   NOP
+ 93   3889              ;---------------------------------------
+ 94   3889 00 00        BREZS   DS 2;+14          FAT PARAMETERS
+ 95   388B 00 00 00 00  FSINF   DS 4;[+48(2)]+[ADDTOP]
+ 96   388F
+ 97   388F 00           BFATS   NOP
+ 98   3890 00 00 00 00  BFTSZ   DS 4
+ 99   3894 00 00        BSECPC  DS 2;USE 1
+100   3896 00 00 00 00  BROOTC  DS 4
+101   389A
+102   389A 02 00 00 00  FSTFRC  DW 2,0
+103   389E
+104   389E 00 00 00 00  ADDTOP  DS 4
+105   38A2
+106   38A2 00 00        SFAT    DS 2
+107   38A4 00 00 00 00  SDFAT   DS 4
+108   38A8
+109   38A8 00 00        CUHL    DS 2
+110   38AA 00 00        CUDE    DS 2
+111   38AC
+112   38AC 00 00        NXDE    DS 2
+113   38AE 00 00        NXHL    DS 2
+114   38B0
+115   38B0 00 00        LDHL    DS 2
+116   38B2
+117   38B2 00           COUNT   NOP
+118   38B3 00 00        DUHL    DS 2
+119   38B5 00 00        DUDE    DS 2
+120   38B7
+121   38B7 00           DUBA    NOP
+122   38B8 00 00        UUHL    DS 2
+123   38BA 00 00        BUHL    DS 2
+124   38BC 00 00        GARY    DS 2;AAA
+125   38BE 00 00        CLCNT   DS 2
+126   38C0 00 00 00 00  FCTS    DS 4
+127   38C4 00 00 00 00  BUTS    DS 4
+128   38C8
+129   38C8 00 00 00 00  LSTCAT  DS 4
+130   38CC 00 00 00 00  RECCAT  DS 4
+131   38D0              ;---------------------------------------
+132   38D0 00 00 00 00  BLKNUM  DS 4
+133   38D4              ;---------------------------------------
+134   38D4 D3 BB        SENDCOM OUT (GSCOM),A
+135   38D6 DB BB        GSWC    IN A,(GSCOM)
+136   38D8 0F                   RRCA
+136   38D9 38 FB         JR C,GSWC
+137   38DB C9                   RET
+138   38DC
+139   38DC D3 B3        SENDDAT OUT (GSDAT),A
+140   38DE DB BB        GSWD    IN A,(GSCOM)
+141   38E0 07                   RLCA
+141   38E1 38 FB         JR C,GSWD
+142   38E3 C9                   RET ;       DB #03,#20:DB 0:DS 2
+143   38E4              ;---------------------------------------
+144   38E4              NGSINI
+145   38E4 3E 20        FANK    LD A,#20
+145   38E6 B7            OR A
+145   38E7 C0            RET NZ
+146   38E8
+147   38E8 3E 20                LD A,#20
+147   38EA CD D4 38      CALL SENDCOM
+148   38ED DB B3                IN A,(GSDAT)
+149   38EF B7                   OR A
+150   38F0 C9           REINI   RET
+151   38F1
+152   38F1 3E 80        SELDEV  LD A,#80
+152   38F3 D3 33         OUT (#33),A
+153   38F5 FB                   EI
+154   38F6 76            HALT
+155   38F7 76            HALT
+156   38F8 3E F3                LD A,#F3
+156   38FA D3 BB         OUT (GSCOM),A
+157   38FC CD 51 39             CALL DIK
+157   38FF 28 4B         JR Z,WSE
+158   3901
+159   3901 AF                   XOR A
+159   3902 D3 B3         OUT (GSDAT),A
+160   3904 3E 1D                LD A,#1D
+160   3906 D3 BB         OUT (GSCOM),A
+161   3908
+162   3908 CD 51 39             CALL DIK
+162   390B 28 3F         JR Z,WSE
+163   390D
+164   390D DB B3                IN A,(GSDAT)
+165   390F FE 8B                CP #8B
+165   3911 3E 01         LD A,1
+165   3913 20 37         JR NZ,WSE
+166   3915
+167   3915 AF                   XOR A
+167   3916 D3 B3         OUT (GSDAT),A
+168   3918 3E 14                LD A,#14
+168   391A CD D4 38      CALL SENDCOM;LOAD memBL
+169   391D 3E 04                LD A,#04
+169   391F CD DC 38      CALL SENDDAT; len #0400
+170   3922
+171   3922 AF                   XOR A
+171   3923 CD DC 38      CALL SENDDAT;   to  ADDRES
+172   3926 3E 40                LD A,#40
+172   3928 CD DC 38      CALL SENDDAT;#4000 inGS
+173   392B
+174   392B 21 F0 39 01          LD HL,TOGS,BC,#0400
+174   392F 00 04
+175   3931 7E           WAV     LD A,(HL)
+175   3932 CD DC 38      CALL SENDDAT
+175   3935 23            INC HL
+176   3936 0B                   DEC BC
+176   3937 78            LD A,B
+176   3938 B1            OR C
+176   3939 20 F6         JR NZ,WAV
+177   393B
+178   393B AF                   XOR A
+178   393C D3 B3         OUT (GSDAT),A
+179   393E 3E 13                LD A,#13
+179   3940 CD D4 38      CALL SENDCOM;JPtoADDRES
+180   3943 3E 40                LD A,#40
+180   3945 CD DC 38      CALL SENDDAT;#4000 inGS
+181   3948
+182   3948 AF                   XOR A
+182   3949 D3 BB         OUT (GSCOM),A
+183   394B 3D                   DEC A
+184   394C 3C           WSE     INC A
+185   394D 32 E5 38             LD (FANK+1),A
+186   3950 C9                   RET
+187   3951
+188   3951 06 30        DIK     LD B,#30
+189   3953 76           D_K     HALT
+189   3954 76            HALT
+190   3955 05                   DEC B
+190   3956 3E 01         LD A,1
+190   3958 C8            RET Z
+191   3959 DB BB                IN A,(GSCOM)
+191   395B 1F            RRA
+191   395C 38 F5         JR C,D_K
+192   395E AF                   XOR A
+192   395F 3C            INC A
+193   3960 C9                   RET
+194   3961              ;---------------------------------------
+195   3961 22 64 38 ED  XPOZI   LD (LTHL),HL,(LTDE),DE
+195   3965 53 66 38
+196   3968 22 D0 38 ED  PROZ    LD (BLKNUM),HL,(BLKNUM+2),DE
+196   396C 53 D2 38
+197   396F C9                   RET
+198   3970              ;---------------------------------------
+199   3970 ED 5B D0 38  SNDPAR  LD DE,(BLKNUM);BC(BLKNUM+2)
+200   3974
+201   3974 D3 B3                OUT (#B3),A
+202   3976 F5                   PUSH AF
+203   3977 78                   LD A,B
+203   3978 CD D4 38      CALL SENDCOM
+204   397B
+205   397B 7B                   LD A,E
+205   397C CD DC 38      CALL SENDDAT
+206   397F 7A                   LD A,D
+206   3980 CD DC 38      CALL SENDDAT
+207   3983 3A D2 38             LD A,(BLKNUM+2)
+207   3986 CD DC 38      CALL SENDDAT
+208   3989 3A D3 38             LD A,(BLKNUM+3)
+208   398C CD DC 38      CALL SENDDAT
+209   398F AF                   XOR A
+209   3990 D3 BB D3 B3   OUT (#BB),A,(#B3),A
+210   3994 5F                   LD E,A
+211   3995 F1                   POP AF
+212   3996
+213   3996 57                   LD D,A
+214   3997 C9           RDD256  RET
+215   3998
+216   3998 06 10        RDDSE   LD B,#10
+216   399A CD 70 39      CALL SNDPAR
+217   399D DB BB        LAWL    IN A,(#BB)
+217   399F 07            RLCA
+217   39A0 30 FB         JR NC,$-3
+218   39A2 06 80                LD B,128
+219   39A4 DB BB        SGI     IN A,(#BB)
+219   39A6 07            RLCA
+219   39A7 30 FB         JR NC,$-3
+220   39A9 DB B3                IN A,(#B3)
+220   39AB 77            LD (HL),A
+220   39AC 23            INC HL
+221   39AD DB BB                IN A,(#BB)
+221   39AF 07            RLCA
+221   39B0 30 FB         JR NC,$-3
+222   39B2 DB B3                IN A,(#B3)
+222   39B4 77            LD (HL),A
+222   39B5 23            INC HL
+223   39B6 DB BB                IN A,(#BB)
+223   39B8 07            RLCA
+223   39B9 30 FB         JR NC,$-3
+224   39BB DB B3                IN A,(#B3)
+224   39BD 77            LD (HL),A
+224   39BE 23            INC HL
+225   39BF DB BB                IN A,(#BB)
+225   39C1 07            RLCA
+225   39C2 30 FB         JR NC,$-3
+226   39C4 DB B3                IN A,(#B3)
+226   39C6 77            LD (HL),A
+226   39C7 23            INC HL
+227   39C8 10 DA                DJNZ SGI
+228   39CA 15                   DEC D
+228   39CB 20 D0         JR NZ,LAWL
+229   39CD
+230   39CD AF                   XOR A
+231   39CE C3 D4 38             JP SENDCOM
+232   39D1
+233   39D1 06 12        SDDSE   LD B,#12
+233   39D3 CD 70 39      CALL SNDPAR
+234   39D6 DB BB        LOL     IN A,(#BB)
+234   39D8 07            RLCA
+234   39D9 38 FB         JR C,$-3
+235   39DB 7E                   LD A,(HL)
+235   39DC D3 B3         OUT (#B3),A
+235   39DE 23            INC HL
+236   39DF DB BB                IN A,(#BB)
+236   39E1 07            RLCA
+236   39E2 38 FB         JR C,$-3
+237   39E4 7E                   LD A,(HL)
+237   39E5 D3 B3         OUT (#B3),A
+237   39E7 23            INC HL
+238   39E8 1B                   DEC DE
+238   39E9 7B            LD A,E
+238   39EA B2            OR D
+238   39EB 20 E9         JR NZ,LOL
+239   39ED C3 D4 38             JP SENDCOM
+240   39F0              ;-------
+241   39F0              UDAFF
+242   39F0              ;---------------------------------------
+243   39F0              ;---------------------------------------
+244   39F0              SCTRL   EQU #11;sdMASK=#01 BITset=#80
+245   39F0              SD_SEND EQU #13
+246   39F0              SD_RSTR EQU #14
+247   39F0              ;---------------------------------------
+248   39F0              CMD_1   EQU %01000000+1; init
+249   39F0              CMD_12  EQU %01000000+12;Stop Transmiss
+250   39F0              CMD_16  EQU %01000000+16;Block Size
+251   39F0              CMD_17  EQU %01000000+17;Single Read
+252   39F0              CMD_24  EQU %01000000+24;Single Write
+253   39F0              ACMD_41 EQU %01000000+41;init (SDC only)
+254   39F0              CMD_55  EQU %01000000+55;app CMD
+255   39F0              CMD_58  EQU %01000000+58;Read OCR
+256   39F0              ;---------------------------------------
+257   39F0              SEC_BUF EQU #5000
+258   39F0              ;-------
+259   39F0              TOGS    EQU UDAFF
+260   39F0                      IFNDEF __ALASM_CORG_ACTIVE
+261   39F0 ~                    ORG #6000+UDAFF-GAFF
+262   39F0 ~                    DISP #4000
+263   39F0 ~                    DEFINE __ALASM_CORG_ACTIVE 1
+264   39F0 ~            __ALASM_CORG_CODE DEFL #6000+UDAFF-GAFF
+265   39F0 ~            __ALASM_CORG_LOGICAL DEFL #4000
+266   39F0 ~            __ALASM_CORG_DISP DEFL 1
+267   39F0                      ELSE
+268   39F0              __ALASM_CORG_END DEFL __ALASM_CORG_CODE + ($ - __ALASM_CORG_LOGICAL)
+269   39F0              __ALASM_CORG_NEW DEFL #6000+UDAFF-GAFF
+270   39F0                      IF __ALASM_CORG_NEW > __ALASM_CORG_END
+271   39F0 ~                    DS __ALASM_CORG_NEW - __ALASM_CORG_END,0
+272   39F0                      ENDIF
+273   39F0                      IF __ALASM_CORG_DISP
+274   39F0                      ENT
+275   61F0                      ENDIF
+276   61F0                      DISP #4000
+277   4000              __ALASM_CORG_CODE DEFL __ALASM_CORG_NEW
+278   4000              __ALASM_CORG_LOGICAL DEFL #4000
+279   4000              __ALASM_CORG_DISP DEFL 1
+280   4000                      ENDIF
+281   4000              TOGS_CODE:
+282   4000 F3                   DI
+283   4001 31 00 60             LD SP,#6000
+284   4004 3E 00                LD A,%00000000
+284   4006 D3 0F         OUT (#0F),A
+285   4008              ;bit0 - 0/1 = ROM+RAM/RAMonly
+286   4008              ;bit1 - RO mode for #0000-#7FFF (abs.)
+287   4008              ;bit2 - 0/1 = 4/8 chan mode
+288   4008              ;bit3 - paging mode (0=orig from GS)
+289   4008              ;bit4,5 - Z80 clocs (00=24MHz, 11=10MHz)
+290   4008              ;bit6,7 - reserved
+291   4008
+292   4008 DB 05        CMD_STR IN A,(#05)
+293   400A DB 04        CMD_CHK IN A,(#04)
+293   400C 0F            RRCA
+293   400D 30 FB         JR NC,$-3
+294   400F DB 01                IN A,(#01)
+295   4011 B7                   OR A
+295   4012 28 F4         JR Z,CMD_STR
+296   4014 FE 10                CP #10
+296   4016 28 1C         JR Z,RD_SEC
+297   4018 FE 12                CP #12
+297   401A CA A2 40      JP Z,SV_SEC
+298   401D FE 20                CP #20
+298   401F 28 0C         JR Z,SDINI
+299   4021 FE F3                CP #F3
+299   4023 CA 00 00      JP Z,0
+300   4026 FE F4                CP #F4
+300   4028 CA 00 00      JP Z,0
+301   402B 18 DD                JR CMD_CHK
+302   402D              ;---------------------------------------
+303   402D CD 6F 41     SDINI   CALL SD_INIT
+304   4030 D3 03                OUT (#03),A
+305   4032 18 D4                JR CMD_STR
+306   4034              ;-------
+307   4034 CD DA 40     RD_SEC  CALL RD_PAR
+308   4037              ;DE=(BLKNUM),BC=(BLKNUM+2),L-COUNT
+309   4037 DB 02                IN A,(#02)
+310   4039 7D                   LD A,L
+311   403A
+312   403A F5           RDGS    PUSH AF
+313   403B 21 00 50             LD HL,SEC_BUF
+314   403E D5 C5                PUSH DE,BC
+315   4040 CD 29 41             CALL RDSINGL
+316   4043 C1 D1                POP BC,DE
+317   4045 13                   INC DE
+318   4046 7A                   LD A,D
+318   4047 B3            OR E
+318   4048 20 01         JR NZ,$+3
+318   404A 03            INC BC
+319   404B
+320   404B 21 00 50             LD HL,SEC_BUF
+321   404E DB 04        ORIGA   IN A,(#04)
+321   4050 07            RLCA
+321   4051 38 FB         JR C,$-3
+322   4053 7E                   LD A,(HL)
+322   4054 D3 03         OUT (#03),A
+322   4056 2C            INC L
+323   4057 DB 04                IN A,(#04)
+323   4059 07            RLCA
+323   405A 38 FB         JR C,$-3
+324   405C 7E                   LD A,(HL)
+324   405D D3 03         OUT (#03),A
+324   405F 2C            INC L
+325   4060 DB 04                IN A,(#04)
+325   4062 07            RLCA
+325   4063 38 FB         JR C,$-3
+326   4065 7E                   LD A,(HL)
+326   4066 D3 03         OUT (#03),A
+326   4068 2C            INC L
+327   4069 DB 04                IN A,(#04)
+327   406B 07            RLCA
+327   406C 38 FB         JR C,$-3
+328   406E 7E                   LD A,(HL)
+328   406F D3 03         OUT (#03),A
+328   4071 2C            INC L
+329   4072 DB 04                IN A,(#04)
+329   4074 07            RLCA
+329   4075 38 FB         JR C,$-3
+330   4077 7E                   LD A,(HL)
+330   4078 D3 03         OUT (#03),A
+330   407A 2C            INC L
+331   407B DB 04                IN A,(#04)
+331   407D 07            RLCA
+331   407E 38 FB         JR C,$-3
+332   4080 7E                   LD A,(HL)
+332   4081 D3 03         OUT (#03),A
+332   4083 2C            INC L
+333   4084 DB 04                IN A,(#04)
+333   4086 07            RLCA
+333   4087 38 FB         JR C,$-3
+334   4089 7E                   LD A,(HL)
+334   408A D3 03         OUT (#03),A
+334   408C 2C            INC L
+335   408D DB 04                IN A,(#04)
+335   408F 07            RLCA
+335   4090 38 FB         JR C,$-3
+336   4092 7E                   LD A,(HL)
+336   4093 D3 03         OUT (#03),A
+336   4095 23            INC HL
+337   4096 7C                   LD A,H
+337   4097 FE 52         CP #52
+337   4099 38 B3         JR C,ORIGA
+338   409B
+339   409B F1                   POP AF
+340   409C 3D                   DEC A
+340   409D 20 9B         JR NZ,RDGS
+341   409F C3 08 40             JP CMD_STR
+342   40A2              ;-------
+343   40A2 CD DA 40     SV_SEC  CALL RD_PAR
+344   40A5 DB 02                IN A,(#02)
+345   40A7 7D                   LD A,L
+346   40A8
+347   40A8 F5           SVGS    PUSH AF
+348   40A9 21 00 50             LD HL,SEC_BUF
+349   40AC DB 04        ORIGA2  IN A,(#04)
+349   40AE 07            RLCA
+349   40AF 30 FB         JR NC,$-3
+350   40B1 DB 02                IN A,(#02)
+350   40B3 77            LD (HL),A
+350   40B4 2C            INC L
+351   40B5 DB 04                IN A,(#04)
+351   40B7 07            RLCA
+351   40B8 30 FB         JR NC,$-3
+352   40BA DB 02                IN A,(#02)
+352   40BC 77            LD (HL),A
+352   40BD 23            INC HL
+353   40BE 7C                   LD A,H
+353   40BF FE 52         CP #52
+353   40C1 38 E9         JR C,ORIGA2
+354   40C3
+355   40C3 21 00 50             LD HL,SEC_BUF
+356   40C6 D5 C5                PUSH DE,BC
+357   40C8 CD 41 41             CALL SVSINGL
+358   40CB C1 D1                POP BC,DE
+359   40CD 13                   INC DE
+360   40CE 7A                   LD A,D
+360   40CF B3            OR E
+360   40D0 20 01         JR NZ,$+3
+360   40D2 03            INC BC
+361   40D3
+362   40D3 F1                   POP AF
+363   40D4 3D                   DEC A
+363   40D5 20 D1         JR NZ,SVGS
+364   40D7 C3 08 40             JP CMD_STR
+365   40DA              ;------------------
+366   40DA DB 05        RD_PAR  IN A,(#05);       command ACCEPT
+367   40DC DB 02                IN A,(#02)
+367   40DE 6F            LD L,A
+367   40DF CD F7 40      CALL WTD
+368   40E2 DB 02                IN A,(#02)
+368   40E4 5F            LD E,A
+368   40E5 CD F7 40      CALL WTD
+369   40E8 DB 02                IN A,(#02)
+369   40EA 57            LD D,A
+369   40EB CD F7 40      CALL WTD
+370   40EE DB 02                IN A,(#02)
+370   40F0 4F            LD C,A
+370   40F1 CD F7 40      CALL WTD
+371   40F4 DB 02                IN A,(#02)
+371   40F6 47            LD B,A
+372   40F7 DB 04        WTD     IN A,(#04)
+373   40F9 07                   RLCA
+373   40FA D8            RET C
+374   40FB 18 FA                JR WTD
+375   40FD              ;=======================================
+376   40FD C5 D5        READS   PUSH BC,DE
+377   40FF 01 14 00             LD BC,SD_RSTR
+378   4102 ED B2                INIR
+379   4104 ED B2                INIR
+380   4106
+381   4106 ED 78                IN A,(C)
+381   4108 00 00         DS 2
+382   410A ED 78                IN A,(C)
+383   410C D1 C1                POP DE,BC
+384   410E C9                   RET
+385   410F              ;-------
+386   410F C5 D5        SAVDS   PUSH BC,DE
+387   4111 01 13 00 3E          LD BC,SD_SEND,A,#FE
+387   4115 FE
+388   4116
+389   4116 ED 79                OUT (C),A
+389   4118 00 00         DS 2
+390   411A ED B3                OTIR
+391   411C ED B3                OTIR
+392   411E
+393   411E 3E FF                LD A,#FF
+394   4120 ED 79                OUT (C),A
+394   4122 00 00         DS 2
+395   4124 ED 79                OUT (C),A
+396   4126 D1 C1                POP DE,BC
+397   4128 C9                   RET
+398   4129              ;---------------------------------------
+399   4129              ;i:HL - Address
+400   4129              ;   A - Sectors
+401   4129 CD B9 42     RDSINGL CALL CMD17
+401   412C 20 FE         JR NZ,$
+402   412E CD 58 43             CALL WTDO
+402   4131 FE FE         CP #FE
+402   4133 20 FE         JR NZ,$
+403   4135 CD FD 40 CD          CALL READS,SNB
+403   4139 3F 42
+404   413B CD 4B 43             CALL WTBY
+405   413E C3 1D 42             JP CSH
+406   4141
+407   4141 78           SVSINGL LD A,B
+407   4142 B1 B2 B3 B7   OR C,D,E,A,3
+407   4146 F6 03
+407   4148 C8            RET Z
+408   4149
+409   4149 CD F5 42             CALL CMD24
+409   414C 20 FE         JR NZ,$
+410   414E CD 0F 41 CD          CALL SAVDS,DRESP,SNB
+410   4152 32 43 CD 3F
+410   4156 42
+411   4157 CD 4B 43             CALL WTBY
+412   415A C3 1D 42             JP CSH
+413   415D              ;---------------------------------------
+414   415D 40           CMD00   DB %01000000+0
+414   415E 00 00 00 00   DS 4
+414   4162 95            DB #95
+415   4163 48 00 00 01  CMD08   DB %01000000+8,0,0,1,#AA,#87
+415   4167 AA 87
+416   4169 50 00 00 02  CMD16   DB %01000000+16,0,0,2,0,#FF
+416   416D 00 FF
+417   416F              ;---------------------------------------
+418   416F CD 1D 42     SD_INIT CALL CSH
+419   4172 11 0A 02             LD DE,512+10
+419   4175 CD 4B 42      CALL CYCL
+420   4178
+421   4178 11 40 1F             LD DE,8000
+422   417B 1B           SDWT    DEC DE
+422   417C 7A            LD A,D
+422   417D B3            OR E
+422   417E CA 1A 42      JP Z,NOSD
+423   4181 CD 03 43             CALL CMD0
+423   4184 20 F5         JR NZ,SDWT
+424   4186 3D                   DEC A
+424   4187 20 F2         JR NZ,SDWT
+425   4189
+426   4189 CD FE 42             CALL CMD8
+427   418C F5                   PUSH AF
+428   418D ED 58         IN E,(C)
+428   418F 00 00         DS 2
+429   4191 ED 58         IN E,(C)
+429   4193 00 00         DS 2
+430   4195 ED 60                IN H,(C)
+430   4197 00 00         DS 2
+431   4199 ED 68                IN L,(C)
+432   419B F1                   POP AF
+432   419C 20 DD         JR NZ,SDWT
+433   419E CB 57                BIT 2,A
+433   41A0 28 2E         JR Z,SDNEW
+434   41A2              ;-------
+435   41A2 11 40 1F     SDOLD   LD DE,8000
+436   41A5 1B           AA      DEC DE
+436   41A6 7A            LD A,D
+436   41A7 B3            OR E
+436   41A8 28 10         JR Z,LC
+437   41AA 26 00                LD H,0
+438   41AC CD 92 42             CALL ACMD41
+438   41AF 20 F4         JR NZ,AA
+439   41B1 FE 01                CP 1
+439   41B3 28 F0         JR Z,AA
+440   41B5 B7                   OR A
+440   41B6 20 02         JR NZ,LC
+441   41B8              ;SDV1 Detected
+442   41B8 18 58                JR FBS
+443   41BA              ;-------
+444   41BA 11 40 1F     LC      LD DE,8000
+445   41BD 1B           OO      DEC DE
+445   41BE 7A            LD A,D
+445   41BF B3            OR E
+445   41C0 28 58         JR Z,NOSD
+446   41C2 CD 7A 42             CALL CMD1
+446   41C5 20 F6         JR NZ,OO
+447   41C7 FE 01                CP 1
+447   41C9 28 F2         JR Z,OO
+448   41CB B7                   OR A
+448   41CC 20 4C         JR NZ,NOSD
+449   41CE              ;MMC Ver.3 Detected
+450   41CE 18 42                JR FBS
+451   41D0              ;-------
+452   41D0 11 AA 01     SDNEW   LD DE,#01AA
+453   41D3 B7                   OR A
+453   41D4 ED 52         SBC HL,DE
+453   41D6 20 42         JR NZ,NOSD
+454   41D8
+455   41D8 11 40 1F             LD DE,8000
+456   41DB 1B           YY      DEC DE
+456   41DC 7A            LD A,D
+456   41DD B3            OR E
+456   41DE 28 3A         JR Z,NOSD
+457   41E0 26 40                LD H,#40
+458   41E2 CD 92 42             CALL ACMD41
+458   41E5 20 F4         JR NZ,YY
+459   41E7 FE 01                CP 1
+459   41E9 28 F0         JR Z,YY
+460   41EB B7                   OR A
+460   41EC 20 2C         JR NZ,NOSD
+461   41EE              ;SDV2 Detected
+462   41EE
+463   41EE CD 8A 42             CALL CMD58
+463   41F1 20 27         JR NZ,NOSD
+464   41F3 01 14 00             LD BC,SD_RSTR
+465   41F6 ED 78                IN A,(C)
+465   41F8 00 00         DS 2
+466   41FA ED 68         IN L,(C)
+466   41FC 00 00         DS 2
+467   41FE ED 68         IN L,(C)
+467   4200 00 00         DS 2
+468   4202 ED 68         IN L,(C)
+468   4204 00 00         DS 2
+469   4206 CB 77                BIT 6,A
+469   4208 28 08         JR Z,FBS;SDV2 Byte Addr
+470   420A              ;SDV2 Block Address
+471   420A
+472   420A 3E 01                LD A,1
+473   420C 32 71 43     SDFND   LD (BLKT),A
+474   420F AF                   XOR A
+475   4210 18 0B                JR CSH
+476   4212              ;-------
+477   4212 CD F9 42     FBS     CALL CMDi6
+477   4215 20 03         JR NZ,NOSD
+478   4217 B7                   OR A
+478   4218 28 F2         JR Z,SDFND
+479   421A              ;-------
+480   421A 3E 01        NOSD    LD A,1
+480   421C C9            RET
+481   421D              ;---------------------------------------
+482   421D C5 F5        CSH     PUSH BC,AF
+483   421F 3E 81                LD A,1+#80
+483   4221 D3 11         OUT (SCTRL),A
+484   4223 01 13 00 3E          LD BC,SD_SEND,A,#FF
+484   4227 FF
+484   4228 ED 79         OUT (C),A
+485   422A F1 C1                POP AF,BC
+486   422C C9                   RET
+487   422D C5 F5        CSL     PUSH BC,AF
+488   422F 3E 01                LD A,1+#00
+488   4231 D3 11         OUT (SCTRL),A
+489   4233 01 13 00 3E          LD BC,SD_SEND,A,#FF
+489   4237 FF
+489   4238 ED 79         OUT (C),A
+490   423A F1 C1                POP AF,BC
+491   423C C3 64 43             JP WAIT
+492   423F
+493   423F C5 F5        SNB     PUSH BC,AF
+494   4241 06 10                LD B,16
+495   4243 AF           SnB     XOR A
+495   4244 DB 14         IN A,(SD_RSTR)
+495   4246 10 FB         DJNZ SnB
+496   4248 F1 C1                POP AF,BC
+497   424A C9                   RET
+498   424B
+499   424B 01 13 00     CYCL    LD BC,SD_SEND
+500   424E 3E FF        Cy      LD A,#FF
+500   4250 ED 79         OUT (C),A
+501   4252 1B                   DEC DE
+501   4253 7A            LD A,D
+501   4254 B3            OR E
+501   4255 20 F7         JR NZ,Cy
+502   4257 C9                   RET
+503   4258              ;-------
+504   4258 CD 1D 42     CMDo    CALL CSH
+505   425B CD 2D 42             CALL CSL
+506   425E C5           CMDx    PUSH BC
+507   425F 01 13 00             LD BC,SD_SEND
+508   4262 ED 79                OUT (C),A
+508   4264 00            NOP
+509   4265 AF                   XOR A
+510   4266 ED 79                OUT (C),A
+510   4268 00 00         DS 2
+511   426A ED 79                OUT (C),A
+511   426C 00 00         DS 2
+512   426E ED 79                OUT (C),A
+512   4270 00 00         DS 2
+513   4272 ED 79                OUT (C),A
+513   4274 00            NOP
+514   4275 3D                   DEC A
+514   4276 ED 79         OUT (C),A
+515   4278 C1                   POP BC
+516   4279 C9                   RET
+517   427A 3E 41        CMD1    LD A,CMD_1
+517   427C CD 58 42      CALL CMDo
+517   427F C3 1E 43      JP RESP
+518   4282 3E 77        CMD55   LD A,CMD_55
+518   4284 CD 58 42      CALL CMDo
+518   4287 C3 1E 43      JP RESP
+519   428A 3E 7A        CMD58   LD A,CMD_58
+519   428C CD 58 42      CALL CMDo
+519   428F C3 1E 43      JP RESP
+520   4292              ;-------
+521   4292 CD 82 42     ACMD41  CALL CMD55
+522   4295 CD 1D 42             CALL CSH
+523   4298 CD 2D 42             CALL CSL
+524   429B
+525   429B 01 13 00 3E          LD BC,SD_SEND,A,ACMD_41
+525   429F 69
+526   42A0 ED 79                OUT (C),A
+526   42A2 2E 00         LD L,0
+526   42A4 00            NOP
+527   42A5 ED 61                OUT (C),H
+527   42A7 00 00         DS 2
+528   42A9 ED 69                OUT (C),L
+528   42AB 00 00         DS 2
+529   42AD ED 69                OUT (C),L
+529   42AF 00 00         DS 2
+530   42B1 ED 69                OUT (C),L
+530   42B3 00            NOP
+531   42B4 2D                   DEC L
+531   42B5 ED 69         OUT (C),L
+532   42B7 18 65                JR RESP
+533   42B9              ;-------
+534   42B9 3E 51        CMD17   LD A,CMD_17
+535   42BB CD 1D 42     CMDz    CALL CSH
+536   42BE CD 2D 42             CALL CSL
+537   42C1 E5 D5 C5             PUSH HL,DE,BC
+538   42C4
+539   42C4 69 60                LD L,C,H,B
+540   42C6
+541   42C6 4F 3A 71 43          LD C,A,A,(BLKT)
+541   42CA B7            OR A
+541   42CB 20 09         JR NZ,CMzz
+542   42CD EB                   EX DE,HL
+542   42CE 29            ADD HL,HL
+543   42CF EB                   EX DE,HL
+543   42D0 ED 6A         ADC HL,HL
+544   42D2 65 6A 53 5F          LD H,L,L,D,D,E,E,A
+545   42D6
+546   42D6 79 01 13 00  CMzz    LD A,C,BC,SD_SEND
+547   42DA ED 79                OUT (C),A
+547   42DC 00 00         DS 2
+548   42DE ED 61                OUT (C),H
+548   42E0 00 00         DS 2
+549   42E2 ED 69                OUT (C),L
+549   42E4 00 00         DS 2
+550   42E6 ED 51                OUT (C),D
+550   42E8 00 00         DS 2
+551   42EA ED 59                OUT (C),E
+552   42EC 3E FF                LD A,#FF
+552   42EE ED 79         OUT (C),A
+553   42F0 C1 D1 E1             POP BC,DE,HL
+554   42F3 18 29                JR RESP
+555   42F5 3E 58        CMD24   LD A,CMD_24
+555   42F7 18 C2         JR CMDz
+556   42F9              ;-------
+557   42F9 21 69 41     CMDi6   LD HL,CMD16
+557   42FC 18 08         JR CMD
+558   42FE 21 63 41     CMD8    LD HL,CMD08
+558   4301 18 03         JR CMD
+559   4303 21 5D 41     CMD0    LD HL,CMD00
+560   4306 CD 1D 42     CMD     CALL CSH
+561   4309 CD 2D 42             CALL CSL
+562   430C 01 13 00             LD BC,SD_SEND
+563   430F ED A3         OUTI
+564   4311 ED A3         OUTI
+565   4313 ED A3         OUTI
+566   4315 ED A3         OUTI
+567   4317 ED A3         OUTI
+568   4319 ED A3         OUTI
+569   431B
+570   431B 01 14 00             LD BC,SD_RSTR
+571   431E D5 C5        RESP    PUSH DE,BC
+572   4320 01 14 00 16          LD BC,SD_RSTR,D,10
+572   4324 0A
+573   4325 ED 78        RESp    IN A,(C)
+573   4327 CB 7F         BIT 7,A
+573   4329 28 04         JR Z,REZ
+574   432B 15                   DEC D
+574   432C 20 F7         JR NZ,RESp
+574   432E 14            INC D
+575   432F C1 D1        REZ     POP BC,DE
+576   4331 C9                   RET
+577   4332              ;-------
+578   4332 C5 F5        DRESP   PUSH BC,AF
+579   4334 01 14 00             LD BC,SD_RSTR
+580   4337 ED 78                IN A,(C)
+580   4339 FE FF         CP #FF
+580   433B 28 FA         JR Z,$-4
+581   433D E6 1F                AND #1F
+581   433F FE 05         CP 5
+581   4341 20 FE         JR NZ,$
+582   4343 ED 78                IN A,(C)
+582   4345 B7            OR A
+582   4346 28 FB         JR Z,$-3
+583   4348 F1 C1                POP AF,BC
+584   434A C9                   RET
+585   434B              ;-------
+586   434B C5 F5        WTBY    PUSH BC,AF
+587   434D 01 14 00             LD BC,SD_RSTR
+587   4350 ED 78         IN A,(C)
+587   4352 B7            OR A
+587   4353 28 FB         JR Z,$-3
+588   4355 F1 C1                POP AF,BC
+589   4357 C9                   RET
+590   4358
+591   4358 C5           WTDO    PUSH BC
+592   4359 01 14 00             LD BC,SD_RSTR
+593   435C ED 78                IN A,(C)
+593   435E FE FF         CP #FF
+593   4360 28 FA         JR Z,$-4
+594   4362 C1                   POP BC
+595   4363 C9                   RET
+596   4364
+597   4364 C5 F5        WAIT    PUSH BC,AF
+598   4366 01 14 00             LD BC,SD_RSTR
+599   4369 ED 78                IN A,(C)
+599   436B 3C            INC A
+599   436C 20 FB         JR NZ,$-3
+600   436E F1 C1                POP AF,BC
+601   4370 C9                   RET
+602   4371              ;-------
+603   4371 00           BLKT    NOP
+604   4372              ;---------------------------------------
+605   4372
+# file closed: DSDNGS.correct.ASM

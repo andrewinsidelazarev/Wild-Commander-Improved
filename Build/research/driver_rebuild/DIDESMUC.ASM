@@ -1,0 +1,331 @@
+;IDE Smuc Driver
+;(C) BUDDER/MGN 2015
+;---------------------------------------
+        IFNDEF __ALASM_CORG_ACTIVE
+        ORG 0
+        DISP #3800
+        DEFINE __ALASM_CORG_ACTIVE 1
+__ALASM_CORG_CODE DEFL 0
+__ALASM_CORG_LOGICAL DEFL #3800
+__ALASM_CORG_DISP DEFL 1
+        ELSE
+__ALASM_CORG_END DEFL __ALASM_CORG_CODE + ($ - __ALASM_CORG_LOGICAL)
+__ALASM_CORG_NEW DEFL __ALASM_CORG_END
+        IF __ALASM_CORG_NEW > __ALASM_CORG_END
+        DS __ALASM_CORG_NEW - __ALASM_CORG_END,0
+        ENDIF
+        IF __ALASM_CORG_DISP
+        ENT
+        ENDIF
+        DISP #3800
+__ALASM_CORG_CODE DEFL __ALASM_CORG_NEW
+__ALASM_CORG_LOGICAL DEFL #3800
+__ALASM_CORG_DISP DEFL 1
+        ENDIF
+;-------
+CMD     EQU #FFBE;#F0;Command/State
+DRV     EQU #FEBE;#FFD0;Drive/Head
+CYLH    EQU #FDBE;#B0;CYL High
+CYLL    EQU #FCBE;#90;CYL Low
+SECR    EQU #FBBE;#70;SEC
+BLKS    EQU #FABE;#50;Counter
+ERRO    EQU #F9BE;#30;Error/Ext
+DATH    EQU #D8BE;#11;Data High
+DATL    EQU #F8BE;#10;Data Low
+
+CONF    EQU #FFBA
+
+LOBU    EQU #3000
+;---------------------------------------
+        JP SELDEV
+        JP SMUCini
+        JP REINI
+
+        JP XPOZI
+        JP PROZ
+
+        JP RDDSE
+        JP SDDSE
+
+        JP RDD256
+
+ .16     DS 3
+;---------------------------------------
+NSDC    NOP ;\ SEC number in CLUS
+EOC     NOP ;/ EndOfChain (Flag)
+
+ABT     NOP
+
+BZN     DB 4
+NR0     DW 4;number of Sectors
+
+CAHL    DS 2
+CADE    DS 2
+
+LSTSE   DS 4
+
+REZDE   DS 2
+
+PR      DS 4
+
+CLHL    DS 2
+CLDE    DS 2
+
+LLHL    DS 4
+
+LTHL    DS 2;LAST
+LTDE    DS 2
+;------Entry Pattern:-------------------
+ENTRY   DS 11
+EFLG    DB 0,0
+        DB #00;ms
+        DW #0000:DW #0000;time,date
+        DW #0000;acc date
+CLSDE   DS 2
+        DW #0000:DW #0000;time,date
+CLSHL   DS 2
+SIZIK   DS 4
+        NOP
+;---------------------------------------
+BREZS   DS 2;+14          FAT PARAMETERS
+FSINF   DS 4;[+48(2)]+[ADDTOP]
+
+BFATS   NOP
+BFTSZ   DS 4
+BSECPC  DS 2;USE 1
+BROOTC  DS 4
+
+FSTFRC  DW 2,0
+
+ADDTOP  DS 4
+
+SFAT    DS 2
+SDFAT   DS 4
+
+CUHL    DS 2
+CUDE    DS 2
+
+NXDE    DS 2
+NXHL    DS 2
+
+LDHL    DS 2;Address
+
+COUNT   NOP
+DUHL    DS 2
+DUDE    DS 2
+
+DUBA    NOP
+UUHL    DS 2
+BUHL    DS 2
+GARY    DS 2;AAA
+CLCNT   DS 2;counter
+FCTS    DS 4
+BUTS    DS 4
+
+LSTCAT  DS 4;Active DIR
+RECCAT  DS 4;RECYCLED BIN DIR
+;---------------------------------------
+;INTERNAL VARIABLES:
+BLKNUM  DS 4
+DRVRE   NOP
+;---------------------------------------
+
+XPOZI   LD (LTHL),HL,(LTDE),DE
+PROZ    LD A,H,H,D,D,E,E,A
+;DE,cyl H,head L,sec
+
+        LD (BLKNUM),HL
+        LD (BLKNUM+2),DE
+        RET
+
+REREG   PUSH HL,DE
+        LD HL,(BLKNUM)
+        LD DE,(BLKNUM+2)
+
+        LD A,H:AND %00001111:LD H,A
+        LD A,(DRVRE)
+        OR H
+        LD BC,DRV:OUT (C),A
+        LD BC,SECR:OUT (C),L
+        LD BC,CYLH:OUT (C),D
+        LD BC,CYLL:OUT (C),E
+        POP DE,HL
+        RET
+
+;---------------------------------------
+RPOZ    LD BC,DRV:IN A,(C):AND #0F
+        LD H,A
+        LD BC,SECR:IN L,(C)
+        LD BC,CYLH:IN D,(C)
+        LD BC,CYLL:IN E,(C)
+        RET
+
+;---------------------------------------
+;i:HL - Address
+;   A - Sectors
+
+RDDSE   EXA:CALL DRDY
+        EXA
+        LD BC,BLKS:OUT (C),A
+        EXA
+        CALL REREG
+        LD A,#20:CALL COMD
+        EXA
+RDH1    EXA
+        CALL WAITDRQ
+        CALL READS
+        CALL READY
+        EXA:DEC A:JR NZ,RDH1
+        RET
+
+;---------------------------------------
+SDDSE   EXA:CALL DRDY
+        EXA
+        LD BC,BLKS:OUT (C),A
+        EXA
+        CALL REREG
+        LD A,#30:CALL COMD
+        EXA
+SDH1    EXA
+        CALL WAITDRQ
+        CALL SAVDS
+        CALL READY
+        EXA:DEC A:JR NZ,SDH1
+        RET
+
+;---------------------------------------
+
+COMM    LD BC,CMD:OUT (C),A:RET
+COMD    LD BC,CMD:OUT (C),A
+READY   CALL LOLL:RLCA:RET NC
+        JR READY
+
+LOLL    LD BC,CMD:IN A,(C):RET
+
+WAITDRQ CALL LOLL:AND 8:RET NZ
+        JR WAITDRQ
+
+DRDY    CALL LOLL:RLCA:JR C,DRDY
+        LD BC,DRV,A,(DRVRE):OUT (C),A
+DRD     CALL LOLL
+        AND %11000000
+        CP %01000000:RET Z
+        JR DRD
+
+ERROR_7 CALL LOLL:RRCA:RET
+
+YDET    CALL LOLL:BIT 7,A:RET Z
+        EI:HALT
+        DEC HL:LD A,H:OR L:JR NZ,YDET
+        INC A
+        RET
+
+DRQWT   CALL LOLL:AND 8:RET NZ
+        EI:HALT
+        DEC HL:LD A,H:OR L:JR NZ,DRQWT
+        RET
+
+SELDEV  LD BC,CONF,L,%00000001:OUT (C),L
+
+        OR A:JR NZ,SEL_SLA
+SEL_MAS LD A,#E0:JR SEL_SLA+2
+SEL_SLA LD A,#F0
+        LD (DRVRE),A
+        LD BC,DRV:OUT (C),A
+        RET
+SET_CHA LD A,(DRVRE)
+        LD BC,DRV:OUT (C),A
+REINI   RET
+
+;---------------------------------------
+SMUCini CALL SET_CHA
+        LD A,#08:CALL COMM
+
+        LD HL,256:CALL YDET:JR NZ,RU
+
+        LD DE,0
+        LD HL,2
+        CALL XPOZI,REREG
+        LD A,#EC:CALL COMM
+
+        LD HL,256:CALL YDET:JR NZ,RU
+        LD HL,32:CALL DRQWT:JR Z,RU
+        CALL RPOZ
+        PUSH HL,DE:LD HL,LOBU:CALL READS
+        POP DE,HL
+
+        LD A,D:OR E,H:JR NZ,RU
+        LD A,L:CP 2:JR Z,KRU
+
+RU      LD A,1:OR A
+        RET
+;-------
+KRU     XOR A
+        RET
+
+;---------------------------------------
+;READ 512b from IDE Device BUFFER
+READS   LD E,high DATL
+        LD D,high DATH
+        LD C,low DATL,A,#08
+RE1
+ .32     LD B,E:INI:LD B,D:INI
+        DEC A:JP NZ,RE1
+        RET
+
+;---------------------------------------
+;SAVE 512b to IDE Device BUFFER
+SAVDS   LD E,high DATL+1
+        LD D,high DATH+1
+        LD C,low DATL,A,#80
+SA1     INC HL
+        LD B,D:OUTD
+        LD B,E:OUTI
+ .2      INC HL
+        LD B,D:OUTD
+        LD B,E:OUTI
+        INC HL
+        DEC A:JP NZ,SA1
+        RET
+;---------------------------------------
+RDD256  EXA:CALL DRDY
+        EXA
+        LD BC,BLKS:OUT (C),A
+        EXA
+        CALL REREG
+        LD A,#20:CALL COMD
+        EXA
+
+RDS256  EXA
+        CALL WAITDRQ
+;-------
+        LD E,high DATL
+        LD D,high DATH
+        LD C,low DATL
+
+ .2      CALL HUU
+;-------
+        CALL READY
+        EXA:DEC A:JP NZ,RDS256
+        RET
+;-------
+HUU     LD A,#10
+HUD
+ .8      LD B,E:INI:LD B,D:INI
+        DEC A:JP NZ,HUD
+        INC H
+        RET
+;---------------------------------------
+STS     EQU #27AF
+
+DMASL   EQU #1AAF
+DMASH   EQU #1BAF
+DMASX   EQU #1CAF
+DMADL   EQU #1DAF
+DMADH   EQU #1EAF
+DMADX   EQU #1FAF
+
+DMA_T   EQU #28AF;0=1, 255=256
+DMA_N   EQU #26AF;255=512
+DMA_C   EQU #27AF;RW 1 - - - 0 0 1
+;---------------------------------------
