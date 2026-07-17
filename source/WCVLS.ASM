@@ -413,8 +413,12 @@ TER2D   DB #0E
 TER2F   DB #0E,"DIR with same name "
         DB "already exists!",0
 TER30   DB #0E,"DIR is not empty!",0
+; Codex - 2026-07-17 - begin
+; Один избыточный восклицательный знак освобождает байт для суффикса версии,
+; не меняя конечную границу WCVLS и адрес начала следующего модуля.
 TER2X   DB #0E
-        DB "UNKNOWN ERROR!!!",0
+        DB "UNKNOWN ERROR!!",0
+; Codex - 2026-07-17 - end
 
 TERC1   DB #0E,"DIR not found (src)",0
 TERC2   DB #0E,"Make DIR failed (dst)",0
@@ -459,7 +463,9 @@ WND_H   DB 36
 
 TXT1    DB #0E,5,5
 TXTC
-        DB "Wild Commander v1.10",0
+; Codex - 2026-07-17 - begin
+        DB "Wild Commander v1.10i",0
+; Codex - 2026-07-17 - end
 TXT2    DB 7,7,"F1",6,1,"Help  "
         DB 7,7,"F2",8,1
 F2TXT   DB "      "

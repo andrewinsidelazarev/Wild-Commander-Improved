@@ -291,6 +291,24 @@
                         //    Z - File created
                         // o:ENTRY(32) [use TENTRY]
 
+// Codex - 2026-07-17 - begin
+#define _APPEND 0x4C    // дописать произвольные байты в конец найденного файла
+                        // перед первым вызовом требуется успешный FENTRY
+                        // i:HL - буфер целиком в диапазоне 0x4000..0xBFFF
+                        // i:BC - число байт 0..512
+                        // o:Z - данные и новый 32-битный размер записаны
+                        // o:NZ, A - код ошибки; повторять блок вслепую нельзя
+#define APPEND_ERR_CONTEXT       0x20
+#define APPEND_ERR_BUFFER        0x21
+#define APPEND_ERR_LENGTH        0x22
+#define APPEND_ERR_ENTRY_CHANGED 0x23
+#define APPEND_ERR_SIZE_OVERFLOW 0x24
+#define APPEND_ERR_BAD_CHAIN     0x25
+#define APPEND_ERR_IS_DIRECTORY  0x26
+#define APPEND_ERR_INTERNAL      0x27
+#define APPEND_ERR_ROLLBACK      0x2A
+// Codex - 2026-07-17 - end
+
 #define _GVtm  0x69     // выставление страницы для TileMap
 #define _GVtl  0x70     // выставление страницы для TileGraphics
 #define _GVsgp 0x71     // выставление страницы для SpriteGraphics

@@ -1,6 +1,5 @@
-; DSDZC — exact-драйвер SD-интерфейса ZC для WildDOSFileCore #35.
+; DSDZC — драйвер SD-интерфейса ZC для WildDOSFileCore #35.
 ; Рабочая база #3800, размер runtime-образа #048C (1164 байта).
-; SHA-256 точного runtime-образа: 12b4323aa4b70a7e009ae6003852b8d372acd9d8b62428f496055d8ebe1af2db.
 ; ABI таблицы переходов:
 ;   #3800 SELDEV — выбрать первый или второй интерфейс: A=0/#6015, A<>0/#6016;
 ;   #3803 SDINI  — определить SD/MMC, настроить адресацию и размер блока;
@@ -41,6 +40,23 @@ SDBSF2  EQU SDBSF+1
 CONF    EQU #77
 DATA    EQU #57
 
+; Codex - 2026-07-16 - begin
+; Фиксированный шлюз WildDOS и номера конечных обработчиков SD-ZC.
+; Сборка CORE32 отдельно утверждает адрес шлюза, а build.ps1 сравнивает
+; установленный после распаковки runtime с этим исходником побайтно.
+WDOS_EXTENSION_GATE EQU #5123
+ID_ZC_WAIT_READY    EQU 26
+ID_ZC_WAIT_TOKEN    EQU 27
+ID_ZC_WAIT_BUSY     EQU 28
+ID_ZC_DATA_RESPONSE EQU 29
+ID_ZC_DMA_WAIT      EQU 30
+ID_ZC_START_READ    EQU 31
+ID_ZC_READ_BLOCK    EQU 32
+ID_ZC_WRITE_READY   EQU 33
+ID_ZC_START_WRITE   EQU 34
+ID_ZC_CHECK_TOKEN   EQU 35
+; Codex - 2026-07-16 - end
+
 CMD_1   EQU %01000000+1
 CMD_12  EQU %01000000+12
 CMD_16  EQU %01000000+16
@@ -62,9 +78,36 @@ CMD_58  EQU %01000000+58
 
         JP RDD256
 
-        DUP 16
-        DS 3
-        EDUP
+; Codex - 2026-07-16 - begin
+; Ранее неиспользуемые строки таблицы драйвера теперь служат короткими
+; переходниками к расширению. Диапазон заканчивается по прежнему адресу #3848.
+ZC_START_READ_GATE:
+        CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_START_READ
+        RET
+ZC_READ_BLOCK_GATE:
+        CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_READ_BLOCK
+        RET
+ZC_WRITE_READY_GATE:
+        CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_WRITE_READY
+        RET
+ZC_START_WRITE_GATE:
+        CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_START_WRITE
+        RET
+ZC_CHECK_TOKEN_GATE:
+        CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_CHECK_TOKEN
+        RET
+ZC_DMA_WAIT_GATE:
+        CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_DMA_WAIT
+        RET
+        DS #3848-$,0
+        ASSERT $ == #3848, переходники SD-ZC пересекли рабочие данные
+; Codex - 2026-07-16 - end
 
 NSDC    NOP
 EOC     NOP
@@ -154,12 +197,21 @@ REINI   RET
 RDDSE   LD DE,(BLKNUM)
         LD BC,(BLKNUM+2)
         EXA
-        CALL CMD18:JR NZ,$
+; Codex - 2026-07-16 - begin
+        CALL ZC_START_READ_GATE
+        RET NZ
+        NOP
+; Codex - 2026-07-16 - end
         EXA
 RD1     EXA
-        CALL WTDO:CP #FE:JR NZ,$-5
-        CALL READS
-        EXA:DEC A:JR NZ,RD1
+; Codex - 2026-07-16 - begin
+        CALL WTDO
+        CALL ZC_CHECK_TOKEN_GATE
+        RET NZ
+        CALL ZC_READ_BLOCK_GATE
+        RET NZ
+        DEC A:JR NZ,RD1
+; Codex - 2026-07-16 - end
 
         CALL CMD12,SNB
         CALL WTBY
@@ -169,12 +221,25 @@ RD1     EXA
 SDDSE   LD DE,(BLKNUM)
         LD BC,(BLKNUM+2)
         EXA
-        XOR A:IN A,(CONF):AND 2:RET NZ
+; Codex - 2026-07-16 - begin
+        CALL ZC_WRITE_READY_GATE
+        RET NZ
+        NOP
+        NOP
+; Codex - 2026-07-16 - end
 
-        CALL CMD25,WAIT
-        EXA
+; Codex - 2026-07-16 - begin
+        CALL ZC_START_WRITE_GATE
+        NOP
+        NOP
+        NOP
+        RET NZ
+; Codex - 2026-07-16 - end
 SD1     EXA:CALL SAVDS,DRESP
-        EXA:DEC A:JR NZ,SD1
+; Codex - 2026-07-16 - begin
+        RET NZ
+        DEC A:JR NZ,SD1
+; Codex - 2026-07-16 - end
 
 SDND    LD BC,DATA,A,#FD:OUT (C),A:CALL SNB
         CALL WTBY
@@ -195,7 +260,10 @@ READS   PUSH BC,DE
 MAK     ADD A,B:LD D,A
         LD B,#60,A,(BC)
 
-        LD BC,STS:INF:JP M,$-2
+; Codex - 2026-07-16 - begin
+        CALL ZC_DMA_WAIT_GATE
+        JR C,RDSEX
+; Codex - 2026-07-16 - end
 
         LD B,high DMADX:OUT (C),A
         DEC B:OUT (C),D
@@ -206,7 +274,10 @@ MAK     ADD A,B:LD D,A
 
         LD B,high DMA_C,A,%01000010:OUT (C),A
         LD DE,512:ADD HL,DE
-        INF:JP M,$-2
+; Codex - 2026-07-16 - begin
+        CALL ZC_DMA_WAIT_GATE
+        JR C,RDSEX
+; Codex - 2026-07-16 - end
 
 RDSEX   LD BC,DATA:IN A,(C):IN A,(C)
         POP DE,BC
@@ -235,7 +306,10 @@ SAVDS   PUSH BC,DE
 MAS     ADD A,B:LD D,A
         LD B,#60,A,(BC)
 
-        LD BC,STS:INF:JP M,$-2
+; Codex - 2026-07-16 - begin
+        CALL ZC_DMA_WAIT_GATE
+        JR C,SVSEX
+; Codex - 2026-07-16 - end
 
         LD B,high DMASX:OUT (C),A
         DEC B:OUT (C),D
@@ -246,7 +320,10 @@ MAS     ADD A,B:LD D,A
 
         LD B,high DMA_C,A,%11000010:OUT (C),A
         LD DE,512:ADD HL,DE
-        INF:JP M,$-2
+; Codex - 2026-07-16 - begin
+        CALL ZC_DMA_WAIT_GATE
+        JR C,SVSEX
+; Codex - 2026-07-16 - end
 
 SVSEX   LD BC,DATA,A,#FF:OUT (C),A:OUT (C),A
         POP DE,BC
@@ -261,11 +338,18 @@ OLDSVS
 ; Прочитать A половинных блоков, сохраняя потоковую позицию.
 RDD256  LD DE,(BLKNUM)
         LD BC,(BLKNUM+2)
-        EXA:CALL CMD18
+        EXA
+; Codex - 2026-07-16 - begin
+        CALL ZC_START_READ_GATE
+; Codex - 2026-07-16 - end
         EXA
 
 RDS256  EXA
-        CALL WTDO:CP #FE:JR NZ,$
+; Codex - 2026-07-16 - begin
+        CALL WTDO
+        CALL ZC_CHECK_TOKEN_GATE
+        RET NZ
+; Codex - 2026-07-16 - end
 
         LD BC,#4000
         LD A,H
@@ -276,7 +360,11 @@ RDS256  EXA
 MA2     ADD A,B:LD D,A
         LD B,#60,A,(BC)
 
-        LD BC,STS:INF:JP M,$-2
+; Codex - 2026-07-16 - begin
+        CALL ZC_DMA_WAIT_GATE
+        RET C
+        NOP
+; Codex - 2026-07-16 - end
 
         LD B,high DMADX:OUT (C),A
         DEC B:OUT (C),D
@@ -289,7 +377,11 @@ MA2     ADD A,B:LD D,A
         DUP 4
         INC H
         EDUP
-        INF:JP M,$-2
+; Codex - 2026-07-16 - begin
+        CALL ZC_DMA_WAIT_GATE
+        RET C
+        NOP
+; Codex - 2026-07-16 - end
 
         LD BC,DATA
         DUP 2
@@ -382,6 +474,9 @@ CSH     PUSH BC,AF
 CSL     PUSH BC,AF
         LD BC,CONF
 CS_ON   LD A,%00000001:OUT (C),A
+; Codex - 2026-07-16 - begin
+        ASSERT CS_ON+1 == #3B30, изменился runtime-операнд выбора интерфейса ZC
+; Codex - 2026-07-16 - end
         LD BC,DATA,A,#FF:OUT (C),A
         POP AF,BC
         JP WAIT
@@ -468,32 +563,33 @@ RESp    IN A,(C):BIT 7,A:JR Z,REZ
 REZ     POP BC,DE
         RET
 
-DRESP   PUSH BC,AF
-        LD BC,DATA
-        IN A,(C):CP #FF:JR Z,$-4
-        AND #1F:CP 5:JR NZ,ER
-        IN A,(C):OR A:JR Z,$-3
-        POP AF,BC
+; Codex - 2026-07-16 - begin
+; Все потенциально бесконечные ожидания перенесены в конечные обработчики.
+; DS сохраняют исходные адреса WTBY/WTDO/WAIT/SELDEV и размер runtime #048C.
+DRESP   CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_DATA_RESPONSE
         RET
-ER      AND 15:ADD A,240
-        LD BC,#0FAF:OUT (C),A
-        CALL SDND
-        JR $
+        DS #3C54-$,0
+        ASSERT $ == #3C54, изменился адрес WTBY
 
-WTBY    PUSH BC,AF
-        LD BC,DATA:IN A,(C):OR A:JR Z,$-3
-        POP AF,BC
+WTBY    CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_WAIT_BUSY
         RET
+        DS #3C61-$,0
+        ASSERT $ == #3C61, изменился адрес WTDO
 
-WTDO    PUSH BC
-        LD BC,DATA:IN A,(C):CP #FF:JR Z,$-4
-        POP BC
+WTDO    CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_WAIT_TOKEN
         RET
+        DS #3C6D-$,0
+        ASSERT $ == #3C6D, изменился адрес WAIT
 
-WAIT    PUSH BC,AF
-        LD BC,DATA:IN A,(C):INC A:JR NZ,$-3
-        POP AF,BC
+WAIT    CALL WDOS_EXTENSION_GATE
+        DB ID_ZC_WAIT_READY
         RET
+        DS #3C7A-$,0
+        ASSERT $ == #3C7A, изменился адрес SELDEV
+; Codex - 2026-07-16 - end
 
 ; Пропатчить chip-select и адрес глобального флага первого/второго ZC.
 SELDEV  OR A:LD A,%00000001,HL,SDBSF
@@ -515,3 +611,13 @@ DMADX   EQU #1FAF
 DMA_T   EQU #28AF
 DMA_N   EQU #26AF
 DMA_C   EQU #27AF
+
+; Codex - 2026-07-17 - begin
+; CORE32_EXT вызывает эти внутренние точки уже распакованного драйвера.
+; Жёсткие проверки не допускают незаметного рассогласования с его константами.
+        ASSERT READS == #393F, изменился внутренний адрес READS SD-ZC
+        ASSERT CSH == #3B17, изменился внутренний адрес CSH SD-ZC
+        ASSERT CMD18 == #3BB5, изменился внутренний адрес CMD18 SD-ZC
+        ASSERT CMD25 == #3BEA, изменился внутренний адрес CMD25 SD-ZC
+        ASSERT WAIT == #3C6D, изменился внутренний адрес WAIT SD-ZC
+; Codex - 2026-07-17 - end

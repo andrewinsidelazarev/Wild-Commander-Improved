@@ -1,0 +1,45 @@
+; Codex - 2026-07-17 - begin
+; Общие номера шлюза страницы расширения WildDOS. Файл включается как в
+; конечный runtime, так и в символический проход основной сборки.
+ID_STREAM_WITH_HANDLER        EQU 0
+ID_READ_SECTORS               EQU 1
+ID_STREAM_IO_ERROR            EQU 2
+ID_INIT_FREE_SCAN             EQU 3
+ID_CHECK_FREE_SCAN_LIMIT      EQU 4
+ID_NEXT_FREE_FAT_SECTOR       EQU 5
+ID_FAT_SECTOR_IN_RANGE        EQU 6
+ID_POSITION_FAT_READ          EQU 7
+ID_CLASSIFY_FAT_LINK          EQU 8
+ID_FAT_LINK_ERROR             EQU 9
+ID_SAVE_FAT_SECTOR            EQU 10
+ID_REFINE_NAME_CLASSIFICATION EQU 11
+ID_IS_EOC_BEFORE_HL           EQU 12
+ID_RESET_DIR_HISTORY          EQU 13
+ID_SAVE_PREVIOUS_DIR_LBA      EQU 14
+ID_PRESERVE_OLDER_DIR_SECTOR  EQU 15
+ID_BEGIN_LFN_COMPARE          EQU 16
+ID_COMPARE_LFN_CHAR           EQU 17
+ID_DELETE_ENTRY_WITH_LFN      EQU 18
+ID_ALLOCATE_FILE              EQU 19
+ID_RFRH_SAFE                  EQU 20
+ID_RECORD_FAT_LINK_ERROR      EQU 21
+ID_LOAD_FAT_CONFIG            EQU 22
+ID_VALIDATE_NAME              EQU 23
+ID_MAP_OLDER_LFN_POINTER      EQU 24
+ID_UNPACK_DRIVER              EQU 25
+ID_ZC_WAIT_READY              EQU 26
+ID_ZC_WAIT_TOKEN              EQU 27
+ID_ZC_WAIT_BUSY               EQU 28
+ID_ZC_DATA_RESPONSE           EQU 29
+ID_ZC_DMA_WAIT                EQU 30
+ID_ZC_START_READ              EQU 31
+ID_ZC_READ_BLOCK              EQU 32
+ID_ZC_WRITE_READY             EQU 33
+ID_ZC_START_WRITE             EQU 34
+ID_ZC_CHECK_TOKEN             EQU 35
+ID_ZERO_CLUSTER_TAIL          EQU 36
+ID_COPY_ENTRY_AND_CAPTURE     EQU 37
+ID_APPEND_BYTES               EQU 38
+ID_COPY_TO_ENTRY              EQU 39
+ID_COUNT                      EQU 40
+; Codex - 2026-07-17 - end

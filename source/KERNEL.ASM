@@ -80,6 +80,11 @@ EFLG    EQU ENTRY+11
 CLSDE   EQU ENTRY+20
 CLSHL   EQU ENTRY+26
 SIZIK   EQU ENTRY+28
+; Codex - 2026-07-16 - begin
+; Младший байт BPB_ExtFlags: бит 7 отключает зеркалирование FAT, младшие четыре
+; бита выбирают активную копию. В эталонном образе ENTRY+32 не использовался.
+FATFLAGS EQU ENTRY+32
+; Codex - 2026-07-16 - end
 BREZS   EQU ENTRY+33
 FSINF   EQU BREZS+2
 
@@ -138,17 +143,23 @@ START   JP Z0            ; +#00: зарезервировано (SELDEV нахо
 
         JP DOS_SWP       ; +#1B: выбрать и распаковать драйвер устройства
 
-        JP GLSTCAT       ; +#1E: получить активный каталог
-        JP TLSTCAT       ; +#21: установить активный каталог
+; Codex - 2026-07-17 - begin
+        JP GLSTCAT       ; +#1E: установить активный каталог из 4 байт по HL
+        JP TLSTCAT       ; +#21: получить активный каталог в 4 байта по DE
+; Codex - 2026-07-17 - end
 
         JP SRHFCL        ; +#24: найти свободный кластер от FSTFRC
-        JP Z0            ; +#27: зарезервировано
+; Codex - 2026-07-17 - begin
+        JP APPEND        ; +#27: дописать 0..512 байт в конец найденного файла
+; Codex - 2026-07-17 - end
         JP MKSG          ; +#2A: создать FAT-цепочку заданного размера
         JP Z0            ; +#2D: зарезервировано
         JP RFRH          ; +#30: записать FSI_Nxt_Free в FSInfo
 
-        JP GENTRY        ; +#33: получить текущую ENTRY
-        JP TENTRY        ; +#36: установить текущую ENTRY
+; Codex - 2026-07-17 - begin
+        JP GENTRY        ; +#33: установить ENTRY из 32 байт по HL
+        JP TENTRY        ; +#36: получить ENTRY в DE и сохранить контекст APPEND
+; Codex - 2026-07-17 - end
 
         JP MKFILE        ; +#39: создать файл
         JP MKDIR         ; +#3C: создать каталог

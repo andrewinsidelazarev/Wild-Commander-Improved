@@ -1,18 +1,20 @@
-; CORE32 — осмысленный exact-исходник WildDOSFileCore #35.
-; Физический диапазон в boot.$C: #C000..#DBD2.
-; INSTALL_WILDDOS копирует #C00C..#DBD2 в рабочий диапазон #4000..#5BC6.
+; Codex - 2026-07-17 - begin
+; CORE32 — осмысленный исходник WildDOSFileCore #35 с исправлениями.
+; Физический исполняемый диапазон в payload: #C000..#DBFD; загрузчик копирует
+; START..END из #C00C..#DBFD в рабочий диапазон #4000..#5BF1.
 ; Основные процедуры рабочего образа:
 ;   START #4000 — 31-элементная таблица API;
-;   NXTETY2 #4067 и NXTETY #4140 — перечисление каталога;
-;   LOAD512 #43BF / SAVE512 #43AD — потоковый обмен;
-;   CURIT #44C5 — загрузка записи FAT;
-;   GIPAG #450F — позиционирование на первом секторе кластера;
-;   MKSG #48A6 — создание FAT-цепочки; DLSG #49E1 — удаление цепочки;
-;   SRHDRN #4A63 — поиск записи; MKFILE #4D52 / MKDIR #4D78 — создание;
-;   DELFL #4CF8 / RENAME #4D31 — удаление и переименование;
-;   HDD #4EA2 — поиск раздела и проверка FAT32;
-;   DOS_SWP #503B — выбор, распаковка и запуск драйвера;
-;   DEHR #5AAA — распаковщик драйверов.
+;   NXTETY2 #4067 и NXTETY #413F — перечисление каталога;
+;   LOAD512 #43A0 / SAVE512 #4398 — потоковый обмен;
+;   CURIT #44A5 — загрузка записи FAT;
+;   GIPAG #44D7 — позиционирование на первом секторе кластера;
+;   MKSG #4880 — создание FAT-цепочки; DLSG #49B4 — удаление цепочки;
+;   SRHDRN #4A4C — поиск записи; MKFILE #4D34 / MKDIR #4D5B — создание;
+;   DELFL #4CDD / RENAME #4D13 — удаление и переименование;
+;   HDD #4E71 — поиск раздела и проверка FAT32;
+;   DOS_SWP #4FF8 — выбор, распаковка и запуск драйвера;
+;   DEHR #5AAA — распаковщик драйверов; END #5BF2 — конец рабочего образа.
+; Codex - 2026-07-17 - end
 ; ALASM-конструкция .N повторяет всю цепочку команд строки. Здесь она явно
 ; выражена DUP/EDUP; это устраняет прежнюю потерю #50 байт и ошибки алгоритмов.
 ; Четыре слова итератора каталога находятся по #37F8..#37FE перед драйвером,
@@ -22,15 +24,26 @@
 ; INSTALL_WILDDOS — физический загрузчик ядра; LC000 сохранено как исторический
 ; алиас адреса. Входных параметров нет.
 ; Копирует исполняемую часть START..END из #C00C в #4000 и возвращается.
-; Побочный эффект: рабочий диапазон #4000..#5BC6 полностью перезаписывается.
+; Codex - 2026-07-17 - begin
+; Побочный эффект: рабочий диапазон #4000..#5BF1 полностью перезаписывается.
+; Codex - 2026-07-17 - end
 INSTALL_WILDDOS:
 LC000:
         LD HL,CORE32,DE,#4000
         LD BC,END-START
-        LDIR
-        RET
+; Codex - 2026-07-16 - begin
+        JP WDOS_INSTALL_COPY
+; Codex - 2026-07-16 - end
 
         INCLUDE "KERNEL.ASM"
+; Codex - 2026-07-16 - begin
+; Вызов функции расширения: байт сразу после CALL является номером строки
+; таблицы в физической странице #E0. Шлюз сам сдвигает адрес возврата.
+        MACRO CALL_WDOS_EXTENSION extension_id
+        CALL EXTENSION_GATE
+        DB extension_id
+        ENDM
+; Codex - 2026-07-16 - end
 RMFL2   LD A,L:AND #F0:LD L,A
         LD C,32:ADD HL,BC
         JP NXFL2
@@ -112,7 +125,9 @@ BT7     LD A,0:OR A:JP Z,NXTE2
         LD A,L:AND #F0:LD L,A
         JP Snm
 
-NXMR    LD A,(EOC):CP #0F:RET Z
+; Codex - 2026-07-16 - begin
+NXMR    LD A,(EOC):OR A:RET NZ
+; Codex - 2026-07-16 - end
 
         PUSH DE
         LD HL,NXTBE-#0300
@@ -321,11 +336,21 @@ NXTINI  LD HL,1
         RET
 
 GENTRY
-        LD DE,ENTRY,BC,32:LDIR
+; Codex - 2026-07-17 - begin
+        ; Три компактных шлюза занимают исходные 17 байт GENTRY/TENTRY и
+        ; сохраняют адрес Z0. APPEND больше не лежит под рабочим стеком #5C00.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_COPY_TO_ENTRY
         RET
-
 TENTRY
-        LD HL,ENTRY,BC,32:LDIR
+        ; Копирование ENTRY одновременно запоминает точный сектор и слот,
+        ; найденные SRHDRN. Контекст нужен последующему APPEND.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_COPY_ENTRY_AND_CAPTURE
+        RET
+APPEND  CALL_WDOS_EXTENSION WDOS_EXT.ID_APPEND_BYTES
+        RET
+        NOP
+        NOP
+; Codex - 2026-07-17 - end
 Z0      RET
 
 GLSTCAT
@@ -341,33 +366,44 @@ RDD
         PUSH BC
         CALL XPOZI
         POP HL
-        JP RDDSE
+; Codex - 2026-07-16 - begin
+        JP SAFE_RDDSE
+; Codex - 2026-07-16 - end
 
 SDD
         PUSH BC
         CALL XPOZI
         POP HL
-        JP SDDSE
+; Codex - 2026-07-16 - begin
+        JP SAFE_SDDSE
+; Codex - 2026-07-16 - end
 
-LOADNON LD DE,Z0,(NW0+1),DE
-        CALL LOAD512
-        LD DE,RDDSE,(NW0+1),DE
+; Codex - 2026-07-16 - begin
+LOADNON LD DE,Z0
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_WITH_HANDLER
         RET
 
-LOAD256 LD DE,RDD256,(NW0+1),DE
-        CALL LOAD512
-        LD DE,RDDSE,(NW0+1),DE
+LOAD256 LD DE,RDD256
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_WITH_HANDLER
         RET
 
 ; SAVE512 — потоково записать B блоков по 512 байт из памяти с адреса HL.
 ; Вход и выход соответствуют LOAD512. На время вызова подменяет цель NW0 на
-; SDDSE, после чего восстанавливает RDDSE; поэтому общий поток не реентерабелен.
+; Codex - 2026-07-17 - begin
+; SAFE_SDDSE; общий эпилог затем нормализует цель к SAFE_RDDSE, а не к
+; произвольному прежнему обработчику. Поэтому общий поток не реентерабелен.
+; Codex - 2026-07-17 - end
 ; Побочные эффекты: пишет носитель и продвигает LTHL/LTDE, NSDC и текущую
 ; позицию драйвера по кластерной цепочке.
-SAVE512 LD DE,SDDSE,(NW0+1),DE
-        CALL LOAD512
-        LD DE,RDDSE,(NW0+1),DE
-        RET
+; Codex - 2026-07-17 - begin
+; Нельзя оставлять страницу расширения #E0 в окне #C000 на время записи:
+; PIO-драйвер Nemo читает буфер непосредственно оттуда. Обработчики чтения и
+; записи лежат в одной странице #51, поэтому достаточно сменить младший байт.
+SAVE512 LD A,low SAFE_SDDSE
+        LD (NW0+1),A
+        JP LOAD512
+; Codex - 2026-07-17 - end
+; Codex - 2026-07-16 - end
 
 ; LOAD512 — потоково прочитать B блоков по 512 байт в память с адреса HL.
 ; Если NSDC=EOC=0, начальный кластер берётся из CUHL/CUDE и позиционируется
@@ -381,10 +417,24 @@ LOAD512
         CALL LPREX:JR NZ,RH
 
         LD A,B:CALL NEWCLA
+; Codex - 2026-07-16 - begin
+; Codex - 2026-07-17 - begin
+        ; Загрузки HL и A не меняют CF. При ошибке пропустить OR A, восстановить
+        ; обработчик чтения и вернуть установленный перенос вызывающему коду.
+; Codex - 2026-07-17 - end
+; Codex - 2026-07-16 - end
 
 RH      LD HL,(LDHL)
+; Codex - 2026-07-16 - begin
+; Codex - 2026-07-17 - begin
+        ; Штатный EOC=#0F возвращается с CF=0; ошибка #FF сохраняет CF=1.
         LD A,(EOC)
-        RET
+        JR C,LOAD512_RESTORE_HANDLER
+        OR A
+LOAD512_RESTORE_HANDLER:
+        JP STREAM_RESTORE_READ_HANDLER
+; Codex - 2026-07-17 - end
+; Codex - 2026-07-16 - end
 
 LPREX   LD (LDHL),HL
         LD A,(EOC):OR A:RET NZ
@@ -409,7 +459,14 @@ KN      LD (HL),A
 
         LD A,B,(NR0),A
         LD HL,(LDHL)
-NW0     CALL RDDSE
+NW0     CALL SAFE_RDDSE
+; Codex - 2026-07-16 - begin
+        LD A,(ABT):OR A
+        JR Z,LOAD512_IO_OK
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_IO_ERROR
+        RET
+LOAD512_IO_OK:
+; Codex - 2026-07-16 - end
         LD (LDHL),HL
 
         LD HL,LTHL,DE,LLHL,BC,4:LDIR
@@ -422,38 +479,54 @@ NW0     CALL RDDSE
         LD (HL),A
 
         LD BC,(BSECPC)
-        CP C:JP C,NXTC
+; Codex - 2026-07-17 - begin
+        ; NXTC находится в пределах JR; короткая ветка сохраняет раскладку
+        ; следующих процедур после добавления общего восстановления NW0.
+        CP C:JR C,NXTC
+; Codex - 2026-07-17 - end
 
         LD HL,(CUHL),DE,(CUDE)
-        CALL CURIT,GIPAG:JP Z,NXTC
+; Codex - 2026-07-17 - begin
+        ; Короткая ветка компенсирует эпилог восстановления NW0 без сдвига ABI.
+        CALL CURIT,GIPAG:JR Z,NXTC
+; Codex - 2026-07-17 - end
         RET
 
 SRHFCL  LD HL,FSTFRC,DE,CAHL,BC,4:LDIR
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_INIT_FREE_SCAN
+; Codex - 2026-07-16 - end
 SRHFC
 
         LD HL,(CAHL),DE,(CADE)
         CALL CURIT:RET C
 
-FC      LD A,(HL):INC HL
+; Codex - 2026-07-16 - begin
+FC      CALL_WDOS_EXTENSION WDOS_EXT.ID_CHECK_FREE_SCAN_LIMIT
+        RET C
+; Codex - 2026-07-16 - end
+        LD A,(HL):INC HL
         OR (HL):INC HL
         OR (HL):INC HL
         OR (HL):INC HL:JR Z,GETZE
 
         EX DE,HL
         LD HL,CAHL
-        INC (HL):JP NZ,AGA:INC HL
+; Codex - 2026-07-17 - begin
+        INC (HL):JR NZ,AGA:INC HL
+; Codex - 2026-07-17 - end
         INC (HL):JR NZ,AGA:INC HL
         INC (HL):JR NZ,AGA:INC HL
         INC (HL)
 AGA     EX DE,HL
-        LD A,H:CP high SECBE:JP C,FC
+; Codex - 2026-07-17 - begin
+        LD A,H:CP high SECBE:JR C,FC
+; Codex - 2026-07-17 - end
 
-        LD HL,(LTHL),DE,(LTDE):INC HL
-        LD A,H:OR L:JR NZ,$+3:INC DE
-        CALL XPOZI
-
-        LD HL,SECBU,A,1:CALL RDDSE
-        LD HL,SECBU
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_NEXT_FREE_FAT_SECTOR
+        RET C
+; Codex - 2026-07-16 - end
         JP FC
 GETZE   EXX
         LD HL,(CAHL),DE,(CADE)
@@ -477,18 +550,16 @@ CURIT
         PUSH BC
         LD (LSTSE+2),DE,(LSTSE),HL
 
-        LD BC,(BFTSZ+2)
-        LD A,D:CP B:JR C,JK
-        LD A,E:CP C:JR C,JK
-        LD BC,(BFTSZ)
-        LD A,H:CP B:JR C,JK
-        LD A,L:CP C:JR NC,FATEND
-
-JK      LD BC,(SFAT)
-        CALL ADD4B
-        CALL XSPOZ
-        CALL XPOZI
-        LD HL,SECBU,A,1:CALL RDDSE
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_FAT_SECTOR_IN_RANGE
+        JR NC,FATEND
+JK      CALL_WDOS_EXTENSION WDOS_EXT.ID_POSITION_FAT_READ
+; Codex - 2026-07-16 - end
+; Codex - 2026-07-16 - begin
+        LD HL,SECBU,A,1
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_READ_SECTORS
+        JR C,FATEND
+; Codex - 2026-07-16 - end
         POP BC
         LD HL,SECBU:ADD HL,BC
         XOR A
@@ -510,8 +581,15 @@ GIPAG
         LD A,(HL):INC HL
         LD H,(HL),L,A:OR H,E,D:JR Z,RDIR
 
-        LD A,H:AND #0F:CP #0F:JR Z,MDC
+; Codex - 2026-07-16 - begin
         EX DE,HL
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+        JR NC,GIPAG_LINK_VALID
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_FAT_LINK_ERROR
+        RET
+GIPAG_LINK_VALID:
+        JR Z,MDC
+; Codex - 2026-07-16 - end
 POM     LD (CUHL),HL,(CUDE),DE
 
         LD BC,2:OR A:SBC HL,BC:JR NC,$+3:DEC DE
@@ -529,9 +607,16 @@ POM     LD (CUHL),HL,(CUDE),DE
 RDIR    LD HL,(BROOTC),DE,(BROOTC+2)
         JR POM
 
-MDC     LD (EOC),A
+; Codex - 2026-07-16 - begin
+; Codex - 2026-07-17 - begin
+; Штатный интерфейс WC завершает цикл COPYF только при A=#0F. Значение #FF
+; зарезервировано расширением для ошибки потока и отличается установленным CF.
+MDC     LD A,#0F
+        LD (EOC),A
         OR A
         RET
+; Codex - 2026-07-17 - end
+; Codex - 2026-07-16 - end
 
 XSPOZ   LD BC,(ADDTOP),(CLHL),BC
         LD BC,(ADDTOP+2),(CLDE),BC
@@ -552,7 +637,9 @@ NXDCL   LD HL,LOBU,B,1:CALL LOAD512
 FIEL    CP (HL):JP Z,FELD
         ADD HL,DE
         DJNZ FIEL
-FIIL    LD A,(EOC):CP #0F:JR NZ,NXDCL
+; Codex - 2026-07-16 - begin
+FIIL    LD A,(EOC):OR A:JR Z,NXDCL
+; Codex - 2026-07-16 - end
         CALL SRHFCL:JR C,IEL
         LD (BUTS),HL,(BUTS+2),DE
         EXX
@@ -561,13 +648,19 @@ FIIL    LD A,(EOC):CP #0F:JR NZ,NXDCL
         DEC HL:LD (HL),A
         DEC HL:LD (HL),A
         DEC HL:LD (HL),A
-        LD HL,SECBU,A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        JR NZ,IEL
+; Codex - 2026-07-16 - end
 
         LD HL,(CUHL),DE,(CUDE)
         CALL CURIT:JR C,IEL
         EX DE,HL
         LD HL,BUTS,BC,4:LDIR
-        LD HL,SECBU,A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        JR NZ,IEL
+; Codex - 2026-07-16 - end
 
         LD HL,BUTS
         CALL GIPAG:LD A,255:RET NZ
@@ -579,13 +672,22 @@ FIIL    LD A,(EOC):CP #0F:JR NZ,NXDCL
 
         LD HL,(LTHL),DE,(LTDE)
         PUSH HL,DE
-        LD HL,SECBU,A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+        LD HL,SECBU,A,1:CALL SAFE_SDDSE
+        JR NZ,SVHDFL_ZERO_IO_ERROR
 
         LD A,(BSECPC)
-        LD HL,SECBU:CALL NOPCLA
+        LD HL,SECBU
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_ZERO_CLUSTER_TAIL
+        JR NZ,SVHDFL_ZERO_IO_ERROR
         POP DE,HL
         CALL XPOZI
         JP NXDCL
+
+SVHDFL_ZERO_IO_ERROR:
+        POP DE,HL
+        JR IEL
+; Codex - 2026-07-16 - end
 
 IEL     LD A,16:OR A:RET
 
@@ -599,13 +701,19 @@ VYG     LD BC,32:LDIR
         BIT 0,D:JR NZ,VYG
         LD (CGDE),HL
         CALL FFld
+; Codex - 2026-07-16 - begin
+        RET NZ
+; Codex - 2026-07-16 - end
         JP FIIL
 
 FFLD    XOR A:LD (DE),A
 FFld    LD HL,(LLHL),DE,(LLHL+2)
         CALL PROZ
         LD HL,LOBU
-        LD A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+        LD A,1:CALL SAFE_SDDSE
+        RET NZ
+; Codex - 2026-07-16 - end
 
         LD HL,(FCTS),DE,(FCTS+2)
         XOR A
@@ -627,6 +735,9 @@ ENTREZ
 
         LD HL,(CGDE):CALL LNLNGcs
         JP Z,ENnvl
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_REFINE_NAME_CLASSIFICATION
+; Codex - 2026-07-16 - end
 
         LD B,11,HL,ENTRY
 SNCC    LD A,(HL):OR A:JR Z,LONG
@@ -744,21 +855,15 @@ ORU     LD B,4
 OR2     CP #F0:RET NC
         CP #E0:RET C
         SUB #A0:LD C,A:RET
-ENVAL   LD B,255
-ENval   LD A,(HL):OR A:JR Z,ENvld
-        CALL ENCEN:JR Z,ENnvl
-        INC HL:DJNZ ENval
-ENnvl   XOR A:INC A
+; Codex - 2026-07-16 - begin
+; Старая процедура отвергала ровно 255 символов. Реализация вынесена в
+; расширение, а размер исходного диапазона сохранён для стабильности адресов.
+ENVAL   CALL_WDOS_EXTENSION WDOS_EXT.ID_VALIDATE_NAME
         RET
-ENvld
-CHI     INC B:JR Z,ENnvl
-        DEC HL:LD A,(HL):CP " ":JR Z,CHI
-        DEC B
-Chi     INC B:JR Z,ENnvl
-        LD A,(HL):DEC HL:CP ".":JR Z,Chi
-        INC HL,HL
-        XOR A:LD (HL),A
-        RET
+ENnvl   LD A,1:OR A:RET
+        DS 41-($-ENVAL),0
+        ASSERT $-ENVAL == 41, изменился размер стабильного блока ENVAL
+; Codex - 2026-07-16 - end
 SNCEN   CP #2B:RET Z
         CP #2C:RET Z
         CP #2E:RET Z
@@ -877,8 +982,11 @@ GENFC   LD C,(HL):INC HL
 GNFC    LD (UUHL),HL
         LD BC,4:LDIR
 
-        DEC HL:LD A,(HL):CP #0F:JR Z,LSTSR
-        INC HL:LD A,H:CP high GENBE:JR NC,LSTsr
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_IS_EOC_BEFORE_HL
+        JR Z,LSTSR
+        LD A,H:CP high GENBE:JR NC,LSTsr
+; Codex - 2026-07-16 - end
 
         LD HL,(UUHL)
         LD C,(HL):INC HL
@@ -893,7 +1001,10 @@ GNFC    LD (UUHL),HL
         EX DE,HL:LD BC,(LSTSE+2)
         OR A:SBC HL,BC:JR Z,GFC
 
-GGC     LD HL,SECBU,A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+GGC     CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        RET NZ
+; Codex - 2026-07-16 - end
         LD HL,(UUHL)
         JP GENFC
 
@@ -905,7 +1016,10 @@ GFC     LD H,0,L,A
         EX DE,HL
         LD HL,(BUHL)
         JR GNFC
-LSTSR   LD HL,SECBU:LD A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+LSTSR   CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        RET NZ
+; Codex - 2026-07-16 - end
         XOR A
         RET
 LSTsr   CALL LSTSR
@@ -928,10 +1042,23 @@ DLSG
         LD (FSTFRC),HL
         LD (FSTFRC+2),HL
 LWT     LD HL,(LOBU),DE,(LOBU+2)
-        LD A,D:CP #0F:RET Z
-        OR E,H,L:RET Z
+        LD A,D:OR E,H,L:RET Z
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+        RET Z
+        JR NC,DLSG_LINK_VALID
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_FAT_LINK_ERROR
+        RET
+DLSG_LINK_VALID:
+; Codex - 2026-07-16 - end
 
-        CALL CURIT:RET C
+; Codex - 2026-07-16 - begin
+        CALL CURIT
+        JR NC,DLSG_ENTRY_VALID
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_FAT_LINK_ERROR
+        RET
+DLSG_ENTRY_VALID:
+; Codex - 2026-07-16 - end
 GOCE    LD DE,LOBU,C,0
  DUP 3
          LD A,(HL),(HL),C,(DE),A:INC L,E
@@ -939,7 +1066,11 @@ GOCE    LD DE,LOBU,C,0
         LD A,(HL),(HL),C,(DE),A
 
         LD HL,(LOBU),DE,(LOBU+2)
-        LD A,D:CP #0F:JR Z,Ne
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+        JR Z,Ne
+        JR C,DLSG_BAD_LINK
+; Codex - 2026-07-16 - end
         CALL DEL128
         LD BC,(LSTSE)
         OR A:SBC HL,BC:JR NZ,NE:EX DE,HL
@@ -953,9 +1084,20 @@ GOCE    LD DE,LOBU,C,0
         LD BC,SECBU:ADD HL,BC
         JP GOCE
 
-NE      LD HL,SECBU,A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+NE      CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        RET NZ
         JP LWT
-Ne      LD HL,SECBU,A,1:JP SDDSE
+Ne      CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        RET
+; Codex - 2026-07-16 - end
+; Codex - 2026-07-16 - begin
+DLSG_BAD_LINK:
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        RET NZ
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_FAT_LINK_ERROR
+        RET
+; Codex - 2026-07-16 - end
 
 ; SRHDRN — найти запись по имени в активном каталоге LSTCAT.
 ; Вход: HL указывает на буфер [флаг, имя длиной 1..255, 0].
@@ -966,6 +1108,10 @@ Ne      LD HL,SECBU,A,1:JP SDDSE
 SRHDRN
 
         LD (CGDE),HL:CALL LNLNG:RET Z
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_REFINE_NAME_CLASSIFICATION
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_RESET_DIR_HISTORY
+; Codex - 2026-07-16 - end
 
 FNDSN   LD HL,LSTCAT,DE,CUHL,BC,4:LDIR
         CALL TOS
@@ -977,7 +1123,16 @@ ANNA    CALL ENTCH:JR Z,FND
         LD BC,32:ADD HL,BC
         LD A,H:CP high LOBU2:JR C,ANNA
 
-HDR     LD A,(EOC):CP #0F:RET Z
+; Codex - 2026-07-16 - begin
+        ; Штатный конец цепочки имеет код #0F, ошибка потока — #FF. OR #F0
+        ; сводит оба к #FF, а INC возвращает Z («не найдено») и не даёт
+        ; полному каталогу уйти в бесконечное чтение после конца цепочки.
+HDR     LD A,(EOC):OR #F0:INC A:RET Z
+HDR_CONTINUE:
+; Codex - 2026-07-16 - end
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_PREVIOUS_DIR_LBA
+; Codex - 2026-07-16 - end
         PUSH HL
         LD HL,LOBU2,B,1:CALL LOAD512
         POP HL
@@ -985,6 +1140,9 @@ AnnA    CALL ENTCH:JR Z,FND
         LD BC,32:ADD HL,BC
         LD A,H:CP high LOBE2:JR C,AnnA
 
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_PRESERVE_OLDER_DIR_SECTOR
+; Codex - 2026-07-16 - end
         EXX
         LD HL,LOBU2,DE,LOBU,BC,512:LDIR
         EXX:LD BC,0-512:ADD HL,BC
@@ -1083,14 +1241,21 @@ LNEB    LD A,L:AND #F0:LD L,A
         LD (CGHL),HL
 
         LD BC,0-30:ADD HL,BC
-        CP (HL):JR NZ,ENTCHE
-        LD A,H:CP high LOBU:JR C,ENTCHE
+; Codex - 2026-07-16 - begin
+        CP (HL):JP NZ,ENTCHE
+        LD A,H:CP high LOBU:JP C,ENTCHE
+; Codex - 2026-07-16 - end
  DUP 2
          DEC L
  EDUP
-        LD A,(HL):CP #0F:JR NZ,ENTCHE
+; Codex - 2026-07-16 - begin
+        LD A,(HL):CP #0F:JP NZ,ENTCHE
+; Codex - 2026-07-16 - end
 
         LD DE,(CGDE):INC DE
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_BEGIN_LFN_COMPARE
+; Codex - 2026-07-16 - end
         LD A,L:AND #F0:LD L,A
 
         LD B,1
@@ -1119,8 +1284,11 @@ LNPARZ  LD A,(HL)
         LD A,B:CP #40:JP NC,ENTFNDx
 
         LD BC,0-(64-1):ADD HL,BC:LD B,A
-        LD A,H:CP high LOBU:JR C,ENTCHE
-        JP LNPARZ
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_MAP_OLDER_LFN_POINTER
+        JR C,ENTCHE
+        JR LNPARZ
+; Codex - 2026-07-16 - end
 ENTST   JR NZ,ENTFNDL
 ENTCHE  LD HL,(CGHL)
 ENTCHe  LD A,L:AND #F0:LD L,A
@@ -1132,17 +1300,14 @@ ENTFNDL LD HL,(CGHL)
 ENTFND  LD A,L:AND #F0:LD L,A
         PUSH HL:LD DE,ENTRY,BC,32:LDIR
         POP BC
+; Codex - 2026-07-16 - begin
         XOR A:LD A,1
+; Codex - 2026-07-16 - end
         RET
-ULNP    LD A,(DE):INC DE:OR A:JR Z,UlnP
-        CALL ACS:LD C,A
-        CALL UCS:OR A:RET Z
-        CALL ACS:CP C:JR Z,ULNp
-ULNz    XOR A:RET
-ULNp    SCF:RET
-UlnP    CALL UCS:INC A:JR NZ,ULNz
-        XOR A:INC A
+; Codex - 2026-07-16 - begin
+ULNP    CALL_WDOS_EXTENSION WDOS_EXT.ID_COMPARE_LFN_CHAR
         RET
+; Codex - 2026-07-16 - end
 ACS     NOP
         CP #80:JR NC,RUS
         CP #60+1:RET C
@@ -1198,16 +1363,25 @@ DELEN   CALL SRHDRN:LD A,8:RET Z
         LD (FCTS+0),HL
         LD (FCTS+2),DE
 
-        LD A,#E5,(BC),A
-        LD H,B,L,0:RES 0,H:CALL STAMP
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_DELETE_ENTRY_WITH_LFN
+        JR NZ,DELEN_WRITE_ERROR
+; Codex - 2026-07-16 - end
         XOR A:INC A
         RET
+; Codex - 2026-07-16 - begin
+DELEN_WRITE_ERROR:
+        XOR A
+        RET
+; Codex - 2026-07-16 - end
 STAMP   PUSH HL
         LD HL,(LLHL),DE,(LLHL+2)
         CALL PROZ
         POP HL
 
-        LD A,1:JP SDDSE
+; Codex - 2026-07-16 - begin
+        LD A,1:JP SAFE_SDDSE
+; Codex - 2026-07-16 - end
 ; RENAME — создать запись с новым именем и удалить старую.
 ; Вход: HL — [флаг, старое имя, 0], DE — новое имя с нулевым окончанием.
 ; Выход: NZ — переименование завершено; Z — старая запись не найдена либо
@@ -1241,7 +1415,10 @@ MKFILE
         LD (CGHL),HL
 
         LD HL,(SIZIK),DE,(SIZIK+2)
-        CALL MKSG:RET NZ
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_ALLOCATE_FILE
+        RET NZ
+; Codex - 2026-07-16 - end
         LD HL,(CGHL)
         CALL SVHDFL:JP NZ,DELCHA
         XOR A
@@ -1251,8 +1428,8 @@ MKFILE
 ; Вход: HL указывает на имя с нулевым окончанием. Выход: Z — успех; NZ —
 ; ошибка выделения или записи записи каталога. Выделяется минимум один сектор,
 ; создаются записи «.» и «..», первый сектор каталога записывается из LOBU,
-; остальные секторы кластера зануляются через NOPCLA. При ошибке цепочка FAT
-; освобождается тем же путём DELCHA, что и у MKFILE.
+; остальные секторы кластера зануляются безопасным циклом расширения. Ошибка
+; низкоуровневой записи немедленно возвращается как NZ.
 MKDIR
 
         LD (CGHL),HL
@@ -1284,22 +1461,22 @@ MKDIR
         LD (HL),0
         LDIR
         LD HL,LOBU
-        LD A,1:CALL SDDSE
+; Codex - 2026-07-16 - begin
+        LD A,1:CALL SAFE_SDDSE
+        RET NZ
 
         LD A,(BSECPC)
         LD HL,LOBU+64
-        CALL NOPCLA
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_ZERO_CLUSTER_TAIL
+        RET NZ
+; Codex - 2026-07-16 - end
         XOR A
         RET
 
-RFRH    LD HL,(FSINF),DE,(FSINF+2)
-        CALL XPOZI
-        LD HL,LOBU
-        LD A,1:CALL RDDSE
-        LD HL,FSTFRC,DE,LOBU+492,BC,4
-        LDIR
-        LD HL,LOBU
-        LD A,1:JP SDDSE
+; Codex - 2026-07-16 - begin
+RFRH    CALL_WDOS_EXTENSION WDOS_EXT.ID_RFRH_SAFE
+        RET
+; Codex - 2026-07-16 - end
 CHTOSE
 
         LD (DABC),BC
@@ -1342,8 +1519,12 @@ GIPP
         LD D,(HL):INC HL
         LD A,(HL):INC HL
         LD H,(HL),L,A:OR H,E,D:RET Z
-        LD A,H:CP #0F:RET Z
+; Codex - 2026-07-16 - begin
         EX DE,HL
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+        JR C,GIPP_BAD_LINK
+        RET Z
+; Codex - 2026-07-16 - end
 
         LD BC,2:OR A:SBC HL,BC:JR NC,$+3:DEC DE
 
@@ -1356,6 +1537,12 @@ GIPP
 
         XOR A:INC A
         RET
+; Codex - 2026-07-16 - begin
+GIPP_BAD_LINK:
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_RECORD_FAT_LINK_ERROR
+        XOR A
+        RET
+; Codex - 2026-07-16 - end
 
 ; HDD — найти доступный раздел FAT32 и заполнить рабочие параметры BPB.
 ; Входных регистров нет; драйвер должен быть выбран и позиционироваться через
@@ -1372,7 +1559,10 @@ HDD
         LD (DAHL),HL,(DADE),HL
         LD (DUHL),HL,(DUDE),HL
         CALL XPOZI
-        LD HL,LOBU,A,1:CALL RDDSE
+; Codex - 2026-07-16 - begin
+        LD HL,LOBU,A,1:CALL SAFE_RDDSE
+        RET NZ
+; Codex - 2026-07-16 - end
 
         LD A,3,(COUNT),A,(ZES),A
 
@@ -1385,12 +1575,22 @@ KKO     LD A,(HL)
         ADD HL,DE
         DJNZ KKO
 
-FHDD    LD A,(ZES):OR A:JP Z,Nhdd
+; Codex - 2026-07-16 - begin
+; После единственной попытки разобрать сектор 0 как superfloppy вернуть ошибку,
+; а не снова переходить в Nhdd и бесконечно читать тот же неисправный BPB.
+FHDD    LD A,(ZES):OR A:JR NZ,FHDD_EXTENDED
+        INC A
+        RET
+FHDD_EXTENDED:
+; Codex - 2026-07-16 - end
 
         LD DE,(DADE),HL,(DAHL)
         CALL XPOZI
 
-        LD HL,LOBU:LD A,1:CALL RDDSE
+; Codex - 2026-07-16 - begin
+        LD HL,LOBU:LD A,1:CALL SAFE_RDDSE
+        RET NZ
+; Codex - 2026-07-16 - end
 
         LD HL,COUNT:DEC (HL):JP Z,NHDD
 
@@ -1406,7 +1606,10 @@ FHDD    LD A,(ZES):OR A:JP Z,Nhdd
         LD (DADE),DE,(DAHL),HL
         CALL XPOZI
 
-        LD HL,LOBU,A,1:CALL RDDSE
+; Codex - 2026-07-16 - begin
+        LD HL,LOBU,A,1:CALL SAFE_RDDSE
+        RET NZ
+; Codex - 2026-07-16 - end
 
         LD HL,(LOBU+446+8)
         LD DE,(LOBU+446+8+2)
@@ -1424,7 +1627,10 @@ LDBPB   LD (ADDTOP),HL,(ADDTOP+2),DE
         CALL XPOZI
 
         LD HL,LOBU
-        LD A,1:CALL RDDSE
+; Codex - 2026-07-16 - begin
+        LD A,1:CALL SAFE_RDDSE
+        RET NZ
+; Codex - 2026-07-16 - end
 
         LD HL,(LOBU+11)
         LD A,H:DEC A,A:OR L:JP NZ,FHDD
@@ -1447,11 +1653,10 @@ NER     OR A:JP NZ,FHDD
         CALL XSPOZ
         LD (FSINF),HL,(FSINF+2),DE
 
-        LD A,(LOBU+16),(BFATS),A
-        LD HL,(LOBU+36),(BFTSZ),HL
-        LD HL,(LOBU+36+2),(BFTSZ+2),HL
-        LD HL,(LOBU+44),(BROOTC),HL
-        LD HL,(LOBU+44+2),(BROOTC+2),HL
+; Codex - 2026-07-16 - begin
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_LOAD_FAT_CONFIG
+        JP NZ,FHDD
+; Codex - 2026-07-16 - end
 
         LD HL,(BFTSZ),DE,(BFTSZ+2)
         LD BC,(BFATS),B,0
@@ -1499,8 +1704,13 @@ DOS_SWP
 
 DRR     PUSH IX
         LD DE,DRVR
-        PUSH BC:CALL DEHR
-        POP AF:CALL SELDEV
+; Codex - 2026-07-16 - begin
+; Расширение выполняет прежнюю распаковку и применяет проверенную runtime-
+; заплатку только к SD-ZC. NOP сохраняет адреса GARY и четырёх packed-блоков.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_UNPACK_DRIVER
+        CALL SELDEV
+        NOP
+; Codex - 2026-07-16 - end
         POP IX
         RET
 
@@ -1605,24 +1815,103 @@ INCDE   EXX
 TOS     XOR A:LD (NSDC),A,(EOC),A
         RET
 
-NOPCLA  LD (NOPCA+1),HL
-NOPC    DEC A:RET Z
-        PUSH AF
-        LD HL,(LTHL),DE,(LTDE)
-        LD BC,1:ADD HL,BC
-        JR NC,$+3:INC DE
-        CALL XPOZI
-
-NOPCA   LD HL,0,A,1:CALL SDDSE
-        POP AF
-        JR NOPC
-
 NOPING  XOR A:LD (HL),A:INC HL:DJNZ $-2
         RET
+; Codex - 2026-07-16 - begin
+; Бывший NOPCLA полагался на продвижение LTHL/LTDE внутри XPOZI, но игнорировал
+; результат SDDSE. Цикл перенесён в расширение и останавливается при ошибке.
+; Компактная первая половина безопасных точек сбрасывает ABT, сохраняя число
+; секторов и признак направления в AF.
+SAFE_RDDSE:
+        OR A
+        JR SAFE_IO_PREPARE
+SAFE_SDDSE:
+        SCF
+SAFE_IO_PREPARE:
+        PUSH AF
+        XOR A
+        LD (ABT),A
+        POP AF
+        JP SAFE_IO_DISPATCH
+        ASSERT $ <= #5115, исправления CORE32 пересекли служебные данные
+        DS #5115-$,0
+; Codex - 2026-07-16 - end
 ; Рабочие данные заключительной части ядра.
 ; GARY — текущая позиция в GENBU при построении цепочки MKSG.
 ; DABC/DAHL/DADE — временные 32-битные значения CHTOSE.
 ; ZES — состояние обхода расширенных разделов в HDD.
+; Codex - 2026-07-16 - begin
+; Состояние фиксированного расширения занимает часть прежнего нулевого
+; промежутка; адреса исходных данных GARY и драйверов остаются неизменными.
+EXT_LFN_LEADING            DS 1
+EXT_DIR_PREVIOUS_LBA       DS 4
+EXT_DIR_OLDER_LBA          DS 4
+EXT_DIR_OLDER_VALID        DS 1
+EXT_DIR_PREVIOUS_DIRTY     DS 1
+EXT_DIR_OLDER_DIRTY        DS 1
+EXT_DIR_EXPECTED_SEQUENCE  DS 1
+EXT_DIR_LFN_CHECKSUM       DS 1
+
+; Шлюз сохраняет оба набора AF/BC/DE/HL и IX в стековом кадре, поэтому
+; вложенный вызов из MKSG/LOAD512 безопасен. IY не используется и остаётся
+; неизменным. Байт номера функции читается из потока сразу после CALL.
+EXTENSION_GATE:
+        PUSH AF
+        PUSH BC
+        PUSH DE
+        PUSH HL
+        PUSH IX
+        EX AF,AF'
+        EXX
+        PUSH AF
+        PUSH BC
+        PUSH DE
+        PUSH HL
+        EXX
+        EX AF,AF'
+
+        LD IX,0
+        ADD IX,SP
+        LD L,(IX+18)
+        LD H,(IX+19)
+        LD A,(HL)
+        INC HL
+        LD (IX+18),L
+        LD (IX+19),H
+        LD L,A
+
+        LD A,I
+        DI
+        LD D,0
+        JP PO,EXTENSION_GATE_IFF_SAVED
+        INC D
+EXTENSION_GATE_IFF_SAVED:
+        LD BC,#13AF
+        IN A,(C)
+        LD E,A
+        LD A,WDOS_EXTENSION_PAGE
+        OUT (C),A
+        PUSH DE
+        JP WDOS_EXT.GATE_CONTINUE
+
+        ASSERT EXTENSION_GATE == #5123, изменился фиксированный шлюз SD-ZC
+; Codex - 2026-07-16 - begin
+; Вторая половина безопасной точки выбирает исходный вход драйвера по CF.
+; После возврата Z означает успех, NZ — ненулевой общий код ABT.
+SAFE_IO_DISPATCH:
+        JR NC,SAFE_IO_READ
+        CALL SDDSE
+        JR SAFE_IO_RESULT
+SAFE_IO_READ:
+        CALL RDDSE
+SAFE_IO_RESULT:
+        LD A,(ABT)
+        OR A
+        RET
+; Codex - 2026-07-16 - end
+        ASSERT $ <= #516D, исправления CORE32 не помещаются перед данными
+        DS #516D-$,0
+; Codex - 2026-07-16 - end
 GARY    DS 2
 
 DABC    DS 2
@@ -1635,7 +1924,14 @@ ZES     NOP
 ; сохранены минимальные exact-потоки: доступный MHMT создаёт совместимые, но
 ; побайтно другие блоки. Распакованные ASM отдельно проверяются build.ps1.
 DR1     INCBIN "DOSpNEMO.CPD"
+; Codex - 2026-07-17 - begin
+; На реальном Z-Controller экспериментальная замена низкоуровневого пути
+; записи привела к общему отказу копирования и удаления, хотя Unreal принимал
+; тот же обмен. В боевой сборке возвращён точный штатный HR-блок SD-ZC;
+; высокоуровневые исправления FAT, каталогов и APPEND от него не зависят.
 DR2     INCBIN "DOSpSDZC35.CPD"
+        ASSERT $-DR2 == 676, изменился точный штатный HR-блок SD-ZC
+; Codex - 2026-07-17 - end
 DR3     INCBIN "DOSpSDNGS35.CPD"
 DR4     INCBIN "DOSpSMUC.CPD"
 ; DEHR — распаковщик HR-блока.
@@ -1651,12 +1947,63 @@ DEHR    INCLUDE "DEHR2.ASM"
         ASSERT DR4 == #5933
         ASSERT DEHR == #5AAA
         ASSERT $ == #5BC7
+; Codex - 2026-07-16 - begin
+; Фиксированное продолжение шлюза обязано исполняться после отключения страницы
+; #E0, поэтому оно находится в безопасном промежутке перед IM2 и стеком.
+EXTENSION_GATE_AFTER:
+; Codex - 2026-07-16 - begin
+; Основной набор регистров остаётся в альтернативном наборе до конца эпилога.
+; Возвращаемый AF' временно хранится в HL; иначе вложенный SD-вызов затирал
+; находящийся в A' счётчик секторов номером восстанавливаемой страницы.
+        EX AF,AF'
+        EXX
+        PUSH AF
+        POP HL
+        POP DE
+        LD A,E
+        LD BC,#13AF
+        OUT (C),A
+        LD A,D
+        OR A
+        DUP 9
+        POP BC
+        EDUP
+        JR Z,EXTENSION_GATE_KEEP_DI
+        PUSH HL
+        POP AF
+        EXX
+        EX AF,AF'
+        EI
+        RET
+EXTENSION_GATE_KEEP_DI:
+        PUSH HL
+        POP AF
+        EXX
+        EX AF,AF'
+        RET
+; Codex - 2026-07-16 - end
+; Codex - 2026-07-17 - begin
+; Общий поток всегда возвращается с обработчиком чтения. Сохранение HL не
+; затрагивает возвращаемые AF/BC/DE и оставляет флаги штатного EOC либо ошибки.
+STREAM_RESTORE_READ_HANDLER:
+        PUSH HL
+        LD HL,NW0+1
+        LD (HL),low SAFE_RDDSE
+        POP HL
+        RET
+; Codex - 2026-07-17 - end
+        ASSERT $ <= #5BF4, шлюз пересёк физический хвост CORE32
+; Codex - 2026-07-16 - end
 END
-        ASSERT END == #5BC7, нарушена рабочая длина WildDOS
+; Codex - 2026-07-16 - begin
+        ASSERT END <= #5BF4, нарушена рабочая длина WildDOS
+; Codex - 2026-07-16 - end
         ENT
 ; Физический адрес условного перехода используется WC как точка подстановки
 ; в генерируемом фрагменте фильтра каталога. Само ядро видит её по #40CD,
 ; а внешний код обращается к исходному образу по #C0D9.
 LC069_5 EQU CORE32 + DIR_FILTER_REJECT_BRANCH - START
         ASSERT LC069_5 == #C0D9, нарушен адрес подстановки фильтра каталога
-        ASSERT $ == #DBD3, нарушена физическая граница WildDOS
+; Codex - 2026-07-16 - begin
+        ASSERT $ <= #DC00, нарушена физическая граница WildDOS
+; Codex - 2026-07-16 - end

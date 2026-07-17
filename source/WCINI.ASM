@@ -88,8 +88,12 @@ GLSTCAT EQU #401E
 SRHDRN  EQU #404E
 
 ; Данные WCVLS, WCVW и двоичные ресурсы после WCINI.
-WND_W   EQU #848B
-TXT1    EQU #848E
+; Codex - 2026-07-17 - begin
+; Байт, освобождённый перед строками интерфейса для суффикса версии, сдвигает
+; только WND_W и TXT1; TXT2 и последующие адреса остаются историческими.
+WND_W   EQU #848A
+TXT1    EQU #848D
+; Codex - 2026-07-17 - end
 TXT2    EQU #84A6
 F2TXT   EQU #84B8
 F4TXT   EQU #84D0
