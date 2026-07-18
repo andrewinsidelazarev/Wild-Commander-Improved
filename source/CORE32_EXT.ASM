@@ -890,7 +890,7 @@ COMPARE_LFN_CHAR:
         RET
 
 ; MKFILE(0): корректный пустой файл имеет нулевой первый кластер и не должен
-; входить в MKSG, где DEC превращал нулевой счётчик в #FFFFFFFF.
+; входить в MKSG, где DEC превращает младшее слово счётчика в #FFFF.
 ALLOCATE_FILE:
         LD A,D:OR E,H,L
         JP NZ,@WDOS.MKSG
