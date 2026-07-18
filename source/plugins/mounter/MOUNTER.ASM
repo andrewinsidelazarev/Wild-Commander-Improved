@@ -1,6 +1,8 @@
 ;TR-DOS MOUNTER v1.61
 ;(C) KOSHI/MGN 2024
 ;---------------------------------------
+        INCLUDE "../../PHYSICAL_MEMORY_MAP.ASM"
+
         IFNDEF __ALASM_CORG_ACTIVE
         ORG #6000
         DISP #6000
@@ -46,8 +48,9 @@ NVRAMRW EQU #BFF7;reg read/write
 NVh10   EQU #10
 NV29AF  EQU #B0
 ;-------
-RAMD    EQU #C0
-RAMDE   EQU #C0+#28
+RAMD    EQU WC_PHYS_MOUNTER_FIRST
+RAMDE   EQU WC_PHYS_MOUNTER_END
+        ASSERT RAMDE-RAMD == #28, RAM-диск Mounter должен занимать 40 страниц
 ;-------
 MDLn2   EQU #C000
 DRV_OFF EQU 8
@@ -1133,4 +1136,3 @@ __ALASM_CORG_DISP DEFL 1
         ENDIF
         INCBIN "MN3O.CCB"
 ;---------------------------------------
-

@@ -5,10 +5,14 @@
 ;     TABLES: #FC,#FD
 ;   RAM DISK: #C0-#E7
 ;-------
+        INCLUDE "../../PHYSICAL_MEMORY_MAP.ASM"
+
         OUTPUT "mn3o.ccb"
 ;-------
 PGAB    EQU #FC
-RAMD    EQU #C0;RAM disk Start Page
+RAMD    EQU WC_PHYS_MOUNTER_FIRST;RAM disk Start Page
+RAMDE   EQU WC_PHYS_MOUNTER_END
+        ASSERT RAMDE-RAMD == #28, RAM-диск Mounter должен занимать 40 страниц
 
 MDL2    EQU #8000
 MDLDRV  EQU MDL2+8
