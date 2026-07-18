@@ -197,7 +197,7 @@ if ($StockDsdzcPackedHash -ne '06742113aff8306b39a1a808ae6042cafc784d7dc9ee6aa0b
 
 # Codex - 2026-07-17 - begin
 # Расширение больше физического нулевого окна boot.$C, но свободно помещается
-# в страницу #E0. Сначала строится карта CORE32 без runtime, затем отдельный
+# в выделенную страницу #E8. Сначала строится карта CORE32 без runtime, затем отдельный
 # бинарник расширения, после чего его HR-поток проверяется обратной распаковкой.
 $CoreSymbolPayload = Join-Path $BuildDir 'boot.symbol-pass.bin'
 $CoreSymbolMap = Join-Path $BuildDir 'boot.symbol-pass.sym'
@@ -236,7 +236,7 @@ try {
 }
 if ($LASTEXITCODE -ne 0) { throw 'CORE32_EXT.ASM assembly failed.' }
 if ((Get-Item -LiteralPath $ExtensionRaw).Length -gt 0x4000) {
-    throw 'CORE32 extension exceeds physical page #E0.'
+    throw 'CORE32 extension exceeds one 16-KiB physical page.'
 }
 
 Push-Location -LiteralPath $ProjectRootAlias
