@@ -18,6 +18,10 @@ LONG_DIRECTORY = "LFNDEL"
 FULL_DIRECTORY = "FULLEOC"
 # Codex - 2026-07-17 - begin
 APPEND_FILE = "FTPAPP.BIN"
+# Codex - 2026-07-27 - begin
+APPEND16_FILE = "APP16K.BIN"
+APPEND16_SIZE = 0x4000
+# Codex - 2026-07-27 - end
 APPEND_PAYLOAD = (
     bytes([0xA1]) * 3
     + bytes([0xB2]) * 509
@@ -374,6 +378,46 @@ def inspect_image(image_path: Path) -> int:
                             failures.append(
                                 f"Хвост последнего частичного сектора {APPEND_FILE} не обнулён"
                             )
+
+            # Codex - 2026-07-27 - begin
+            append16_entry = image.find_entry(test_cluster, APPEND16_FILE)
+            if not append16_entry:
+                failures.append(f"Файл дописывания {APPEND16_FILE} не создан")
+            else:
+                persistent_entries.append(append16_entry)
+                if append16_entry["size"] != APPEND16_SIZE:
+                    failures.append(
+                        f"Размер {APPEND16_FILE} равен {append16_entry['size']}, "
+                        f"ожидалось {APPEND16_SIZE}"
+                    )
+                if append16_entry["cluster"] < 2:
+                    failures.append(
+                        f"У непустого {APPEND16_FILE} отсутствует первый кластер"
+                    )
+                else:
+                    chain = image.cluster_chain(append16_entry["cluster"])
+                    bytes_per_cluster = image.bps * image.spc
+                    expected_clusters = (
+                        APPEND16_SIZE + bytes_per_cluster - 1
+                    ) // bytes_per_cluster
+                    if len(chain) != expected_clusters:
+                        failures.append(
+                            f"Цепочка {APPEND16_FILE} содержит {len(chain)} кластеров, "
+                            f"ожидалось {expected_clusters}"
+                        )
+                    try:
+                        payload = image.read_file(test_cluster, APPEND16_FILE)
+                    except Exception as exc:
+                        failures.append(
+                            f"Файл {APPEND16_FILE} не читается: {exc}"
+                        )
+                    else:
+                        if len(payload) != APPEND16_SIZE:
+                            failures.append(
+                                f"Прочитано {len(payload)} байт {APPEND16_FILE}, "
+                                f"ожидалось {APPEND16_SIZE}"
+                            )
+            # Codex - 2026-07-27 - end
             # Codex - 2026-07-17 - end
 
             long_dir_entry = image.find_entry(test_cluster, LONG_DIRECTORY)

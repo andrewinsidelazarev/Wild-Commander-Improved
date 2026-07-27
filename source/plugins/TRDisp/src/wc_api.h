@@ -292,10 +292,11 @@
                         // o:ENTRY(32) [use TENTRY]
 
 // Codex - 2026-07-17 - begin
-#define _APPEND 0x4C    // дописать произвольные байты в конец найденного файла
+// Codex - 2026-07-27 - begin
+#define _APPEND 0x4C    // дописать до 16 КиБ в конец найденного файла
                         // перед первым вызовом требуется успешный FENTRY
                         // i:HL - буфер целиком в диапазоне 0x4000..0xBFFF
-                        // i:BC - число байт 0..512
+                        // i:BC - число байт 0..0x4000
                         // o:Z - данные и новый 32-битный размер записаны
                         // o:NZ, A - код ошибки; повторять блок вслепую нельзя
 #define APPEND_ERR_CONTEXT       0x20
@@ -307,6 +308,7 @@
 #define APPEND_ERR_IS_DIRECTORY  0x26
 #define APPEND_ERR_INTERNAL      0x27
 #define APPEND_ERR_ROLLBACK      0x2A
+// Codex - 2026-07-27 - end
 // Codex - 2026-07-17 - end
 
 #define _GVtm  0x69     // выставление страницы для TileMap

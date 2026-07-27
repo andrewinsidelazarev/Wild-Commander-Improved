@@ -184,7 +184,8 @@ APPEND_ERROR_IS_DIRECTORY  EQU #26
 APPEND_ERROR_INTERNAL      EQU #27
 APPEND_ERROR_ROLLBACK      EQU #2A
 
-; Дописать в найденный файл от 1 до 512 байт. Нулевой BC является успешной
+; Codex - 2026-07-27 - begin
+; Дописать в найденный файл от 1 до 16 КиБ. Нулевой BC является успешной
 ; пустой операцией. Данные должны полностью лежать в #4000..#BFFF: окно #0000
 ; занято файловой страницей, а #C000 временно содержит это расширение.
 ; Контекст создаётся штатным XFENTRY/TENTRY и кэширует положение EOF, поэтому
@@ -198,7 +199,7 @@ APPEND_BYTES:
 
 .nonempty:
         LD (APPEND_SOURCE),HL
-        LD A,B:CP 2:JR C,.length_ok
+        LD A,B:CP #40:JR C,.length_ok
         JP NZ,.bad_length
         LD A,C:OR A:JP NZ,.bad_length
 .length_ok:
@@ -233,6 +234,14 @@ APPEND_BYTES:
         XOR A
         LD (APPEND_PENDING_NEW),A
         LD (APPEND_LINKED_NEW),A
+        LD (APPEND_NEW_ACTIVE),A
+
+        ; Вся недостающая цепочка выделяется заранее, но до commit остаётся
+        ; отсоединённой от старого хвоста. Поэтому один APPEND может безопасно
+        ; пересечь до 32 одно-секторных кластеров, а откату достаточно знать
+        ; только голову новой цепочки.
+        CALL APPEND_PREALLOCATE
+        JP NZ,.failed_with_rollback
 
 .write_loop:
         LD HL,(APPEND_REMAINING)
@@ -241,6 +250,58 @@ APPEND_BYTES:
         CALL NZ,APPEND_ENSURE_CLUSTER
         JP NZ,.failed_with_rollback
 
+        ; Полные выровненные секторы внутри одного кластера передаются драйверу
+        ; одним вызовом. Все штатные драйверы принимают A=число секторов и сами
+        ; продвигают HL. На границе кластера следующий проход заново вычислит
+        ; LBA, поэтому физически несмежные кластеры не объединяются.
+        LD HL,(APPEND_WORK_OFFSET)
+        LD A,H:OR L:JR NZ,.single_sector
+        LD HL,(APPEND_REMAINING)
+        LD A,H:CP 2:JR C,.single_sector
+
+        SRL A
+        LD B,A
+        LD A,(APPEND_WORK_SECTOR)
+        LD C,A
+        LD A,(@WDOS.BSECPC)
+        SUB C
+        CP B
+        JR C,.run_ready
+        LD A,B
+.run_ready:
+        LD (APPEND_RUN),A
+        CALL APPEND_POSITION_SECTOR
+        JP NZ,.failed_with_rollback
+        LD HL,(APPEND_SOURCE)
+        LD A,(APPEND_RUN)
+        CALL WRITE_SECTORS
+        JP NZ,.failed_with_rollback
+        LD (APPEND_SOURCE),HL
+
+        LD A,(APPEND_RUN)
+        ADD A,A
+        LD D,A
+        LD E,0
+        LD HL,(APPEND_REMAINING)
+        OR A:SBC HL,DE
+        LD (APPEND_REMAINING),HL
+
+        LD A,(APPEND_WORK_SECTOR)
+        LD B,A
+        LD A,(APPEND_RUN)
+        ADD A,B
+        LD (APPEND_WORK_SECTOR),A
+        LD B,A
+        LD A,(@WDOS.BSECPC)
+        CP B
+        JP NZ,.write_loop
+        XOR A
+        LD (APPEND_WORK_SECTOR),A
+        INC A
+        LD (APPEND_WORK_NEEDS_CLUSTER),A
+        JP .write_loop
+
+.single_sector:
         CALL APPEND_POSITION_SECTOR
         JP NZ,.failed_with_rollback
         LD HL,(APPEND_WORK_OFFSET)
@@ -312,6 +373,7 @@ APPEND_BYTES:
         XOR A
         LD (APPEND_PENDING_NEW),A
         LD (APPEND_LINKED_NEW),A
+        LD (APPEND_NEW_ACTIVE),A
         LD HL,(APPEND_SOURCE)
         POP DE
         RET
@@ -471,49 +533,82 @@ APPEND_READ_FAT_LINK:
         EX DE,HL
         JP CLASSIFY_FAT_LINK
 
-; При переходе через границу кластера использовать уже существующее звено,
-; либо выделить ровно один новый кластер. При BC<=512 второго выделения за
-; один вызов APPEND не требуется.
-APPEND_ENSURE_CLUSTER:
+; Выделить одной операцией всю часть цепочки, которой не хватает для текущего
+; вызова. Размер APPEND не превышает 16 КиБ, поэтому если в текущем кластере
+; остаётся не менее 33 секторов, места гарантированно достаточно даже при
+; ненулевом смещении внутри первого сектора.
+APPEND_PREALLOCATE:
+        LD A,(APPEND_WORK_NEEDS_CLUSTER):OR A:JR NZ,.allocate_all
         LD HL,(APPEND_WORK_CURRENT),DE,(APPEND_WORK_CURRENT+2)
-        LD A,D:OR E:OR H:OR L:JR Z,.allocate
-        LD (APPEND_PENDING_OLD_TAIL),HL
-        LD (APPEND_PENDING_OLD_TAIL+2),DE
-        CALL APPEND_READ_FAT_LINK
-        JR C,.bad_chain
-        JR Z,.allocate_with_tail
-        LD (APPEND_WORK_CURRENT),HL
-        LD (APPEND_WORK_CURRENT+2),DE
-        XOR A
-        LD (APPEND_WORK_NEEDS_CLUSTER),A
-        RET
-.allocate_with_tail:
-        LD HL,(APPEND_PENDING_OLD_TAIL),DE,(APPEND_PENDING_OLD_TAIL+2)
-        JR .allocate_common
+        LD A,D:OR E:OR H:OR L:JR Z,.allocate_all
+
+        LD A,(APPEND_WORK_SECTOR)
+        LD C,A
+        LD A,(@WDOS.BSECPC)
+        SUB C
+        CP 33
+        JR NC,.nothing
+        ADD A,A
+        LD H,A
+        LD L,0
+        LD DE,(APPEND_WORK_OFFSET)
+        OR A:SBC HL,DE
+        EX DE,HL
+        LD HL,(APPEND_REMAINING)
+        OR A:SBC HL,DE
+        JR C,.nothing
+        JR Z,.nothing
+        JR .allocate
+
+.allocate_all:
+        LD HL,(APPEND_REMAINING)
 .allocate:
-        LD HL,0,DE,0
+        PUSH HL
+        LD HL,(APPEND_WORK_CURRENT),DE,(APPEND_WORK_CURRENT+2)
         LD (APPEND_PENDING_OLD_TAIL),HL
         LD (APPEND_PENDING_OLD_TAIL+2),DE
-.allocate_common:
-        LD A,(APPEND_PENDING_NEW):OR A
-        LD A,APPEND_ERROR_INTERNAL
-        RET NZ
-        LD HL,1,DE,0
+        POP HL
+        LD DE,0
         CALL @WDOS.MKSG
         RET NZ
+
         LD HL,(@WDOS.FCTS),DE,(@WDOS.FCTS+2)
         LD (APPEND_NEW_CLUSTER),HL
         LD (APPEND_NEW_CLUSTER+2),DE
-        LD (APPEND_WORK_CURRENT),HL
-        LD (APPEND_WORK_CURRENT+2),DE
         LD A,1
         LD (APPEND_PENDING_NEW),A
+
         LD HL,(APPEND_WORK_FIRST),DE,(APPEND_WORK_FIRST+2)
-        LD A,D:OR E:OR H:OR L:JR NZ,.first_ready
+        LD A,D:OR E:OR H:OR L:JR NZ,.nothing
         LD HL,(APPEND_NEW_CLUSTER),DE,(APPEND_NEW_CLUSTER+2)
         LD (APPEND_WORK_FIRST),HL
         LD (APPEND_WORK_FIRST+2),DE
-.first_ready:
+.nothing:
+        XOR A
+        RET
+
+; При первом переходе через прежний EOF выбрать голову заранее выделенной
+; отсоединённой цепочки. Дальше идти только по её уже построенным FAT-ссылкам.
+; Прежний хвост проверяется и связывается с этой головой лишь во время commit.
+APPEND_ENSURE_CLUSTER:
+        LD A,(APPEND_PENDING_NEW):OR A:JR Z,.bad_chain
+        LD A,(APPEND_NEW_ACTIVE):OR A:JR NZ,.next_cluster
+        LD HL,(APPEND_NEW_CLUSTER),DE,(APPEND_NEW_CLUSTER+2)
+        LD (APPEND_WORK_CURRENT),HL
+        LD (APPEND_WORK_CURRENT+2),DE
+        LD A,1
+        LD (APPEND_NEW_ACTIVE),A
+        XOR A
+        LD (APPEND_WORK_NEEDS_CLUSTER),A
+        RET
+
+.next_cluster:
+        LD HL,(APPEND_WORK_CURRENT),DE,(APPEND_WORK_CURRENT+2)
+        CALL APPEND_READ_FAT_LINK
+        JR C,.bad_chain
+        JR Z,.bad_chain
+        LD (APPEND_WORK_CURRENT),HL
+        LD (APPEND_WORK_CURRENT+2),DE
         XOR A
         LD (APPEND_WORK_NEEDS_CLUSTER),A
         RET
@@ -581,10 +676,14 @@ APPEND_LINK_NEW_CLUSTER:
         LD A,(DE):LD (HL),A:INC DE,HL
         LD A,(HL):AND #F0:LD B,A
         LD A,(DE):AND #0F:OR B:LD (HL),A
-        CALL SAVE_FAT_SECTOR
-        RET NZ
+        ; После начала записи FAT результат носителя может быть неоднозначным.
+        ; Откат должен восстановить старую EOC-ссылку и когда драйвер вернул
+        ; ошибку: повторная запись прежнего значения безопаснее оставленной
+        ; ссылки на цепочку, которую затем освободит DLSG.
         LD A,1
         LD (APPEND_LINKED_NEW),A
+        CALL SAVE_FAT_SECTOR
+        RET NZ
         XOR A
         RET
 .bad_chain:
@@ -649,7 +748,7 @@ APPEND_UPDATE_DIRECTORY:
         RET
 
 ; При ошибке до обновления каталожной записи восстановить EOC старого хвоста
-; и освободить отдельно выделенный кластер. Ошибка самого отката имеет
+; и освободить отдельно выделенную цепочку. Ошибка самого отката имеет
 ; отдельный код, чтобы FTP-сервер не повторял операцию вслепую.
 APPEND_ROLLBACK:
         LD A,(APPEND_PENDING_NEW):OR A:RET Z
@@ -673,7 +772,9 @@ APPEND_ROLLBACK:
         XOR A
         LD (APPEND_PENDING_NEW),A
         LD (APPEND_LINKED_NEW),A
+        LD (APPEND_NEW_ACTIVE),A
         RET
+; Codex - 2026-07-27 - end
 ; Codex - 2026-07-17 - end
 
 ; Вызвать драйвер чтения/записи с единым признаком результата в ABT.
@@ -1524,9 +1625,15 @@ APPEND_WORK_NEEDS_CLUSTER:    DS 1
 APPEND_SOURCE:                DS 2
 APPEND_REMAINING:             DS 2
 APPEND_CHUNK:                 DS 2
+; Codex - 2026-07-27 - begin
+APPEND_RUN:                   DS 1
+; Codex - 2026-07-27 - end
 APPEND_SKIP_COUNT:            DS 4
 APPEND_PENDING_NEW:           DS 1
 APPEND_LINKED_NEW:            DS 1
+; Codex - 2026-07-27 - begin
+APPEND_NEW_ACTIVE:            DS 1
+; Codex - 2026-07-27 - end
 APPEND_PENDING_OLD_TAIL:      DS 4
 APPEND_NEW_CLUSTER:           DS 4
 APPEND_OLD_LINK:              DS 4

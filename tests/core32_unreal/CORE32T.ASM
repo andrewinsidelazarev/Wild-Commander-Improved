@@ -746,6 +746,7 @@ TEST_FULL_DIRECTORY_END:
 ; Codex - 2026-07-16 - end
 
 ; Codex - 2026-07-17 - begin
+; Codex - 2026-07-27 - begin
 ; Проверить FTP-сценарий: пустой файл получает произвольные куски, пересекает
 ; частичный сектор и пять одно-секторных кластеров, затем повторно открывается
 ; и продолжает расти. Недопустимые длина и окно памяти не должны менять файл.
@@ -760,7 +761,7 @@ TEST_APPEND_FILE:
         LD HL,APPEND_BUFFER,BC,0
         CALL APPEND
         JP NZ,API_ERROR
-        LD HL,APPEND_BUFFER,BC,513
+        LD HL,APPEND_BUFFER,BC,#4001
         CALL APPEND
         JP Z,SEMANTIC_ERROR
         CP #22
@@ -842,7 +843,7 @@ TEST_APPEND_FILE:
         LD A,#28,BC,400:CALL CHECK_APPEND_PATTERN:JP NZ,SEMANTIC_ERROR
         XOR A
         LD BC,507:CALL CHECK_APPEND_PATTERN:JP NZ,SEMANTIC_ERROR
-        XOR A
+        CALL TEST_APPEND_16K
         RET
 
 ; Заполнить временный блок одним байтом и сразу вызвать API 76, сохранив BC.
@@ -873,6 +874,47 @@ CHECK_APPEND_PATTERN:
         LD A,1
         OR A
         RET
+
+; Проверить верхнюю границу нового контракта API 76. Источником служит вся
+; текущая 16-КиБ страница плагина #8000..#BFFF; содержимое исполняемого кода
+; не меняется, а вызов обязан построить до 32 кластеров при SPC=1.
+TEST_APPEND_16K:
+        LD HL,APPEND16_CREATE
+        CALL MKFILE
+        JP NZ,API_ERROR
+        LD HL,APPEND16_FIND
+        CALL FENTRY
+        JP Z,SEARCH_ERROR
+
+        LD HL,#8001,BC,#4000
+        CALL APPEND
+        JP Z,SEMANTIC_ERROR
+        CP #21
+        JP NZ,SEMANTIC_ERROR
+
+        LD HL,#8000,BC,#4000
+        CALL APPEND
+        JP NZ,API_ERROR
+
+        LD HL,APPEND16_FIND
+        CALL FENTRY
+        JP Z,SEARCH_ERROR
+        LD BC,#4000
+        OR A:SBC HL,BC
+        JP NZ,SEMANTIC_ERROR
+        LD A,D:OR E
+        JP NZ,SEMANTIC_ERROR
+        LD DE,ENTRY_BUFFER
+        CALL TENTRY
+        LD HL,(ENTRY_BUFFER+28),BC,#4000
+        OR A:SBC HL,BC
+        JP NZ,SEMANTIC_ERROR
+        LD HL,(ENTRY_BUFFER+30)
+        LD A,H:OR L
+        JP NZ,SEMANTIC_ERROR
+        XOR A
+        RET
+; Codex - 2026-07-27 - end
 ; Codex - 2026-07-17 - end
 
 TEST_LONG_DELETE:
@@ -1137,12 +1179,20 @@ FAT_BOUNDARY_FIND:
         DB #00,"CROSSFAT.BIN",0
 
 ; Codex - 2026-07-17 - begin
+; Codex - 2026-07-27 - begin
 APPEND_CREATE:
         DB #00
         DD 0
         DB "FTPAPP.BIN",0
 APPEND_FIND:
         DB #00,"FTPAPP.BIN",0
+APPEND16_CREATE:
+        DB #00
+        DD 0
+        DB "APP16K.BIN",0
+APPEND16_FIND:
+        DB #00,"APP16K.BIN",0
+; Codex - 2026-07-27 - end
 ; Codex - 2026-07-17 - end
 
 LONG_CREATE:
