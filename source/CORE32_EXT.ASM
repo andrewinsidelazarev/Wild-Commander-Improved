@@ -148,6 +148,7 @@ COPY_ENTRY_AND_CAPTURE:
         XOR A
         LD (APPEND_VALID),A
         LD (APPEND_READY),A
+        LD (APPEND_LBA_VALID),A
         LD BC,(APPEND_FOUND_POINTER)
         LD A,C:AND #1F:JR NZ,.copy_saved_entry
         LD A,B:SUB high @WDOS.LOBU:CP 4:JR NC,.copy_saved_entry
@@ -512,7 +513,13 @@ APPEND_PREPARE:
         JR .walk_chain
 
 .ready:
-        LD A,1
+; Codex - 2026-07-28 - begin
+        ; Новый FENTRY заново вычислил EOF. Старый LBA мог относиться к другому
+        ; файлу, кластеру или геометрии тома и не переносится в новый контекст.
+        XOR A
+        LD (APPEND_LBA_VALID),A
+        INC A
+; Codex - 2026-07-28 - end
         LD (APPEND_READY),A
         XOR A
         RET
@@ -600,6 +607,11 @@ APPEND_ENSURE_CLUSTER:
         LD (APPEND_NEW_ACTIVE),A
         XOR A
         LD (APPEND_WORK_NEEDS_CLUSTER),A
+; Codex - 2026-07-28 - begin
+        ; Сменили APPEND_WORK_CURRENT на голову новой цепочки: кэш LBA базы
+        ; устарел.
+        LD (APPEND_WORK_LBA_VALID),A
+; Codex - 2026-07-28 - end
         RET
 
 .next_cluster:
@@ -611,6 +623,10 @@ APPEND_ENSURE_CLUSTER:
         LD (APPEND_WORK_CURRENT+2),DE
         XOR A
         LD (APPEND_WORK_NEEDS_CLUSTER),A
+; Codex - 2026-07-28 - begin
+        ; Перешли по FAT-ссылке в следующий кластер: кэш LBA базы устарел.
+        LD (APPEND_WORK_LBA_VALID),A
+; Codex - 2026-07-28 - end
         RET
 .bad_chain:
         LD A,APPEND_ERROR_BAD_CHAIN
@@ -622,11 +638,29 @@ APPEND_POSITION_SECTOR:
 ; Codex - 2026-07-17 - begin
         ; GIPAG принимает адрес четырёхбайтового номера кластера, а не сам
         ; номер в DE:HL. Передача значения как указателя давала случайный LBA.
-        LD HL,APPEND_WORK_CURRENT
 ; Codex - 2026-07-17 - end
+; Codex - 2026-07-28 - begin
+        ; Кэш переносится между успешными APPEND. Перед использованием
+        ; проверяются кластер и параметры его отображения в LBA: даже если
+        ; вызывающий код сменил том без нового FENTRY, устаревшая база не
+        ; попадёт в драйвер.
+        CALL APPEND_LBA_CACHE_MATCH
+        JR Z,.recompute
+        LD HL,(APPEND_WORK_LBA),DE,(APPEND_WORK_LBA+2)
+        CALL APPEND_LBA_CACHE_RESTORE_STATE
+        JR .add_sector
+.recompute:
+        LD HL,APPEND_WORK_CURRENT
         CALL @WDOS.GIPAG
         RET NZ
         LD HL,(@WDOS.LTHL),DE,(@WDOS.LTDE)
+        LD (APPEND_WORK_LBA),HL
+        LD (APPEND_WORK_LBA+2),DE
+        CALL APPEND_LBA_CACHE_TAG
+        LD A,1
+        LD (APPEND_WORK_LBA_VALID),A
+.add_sector:
+; Codex - 2026-07-28 - end
         LD A,(APPEND_WORK_SECTOR)
         ADD A,L:LD L,A:JR NC,.position
         INC H:JR NZ,.position
@@ -634,6 +668,74 @@ APPEND_POSITION_SECTOR:
 .position:
         CALL @WDOS.PROZ
         XOR A
+        RET
+
+; Вернуть NZ, только если сохранённая база принадлежит текущему кластеру и
+; текущей геометрии FAT. APPEND_ENSURE_CLUSTER также явно сбрасывает VALID,
+; но полная сверка делает ошибку инвалидизации безопасным промахом кэша.
+APPEND_LBA_CACHE_MATCH:
+        LD A,(APPEND_WORK_LBA_VALID):OR A:JR Z,.miss
+
+        LD HL,(APPEND_WORK_CURRENT),DE,(APPEND_WORK_LBA_CLUSTER)
+        OR A:SBC HL,DE:JR NZ,.miss
+        LD HL,(APPEND_WORK_CURRENT+2),DE,(APPEND_WORK_LBA_CLUSTER+2)
+        OR A:SBC HL,DE:JR NZ,.miss
+
+        LD A,(@WDOS.BSECPC)
+        LD B,A
+        LD A,(APPEND_WORK_LBA_BSECPC)
+        CP B:JR NZ,.miss
+
+        LD HL,(@WDOS.SDFAT),DE,(APPEND_WORK_LBA_SDFAT)
+        OR A:SBC HL,DE:JR NZ,.miss
+        LD HL,(@WDOS.SDFAT+2),DE,(APPEND_WORK_LBA_SDFAT+2)
+        OR A:SBC HL,DE:JR NZ,.miss
+
+        LD HL,(@WDOS.ADDTOP),DE,(APPEND_WORK_LBA_ADDTOP)
+        OR A:SBC HL,DE:JR NZ,.miss
+        LD HL,(@WDOS.ADDTOP+2),DE,(APPEND_WORK_LBA_ADDTOP+2)
+        OR A:SBC HL,DE:JR NZ,.miss
+
+        LD A,1
+        OR A
+        RET
+.miss:
+        XOR A
+        RET
+
+; Привязать уже сохранённый APPEND_WORK_LBA к текущему кластеру и геометрии.
+APPEND_LBA_CACHE_TAG:
+        PUSH HL,DE
+        LD HL,(APPEND_WORK_CURRENT),DE,(APPEND_WORK_CURRENT+2)
+        LD (APPEND_WORK_LBA_CLUSTER),HL
+        LD (APPEND_WORK_LBA_CLUSTER+2),DE
+        LD A,(@WDOS.BSECPC)
+        LD (APPEND_WORK_LBA_BSECPC),A
+        LD HL,(@WDOS.SDFAT),DE,(@WDOS.SDFAT+2)
+        LD (APPEND_WORK_LBA_SDFAT),HL
+        LD (APPEND_WORK_LBA_SDFAT+2),DE
+        LD HL,(@WDOS.ADDTOP),DE,(@WDOS.ADDTOP+2)
+        LD (APPEND_WORK_LBA_ADDTOP),HL
+        LD (APPEND_WORK_LBA_ADDTOP+2),DE
+        POP DE,HL
+        RET
+
+; GIPAG не только вычисляет LBA. Потоковый LOAD/SAVE затем полагается на
+; сброшенные NSDC/EOC, текущий CUHL/CUDE и базовый LBA в CL*/LT*. Попадание
+; кэша обязано воспроизвести это состояние; одного PROZ недостаточно.
+; Вход/выход: DE:HL — кэшированный абсолютный LBA начала кластера.
+APPEND_LBA_CACHE_RESTORE_STATE:
+        LD (@WDOS.LTHL),HL
+        LD (@WDOS.LTDE),DE
+        LD (@WDOS.CLHL),HL
+        LD (@WDOS.CLDE),DE
+        LD HL,(APPEND_WORK_CURRENT),DE,(APPEND_WORK_CURRENT+2)
+        LD (@WDOS.CUHL),HL
+        LD (@WDOS.CUDE),DE
+        XOR A
+        LD (@WDOS.NSDC),A
+        LD (@WDOS.EOC),A
+        LD HL,(@WDOS.LTHL),DE,(@WDOS.LTDE)
         RET
 
 APPEND_CLEAR_SECTOR:
@@ -1610,6 +1712,16 @@ APPEND_CURRENT_CLUSTER:       DS 4
 APPEND_SECTOR:                DS 1
 APPEND_OFFSET:                DS 2
 APPEND_NEEDS_CLUSTER:         DS 1
+; Codex - 2026-07-28 - begin
+; Постоянный ключ и значение LBA-кэша. Ключ защищает межвызовное
+; переиспользование от смены кластера и параметров отображения FAT.
+APPEND_LBA_VALID:             DS 1
+APPEND_LBA_CLUSTER:           DS 4
+APPEND_LBA_BSECPC:            DS 1
+APPEND_LBA_SDFAT:             DS 4
+APPEND_LBA_ADDTOP:            DS 4
+APPEND_LBA:                   DS 4
+; Codex - 2026-07-28 - end
 APPEND_CONTEXT_END:
 APPEND_CONTEXT_SIZE           EQU APPEND_CONTEXT_END-APPEND_CONTEXT
 
@@ -1620,6 +1732,14 @@ APPEND_WORK_CURRENT:          DS 4
 APPEND_WORK_SECTOR:           DS 1
 APPEND_WORK_OFFSET:           DS 2
 APPEND_WORK_NEEDS_CLUSTER:    DS 1
+; Codex - 2026-07-28 - begin
+APPEND_WORK_LBA_VALID:        DS 1
+APPEND_WORK_LBA_CLUSTER:      DS 4
+APPEND_WORK_LBA_BSECPC:       DS 1
+APPEND_WORK_LBA_SDFAT:        DS 4
+APPEND_WORK_LBA_ADDTOP:       DS 4
+APPEND_WORK_LBA:              DS 4
+; Codex - 2026-07-28 - end
         ASSERT $-APPEND_WORK_CONTEXT == APPEND_CONTEXT_SIZE, различается контекст APPEND
 
 APPEND_SOURCE:                DS 2

@@ -4,6 +4,12 @@
 
         DEVICE ZXSPECTRUM128
 
+; Адрес внутреннего GIPAG берётся из карты именно той сборки CORE32, с которой
+; собирается тест. MODULE изолирует остальные исторические имена интерфейса.
+        MODULE CORE32_TEST_WDOS
+        INCLUDE "../../Build/CORE32_WDOS_SYMBOLS.INC"
+        ENDMODULE
+
 WLD             EQU #6006
 ; Codex - 2026-07-17 - begin
 ; #6004 принадлежит менеджеру плагинов и является флагом Esc, а не ABT CORE32.
@@ -33,6 +39,7 @@ DRIVER_SDD_JUMP EQU #3812
 DRIVER_CUHL     EQU #38A8
 EXT_ID_FAT_SECTOR_IN_RANGE EQU 6
 EXT_ID_CLASSIFY_FAT_LINK   EQU 8
+CORE_GIPAG_IMPL EQU CORE32_TEST_WDOS.GIPAG
 ; Codex - 2026-07-17 - end
 
         ORG #0000
@@ -772,12 +779,21 @@ TEST_APPEND_FILE:
         CP #21
         JP NZ,SEMANTIC_ERROR
 
+        ; Два последовательных APPEND внутри одного кластера обязаны один раз
+        ; вычислить его базовый LBA, а затем взять его из постоянного кэша.
+        CALL INSTALL_GIPAG_COUNTER
         LD A,#A1,BC,3
         CALL APPEND_PATTERN
-        JP NZ,API_ERROR
+        JP NZ,.counter_api_error
         LD A,#B2,BC,509
         CALL APPEND_PATTERN
-        JP NZ,API_ERROR
+        JP NZ,.counter_api_error
+        CALL RESTORE_GIPAG_COUNTER
+        LD A,(APPEND_GIPAG_CALLS)
+        LD (RESULT_RESERVED+20),A
+        CP 1
+        JP NZ,SEMANTIC_ERROR
+
         LD A,#C3,BC,1
         CALL APPEND_PATTERN
         JP NZ,API_ERROR
@@ -846,6 +862,12 @@ TEST_APPEND_FILE:
         CALL TEST_APPEND_16K
         RET
 
+.counter_api_error:
+        PUSH AF
+        CALL RESTORE_GIPAG_COUNTER
+        POP AF
+        JP API_ERROR
+
 ; Заполнить временный блок одним байтом и сразу вызвать API 76, сохранив BC.
 APPEND_PATTERN:
         PUSH BC
@@ -859,6 +881,48 @@ APPEND_PATTERN:
         POP BC
         LD HL,APPEND_BUFFER
         JP APPEND
+
+; На время двух APPEND заменить первые три байта внутреннего GIPAG на JP к
+; счётчику. Обёртка перед настоящим вызовом восстанавливает исходные байты, а
+; после возврата снова ставит JP, полностью сохраняя результат и регистры.
+INSTALL_GIPAG_COUNTER:
+        XOR A
+        LD (APPEND_GIPAG_CALLS),A
+        LD HL,CORE_GIPAG_IMPL,DE,APPEND_GIPAG_ORIGINAL,BC,3
+        LDIR
+        JP PATCH_GIPAG_COUNTER
+
+PATCH_GIPAG_COUNTER:
+        LD HL,CORE_GIPAG_IMPL
+        LD (HL),#C3
+        INC HL
+        LD DE,COUNTED_GIPAG
+        LD (HL),E
+        INC HL
+        LD (HL),D
+        XOR A
+        RET
+
+RESTORE_GIPAG_COUNTER:
+        LD HL,APPEND_GIPAG_ORIGINAL,DE,CORE_GIPAG_IMPL,BC,3
+        LDIR
+        XOR A
+        RET
+
+COUNTED_GIPAG:
+        PUSH AF,BC,DE,HL
+        LD A,(APPEND_GIPAG_CALLS)
+        INC A
+        LD (APPEND_GIPAG_CALLS),A
+        CALL RESTORE_GIPAG_COUNTER
+        POP HL,DE,BC,AF
+
+        CALL CORE_GIPAG_IMPL
+
+        PUSH AF,BC,DE,HL
+        CALL PATCH_GIPAG_COUNTER
+        POP HL,DE,BC,AF
+        RET
 
 ; Сверить BC байт с A. При успехе HL остаётся на следующем диапазоне.
 CHECK_APPEND_PATTERN:
@@ -1225,6 +1289,10 @@ FAKE_WRITE_CALLED:
 ; Codex - 2026-07-16 - end
 ENTRY_BUFFER:
         DS 32,0
+APPEND_GIPAG_CALLS:
+        DB 0
+APPEND_GIPAG_ORIGINAL:
+        DS 3,0
 
 RESULT_BUFFER:
         DB "C32T2026"

@@ -18,7 +18,7 @@
 ;   #C000 WDOS.INSTALL_WILDDOS — физический загрузчик WildDOS;
 ;   #5AAA DEHRUST        — рабочий адрес распаковщика драйверов после копирования.
 ; Сборка: SJASMPlus 1.21. Ожидаемый SHA-256 полезной нагрузки:
-; 9fb3b6a2a29ea2730201f4a0ff5c10cc7f666a1118a6d3a016f72e3d5c8fda7c
+; a96cb9795726a97dde0a1a6223b2df7361c9736fb00aae462ce9f3f35b61cf94
 
         INCLUDE "PHYSICAL_MEMORY_MAP.ASM"
 

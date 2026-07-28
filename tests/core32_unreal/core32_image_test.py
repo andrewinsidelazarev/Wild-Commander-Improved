@@ -21,6 +21,7 @@ APPEND_FILE = "FTPAPP.BIN"
 # Codex - 2026-07-27 - begin
 APPEND16_FILE = "APP16K.BIN"
 APPEND16_SIZE = 0x4000
+APPEND_GIPAG_RESULT_OFFSET = 13 + 20
 # Codex - 2026-07-27 - end
 APPEND_PAYLOAD = (
     bytes([0xA1]) * 3
@@ -291,11 +292,17 @@ def inspect_image(image_path: Path) -> int:
             test_cluster = test_entry["cluster"]
 
         main_fields = None
+        main_append_gipag_calls = None
         long_fields = None
         persistent_entries = []
         if test_cluster:
             try:
-                main_fields = result_fields(image.read_file(test_cluster, MAIN_RESULT))
+                main_payload = image.read_file(test_cluster, MAIN_RESULT)
+                main_fields = result_fields(main_payload)
+                if len(main_payload) <= APPEND_GIPAG_RESULT_OFFSET:
+                    failures.append("Основной результат не содержит счётчик GIPAG")
+                else:
+                    main_append_gipag_calls = main_payload[APPEND_GIPAG_RESULT_OFFSET]
             except Exception as exc:
                 failures.append(f"Основной результат не читается: {exc}")
 
@@ -483,10 +490,16 @@ def inspect_image(image_path: Path) -> int:
                     f"Основной набор CORE32 не прошёл: test={failed_test}, "
                     f"api=#{api_error:02X}, completed={completed}"
                 )
+            if main_append_gipag_calls != 1:
+                failures.append(
+                    "Межвызовный кэш APPEND вызвал GIPAG "
+                    f"{main_append_gipag_calls!r} раз, ожидался 1"
+                )
             # Codex - 2026-07-16 - end
             print(
                 f"Основной результат: status=#{status:02X} test={failed_test} "
-                f"api=#{api_error:02X} stage={stage} completed={completed}"
+                f"api=#{api_error:02X} stage={stage} completed={completed} "
+                f"append_gipag={main_append_gipag_calls}"
             )
 
         if long_fields is not None:
