@@ -103,15 +103,19 @@ Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'source') -Recurse -File |
         $_.FullName -notlike '*\to delete\*'
     } |
     ForEach-Object {
-        $bytes = [IO.File]::ReadAllBytes($_.FullName)
+        # Путь запоминается ДО try: внутри catch $_ — это пойманная ошибка, а не
+        # файл, и обращение к $_.FullName в строгом режиме падает само,
+        # подменяя внятное «файл не в UTF-8» на «нет свойства FullName».
+        $path = $_.FullName
+        $bytes = [IO.File]::ReadAllBytes($path)
         if ($bytes.Length -ge 3 -and
             $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            throw "UTF-8 BOM is forbidden: $($_.FullName)"
+            throw "UTF-8 BOM is forbidden: $path"
         }
         try {
             $null = $Utf8Strict.GetString($bytes)
         } catch {
-            throw "File is not valid UTF-8: $($_.FullName)"
+            throw "File is not valid UTF-8: $path"
         }
     }
 
@@ -316,12 +320,14 @@ if (Test-Path -LiteralPath $Core32TestSource -PathType Leaf) {
 & python (Join-Path $ProjectRoot 'tools\pack_hobeta.py') $Payload $BootOutput
 if ($LASTEXITCODE -ne 0) { throw 'HoBeta packing failed.' }
 
-# Плагины, меню, конфигурация и документация — готовые runtime-файлы.
-# Код Commander всегда собирается выше; остальные неизменяемые файлы берутся
-# из указанного локального эталона и также входят в хэш-аудит.
+# Плагины, меню и конфигурация — готовые runtime-файлы.
+# boot.$C собирается выше, а WC_History.txt и WC_todo.txt ведутся самим
+# Improved; остальные неизменяемые файлы берутся из локального эталона.
+# Все они входят в хэш-аудит.
+$ProjectOwnedRuntime = @('boot.$C', 'WC_History.txt', 'WC_todo.txt')
 Get-ChildItem -LiteralPath $ReferenceExe -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($ReferenceExe.Length + 1)
-    if ($relative -ine 'boot.$C') {
+    if ($ProjectOwnedRuntime -inotcontains $relative) {
         $destination = Join-Path $ExeDir $relative
         $parent = Split-Path -Parent $destination
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -342,12 +348,16 @@ if ($HashExitCode -ne 0) {
         Import-Csv -LiteralPath $HashReport -Delimiter "`t" |
             Where-Object { $_.status -ne 'MATCH' }
     )
-    $Unexpected = @($Mismatches | Where-Object { $_.path -ine 'boot.$C' })
-    if ($RequireExact -or $Unexpected.Count -ne 0 -or $Mismatches.Count -ne 1) {
+    $ExpectedMismatchPaths = @('boot.$C', 'WC_History.txt', 'WC_todo.txt')
+    $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
+    $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
+    $MissingExpected = @($ExpectedMismatchPaths | Where-Object { $MismatchPaths -inotcontains $_ })
+    if ($RequireExact -or $Unexpected.Count -ne 0 -or $MissingExpected.Count -ne 0 -or
+        $Mismatches.Count -ne $ExpectedMismatchPaths.Count) {
         throw "Hash verification failed. See $HashReport"
     }
-    Write-Warning 'boot.$C intentionally differs from the reference; all other runtime files match.'
-    # Ожидаемое единственное отличие уже строго проверено. Не оставлять код 1
+    Write-Warning 'boot.$C, WC_History.txt and WC_todo.txt intentionally differ from the reference; all other runtime files match.'
+    # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.
     $global:LASTEXITCODE = 0

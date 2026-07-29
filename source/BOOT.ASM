@@ -101,6 +101,8 @@ LB59F:
 WDOS_INSTALL_COPY:
         LDIR                            ; исходный CORE32 #C00C -> #4000
         RET
+; Автозапуск типа #06 живёт в нулевой области: точные модули не двигаются.
+        INCLUDE "AUTOEXEC.ASM"
         DS #C000-$,0
         ELSE
 ; Codex - 2026-07-17 - end
@@ -153,6 +155,8 @@ WDOS_EXTENSION_PACKED:
         INCBIN "../Build/CORE32_EXT.CPD"
 WDOS_EXTENSION_PACKED_END:
         ASSERT WDOS_EXTENSION_PACKED_END <= #C000, упакованное расширение WildDOS не помещается
+; Автозапуск типа #06 живёт в нулевой области: точные модули не двигаются.
+        INCLUDE "AUTOEXEC.ASM"
         DS #C000-$,0
         ASSERT $ == #C000, нарушена граница нулевой области
         ENDIF
