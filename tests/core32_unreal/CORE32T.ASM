@@ -69,7 +69,10 @@ START_CODE:
         DB #00
         DD #FFFFFFFF
         DB "CORE32 regression test Codex    "
-        DB #03
+        ; Тип #06 запускается один раз после инициализации WC 1.10i и сразу
+        ; исчезает из меню. Это делает файловый тест автономным: клавиатура и
+        ; ручной выбор плагина не участвуют в доказательстве.
+        DB #06
         DB #00
 
         ALIGN 512,0
@@ -255,6 +258,13 @@ TEST_FAILED:
         CALL WRITE_CURRENT_RESULT
 
 SHOW_RESULT:
+        ; Автономный тип #06 уже записал подробный результат на FAT. Возвращаем
+        ; управление WC без окна ожидания Esc, чтобы хост мог штатно закрыть
+        ; Unreal и затем независимо проверить образ.
+        POP IX
+        RET
+
+SHOW_RESULT_INTERACTIVE:
         LD IX,RESULT_WINDOW
         CALL PRWOW
         LD A,(RESULT_STATUS)
@@ -860,6 +870,8 @@ TEST_APPEND_FILE:
         XOR A
         LD BC,507:CALL CHECK_APPEND_PATTERN:JP NZ,SEMANTIC_ERROR
         CALL TEST_APPEND_16K
+        RET NZ
+        CALL TEST_APPEND_256K
         RET
 
 .counter_api_error:
@@ -978,6 +990,58 @@ TEST_APPEND_16K:
         JP NZ,SEMANTIC_ERROR
         XOR A
         RET
+
+; Проверить рост уже созданного файла далеко за первый кластер: шестнадцать
+; штатных вызовов API 76 по 16 КиБ дают 256 КиБ. Счётчик хранится в AF на
+; стеке, а не внутри страницы #8000, поэтому все шестнадцать исходных окон
+; побайтово одинаковы и пригодны для независимой проверки образа.
+TEST_APPEND_256K:
+        LD HL,APPEND256_CREATE
+        CALL MKFILE
+        JP NZ,API_ERROR
+        LD HL,APPEND256_FIND
+        CALL FENTRY
+        JP Z,SEARCH_ERROR
+
+        LD A,16
+.append:
+        PUSH AF
+        LD HL,#8000,BC,#4000
+        CALL APPEND
+        JR NZ,.append_error
+        POP AF
+        DEC A
+        JR NZ,.append
+
+        LD HL,APPEND256_FIND
+        CALL FENTRY
+        JP Z,SEARCH_ERROR
+        LD A,H:OR L
+        JP NZ,SEMANTIC_ERROR
+        LD A,D
+        OR A
+        JP NZ,SEMANTIC_ERROR
+        LD A,E
+        CP 4                              ; DE:HL = #0004:0000 = 256 КиБ
+        JP NZ,SEMANTIC_ERROR
+        LD DE,ENTRY_BUFFER
+        CALL TENTRY
+        LD HL,(ENTRY_BUFFER+28)
+        LD A,H:OR L
+        JP NZ,SEMANTIC_ERROR
+        LD HL,(ENTRY_BUFFER+30)
+        LD A,H
+        OR A
+        JP NZ,SEMANTIC_ERROR
+        LD A,L
+        CP 4
+        JP NZ,SEMANTIC_ERROR
+        XOR A
+        RET
+
+.append_error:
+        POP BC                           ; снять сохранённый AF, не меняя код A
+        JP API_ERROR
 ; Codex - 2026-07-27 - end
 ; Codex - 2026-07-17 - end
 
@@ -1256,6 +1320,12 @@ APPEND16_CREATE:
         DB "APP16K.BIN",0
 APPEND16_FIND:
         DB #00,"APP16K.BIN",0
+APPEND256_CREATE:
+        DB #00
+        DD 0
+        DB "APP256K.BIN",0
+APPEND256_FIND:
+        DB #00,"APP256K.BIN",0
 ; Codex - 2026-07-27 - end
 ; Codex - 2026-07-17 - end
 

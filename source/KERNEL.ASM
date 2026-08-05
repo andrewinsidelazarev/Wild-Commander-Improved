@@ -155,7 +155,7 @@ START   JP Z0            ; +#00: зарезервировано (SELDEV нахо
 ; Codex - 2026-07-27 - end
 ; Codex - 2026-07-17 - end
         JP MKSG          ; +#2A: создать FAT-цепочку заданного размера
-        JP Z0            ; +#2D: зарезервировано
+        JP WDOS_FILEX_GATE ; +#2D: единый расширенный файловый API 77
         JP RFRH          ; +#30: записать FSI_Nxt_Free в FSInfo
 
 ; Codex - 2026-07-17 - begin

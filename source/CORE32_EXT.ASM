@@ -56,6 +56,7 @@ ENTRY_TABLE:
         JP COPY_ENTRY_AND_CAPTURE
         JP APPEND_BYTES
         JP COPY_TO_ENTRY
+        JP FILEX_CONTEXT_BRIDGE
 ; Codex - 2026-07-17 - end
 ; Codex - 2026-07-16 - end
 ENTRY_TABLE_END:
@@ -175,6 +176,38 @@ COPY_TO_ENTRY:
         LDIR
         RET
 
+; Малый мост между одностраничным FILEX и приватным контекстом FENTRY.
+; A=0: экспортировать LBA каталога, смещение и 32-байтовую запись в DE
+;      (NZ=успех, Z=нет действительного контекста).
+; A=1: инвалидировать контекст.
+; A=2: импортировать те же 38 байт из HL после успешной транзакции.
+FILEX_CONTEXT_BRIDGE:
+        OR A:JR Z,.export
+        CP 2:JR Z,.import
+.export:
+        JR C,.invalidate
+        LD A,(APPEND_VALID):OR A:RET Z
+        LD HL,APPEND_DIRECTORY_LBA,BC,38
+        LDIR
+        LD A,1:OR A
+        RET
+.invalidate:
+        XOR A
+        LD (APPEND_VALID),A
+        LD (APPEND_READY),A
+        LD (APPEND_LBA_VALID),A
+        RET
+.import:
+        LD DE,APPEND_DIRECTORY_LBA,BC,38
+        LDIR
+        XOR A
+        LD (APPEND_READY),A
+        LD (APPEND_LBA_VALID),A
+        INC A
+        LD (APPEND_VALID),A
+        OR A
+        RET
+
 APPEND_ERROR_CONTEXT       EQU #20
 APPEND_ERROR_BUFFER        EQU #21
 APPEND_ERROR_LENGTH        EQU #22
@@ -187,8 +220,9 @@ APPEND_ERROR_ROLLBACK      EQU #2A
 
 ; Codex - 2026-07-27 - begin
 ; Дописать в найденный файл от 1 до 16 КиБ. Нулевой BC является успешной
-; пустой операцией. Данные должны полностью лежать в #4000..#BFFF: окно #0000
-; занято файловой страницей, а #C000 временно содержит это расширение.
+; пустой операцией. Публичный буфер лежит в #4000..#BFFF. Внутренний FILEX
+; дополнительно использует сериализованный нулевой scratch #2000..#2FFF;
+; #C000 во время операции содержит это расширение.
 ; Контекст создаётся штатным XFENTRY/TENTRY и кэширует положение EOF, поэтому
 ; последовательные FTP-блоки не обходят FAT-цепочку заново.
 APPEND_BYTES:
@@ -204,7 +238,7 @@ APPEND_BYTES:
         JP NZ,.bad_length
         LD A,C:OR A:JP NZ,.bad_length
 .length_ok:
-        LD A,H:CP #40:JP C,.bad_buffer
+        LD A,H:CP #20:JP C,.bad_buffer
         CP #C0:JP NC,.bad_buffer
         PUSH HL
         ADD HL,BC
@@ -1126,6 +1160,7 @@ LOAD_FAT_CONFIG:
         LD HL,(@WDOS.LOBU+46)
         LD A,H:AND #0F:LD H,A
         LD (@WDOS.BROOTC+2),HL
+
         XOR A
         RET
 .bad:

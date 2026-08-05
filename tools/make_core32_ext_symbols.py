@@ -13,12 +13,12 @@ SYMBOL_RE = re.compile(r"^WDOS\.([A-Za-z0-9_]+):\s+EQU\s+(\S+)", re.MULTILINE)
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--source", type=Path, action="append", required=True)
     parser.add_argument("--symbols", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    source = args.source.read_text(encoding="utf-8")
+    source = "\n".join(path.read_text(encoding="utf-8") for path in args.source)
     symbol_text = args.symbols.read_text(encoding="utf-8")
     required = sorted(set(REFERENCE_RE.findall(source)))
     available = dict(SYMBOL_RE.findall(symbol_text))

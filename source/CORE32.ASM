@@ -919,7 +919,9 @@ MKSG
 
         CALL SGENBU:JR C,ERG1
 ROSTIK  CALL PREPFC:JR C,ERG2
-        CALL BUtoFAT:RET Z
+        ; BUtoFAT: CF=1 означает как завершённую цепочку, так и ошибку записи;
+        ; Z/NZ при возврате сохраняет различие для вызывающего APPEND.
+        CALL BUtoFAT:RET C
         CALL SGENB2:JR C,ERG2
         JR ROSTIK
 SGENBU  LD HL,GENBU,(GARY),HL
@@ -1019,11 +1021,12 @@ GFC     LD H,0,L,A
         JR GNFC
 ; Codex - 2026-07-16 - begin
 LSTSR   CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
-        RET NZ
-; Codex - 2026-07-16 - end
-        XOR A
+        ; SAVE_FAT_SECTOR уже оставил Z/NZ и A результата. CF помечает
+        ; окончание BUtoFAT; это не скрывает ненулевую ошибку записи.
+        SCF
         RET
 LSTsr   CALL LSTSR
+        RET NZ                          ; ошибка промежуточного сброса GENBU
         LD HL,(UUHL),DE,GENBU,BC,4:LDIR
         LD (GARY),DE
 
@@ -1910,8 +1913,12 @@ SAFE_IO_RESULT:
         OR A
         RET
 ; Codex - 2026-07-16 - end
-        ASSERT $ <= #516D, исправления CORE32 не помещаются перед данными
-        DS #516D-$,0
+        ASSERT $ <= #516C, исправления CORE32 не помещаются перед GARY
+        DS #516C-$,0
+        ; Один байт сохраняет историческое размещение GARY и точных драйверов.
+        ; Страница FILEX хранится в операнде резидентного шлюза по #6A48.
+        DB #FF
+        ASSERT $ == #516D, изменился адрес GARY
 ; Codex - 2026-07-16 - end
 GARY    DS 2
 

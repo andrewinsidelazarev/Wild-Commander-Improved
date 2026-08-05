@@ -224,6 +224,8 @@ Remove-Item -LiteralPath $CoreSymbolPayload, $CoreSymbolMap, $CoreSymbolList, `
 if ($LASTEXITCODE -ne 0) { throw 'BOOT.ASM symbol pass failed.' }
 & python (Join-Path $ProjectRoot 'tools\make_core32_ext_symbols.py') `
     --source (Join-Path $ProjectRoot 'source\CORE32_EXT.ASM') `
+    --source (Join-Path $ProjectRoot 'source\plugins\filex\FILEX.ASM') `
+    --source (Join-Path $ProjectRoot 'source\plugins\filex\FILEX_RUNTIME.ASM') `
     --symbols $CoreSymbolMap `
     --output $CoreInterface
 if ($LASTEXITCODE -ne 0) { throw 'CORE32 extension interface generation failed.' }
@@ -266,6 +268,31 @@ if ($ExtensionRawHash -ne $ExtensionVerifyHash) {
 }
 Remove-Item -LiteralPath $ExtensionVerify -Force
 $global:LASTEXITCODE = 0
+
+# API 77 lives in a mandatory one-page type-#06 provider. Its installer is
+# position independent at #8000; the implementation is called at #C010.
+$FilexSource = Join-Path $ProjectRoot 'source\plugins\filex\FILEX.ASM'
+$FilexOutput = Join-Path $BuildDir 'FILEX.WMF'
+$FilexSymbols = Join-Path $BuildDir 'FILEX.sym'
+$FilexListing = Join-Path $BuildDir 'FILEX.lst'
+Remove-Item -LiteralPath $FilexOutput, $FilexSymbols, $FilexListing `
+    -Force -ErrorAction SilentlyContinue
+Push-Location -LiteralPath $ProjectRootAlias
+try {
+    & $SjasmPlus '--nologo' '--msg=err' `
+        "--sym=$ProjectRootAscii/Build/FILEX.sym" `
+        "--lst=$ProjectRootAscii/Build/FILEX.lst" `
+        "$ProjectRootAscii/source/plugins/filex/FILEX.ASM"
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { throw 'FILEX.ASM assembly failed.' }
+if (-not (Test-Path -LiteralPath $FilexOutput -PathType Leaf)) {
+    throw 'FILEX.WMF was not created.'
+}
+if ((Get-Item -LiteralPath $FilexOutput).Length -gt (512 + 0x4000)) {
+    throw 'FILEX.WMF exceeds one 16-KiB runtime page.'
+}
 # Codex - 2026-07-17 - end
 
 # Codex - 2026-07-16 - begin
@@ -315,6 +342,54 @@ if (Test-Path -LiteralPath $Core32TestSource -PathType Leaf) {
         throw 'CORE32T.WMF was not created.'
     }
 }
+
+# Отдельный автономный тест типа #03 вызывает новый API 77 через публичный
+# диспетчер. Он собирается всегда, но в боевой каталог exe не копируется.
+$FilexTestSource = Join-Path $ProjectRoot 'tests\core32_unreal\FILEXT.ASM'
+$FilexTestOutput = Join-Path $BuildDir 'FILEXT.WMF'
+if (Test-Path -LiteralPath $FilexTestSource -PathType Leaf) {
+    Remove-Item -LiteralPath $FilexTestOutput -Force -ErrorAction SilentlyContinue
+    Push-Location -LiteralPath $ProjectRootAlias
+    try {
+        & $SjasmPlus '--nologo' '--msg=err' `
+            "--lst=$ProjectRootAscii/Build/FILEXT.lst" `
+            "--sym=$ProjectRootAscii/Build/FILEXT.sym" `
+            "$ProjectRootAscii/tests/core32_unreal/FILEXT.ASM"
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'FILEXT.ASM assembly failed.' }
+    if (-not (Test-Path -LiteralPath $FilexTestOutput -PathType Leaf)) {
+        throw 'FILEXT.WMF was not created.'
+    }
+    if ((Get-Item -LiteralPath $FilexTestOutput).Length -gt (512 + 0x4000)) {
+        throw 'FILEXT.WMF exceeds one 16-KiB runtime page.'
+    }
+}
+
+# Минимальный тест настоящего заполненного тома отделён от общей регрессии:
+# его образ имеет ноль свободных кластеров и проверяет атомарный NO_SPACE.
+$FilexNoSpaceSource = Join-Path $ProjectRoot 'tests\core32_unreal\FILEXNST.ASM'
+$FilexNoSpaceOutput = Join-Path $BuildDir 'FILEXNST.WMF'
+if (Test-Path -LiteralPath $FilexNoSpaceSource -PathType Leaf) {
+    Remove-Item -LiteralPath $FilexNoSpaceOutput -Force -ErrorAction SilentlyContinue
+    Push-Location -LiteralPath $ProjectRootAlias
+    try {
+        & $SjasmPlus '--nologo' '--msg=err' `
+            "--lst=$ProjectRootAscii/Build/FILEXNST.lst" `
+            "--sym=$ProjectRootAscii/Build/FILEXNST.sym" `
+            "$ProjectRootAscii/tests/core32_unreal/FILEXNST.ASM"
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'FILEXNST.ASM assembly failed.' }
+    if (-not (Test-Path -LiteralPath $FilexNoSpaceOutput -PathType Leaf)) {
+        throw 'FILEXNST.WMF was not created.'
+    }
+    if ((Get-Item -LiteralPath $FilexNoSpaceOutput).Length -gt (512 + 0x4000)) {
+        throw 'FILEXNST.WMF exceeds one 16-KiB runtime page.'
+    }
+}
 # Codex - 2026-07-16 - end
 
 & python (Join-Path $ProjectRoot 'tools\pack_hobeta.py') $Payload $BootOutput
@@ -335,6 +410,13 @@ Get-ChildItem -LiteralPath $ReferenceExe -Recurse -File | ForEach-Object {
     }
 }
 
+# FILEX — обязательный type-#06 провайдер API 77. Он должен загрузиться до
+# остальных плагинов, записать свою физическую страницу и исчезнуть из меню.
+& python (Join-Path $ProjectRoot 'tools\install_filex_runtime.py') `
+    --provider $FilexOutput `
+    --wc-dir (Join-Path $ExeDir 'WC')
+if ($LASTEXITCODE -ne 0) { throw 'FILEX runtime installation failed.' }
+
 $HashReport = Join-Path $BuildDir 'hash-report.tsv'
 & python (Join-Path $ProjectRoot 'tools\verify_hashes.py') `
     --actual $ExeDir `
@@ -348,7 +430,10 @@ if ($HashExitCode -ne 0) {
         Import-Csv -LiteralPath $HashReport -Delimiter "`t" |
             Where-Object { $_.status -ne 'MATCH' }
     )
-    $ExpectedMismatchPaths = @('boot.$C', 'WC_History.txt', 'WC_todo.txt')
+    $ExpectedMismatchPaths = @(
+        'boot.$C', 'WC_History.txt', 'WC_todo.txt',
+        'WC/FILEX.WMF', 'WC/wc.ini'
+    )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
     $MissingExpected = @($ExpectedMismatchPaths | Where-Object { $MismatchPaths -inotcontains $_ })
@@ -356,7 +441,7 @@ if ($HashExitCode -ne 0) {
         $Mismatches.Count -ne $ExpectedMismatchPaths.Count) {
         throw "Hash verification failed. See $HashReport"
     }
-    Write-Warning 'boot.$C, WC_History.txt and WC_todo.txt intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX runtime/config and Improved history files intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.

@@ -21,6 +21,8 @@ AX_MNGC  EQU #68C1                      ; подключить страницу 
 AX_LOBU  EQU #B000                      ; буфер заголовка для запуска
 AX_AJT   EQU #70C3                      ; выполнить плагин из AX_LOBU
 AX_TYPE  EQU #06                        ; новый, ранее свободный тип автозапуска
+FILEX_PROVIDER_PAGE_ADDR EQU #6A48      ; операнд LD A,#page в резидентном шлюзе
+FILEX_PROVIDER_ENTRY     EQU #C010      ; постоянный вход в подключённой странице
 
 ; Замена CALL WCINI.PATH в последовательности старта: тот же размер вызова.
 AX_PATH:
@@ -30,11 +32,16 @@ AX_PATH:
 ; Обойти заголовки загруженных плагинов, выполнить каждый с типом #06 и сразу
 ; убрать его заголовок из таблицы, которую F11MENU показывает пользователю.
 AX_RUN:
+        ; Ноль в непосредственном операнде шлюза означает, что обязательный
+        ; FILEX.WMF ещё не зарегистрировался. Менеджер плагинов не может
+        ; затереть этот байт как обычную переменную состояния.
+        XOR A
+        LD (FILEX_PROVIDER_PAGE_ADDR),A
         ; PPGM — логический номер страницы плагина, а не текущее физическое
         ; отображение окна #C000. MNGC хранит фактическую страницу в #6003.
         ; Сохраняем именно её: следом идёт PATH, которому нужно прежнее окно.
         LD A,(#6003)
-        LD (AX_SAVED_PAGE),A
+        PUSH AF
         LD A,AX_PLHPG
         CALL AX_MNGC                       ; страница заголовков плагинов
         LD HL,#C000+197                 ; байт типа первого заголовка
@@ -72,16 +79,15 @@ AX_REMOVE_HEADER:
         PUSH HL                         ; начало удаляемого заголовка
         LD BC,512
         ADD HL,BC                       ; источник: следующий заголовок
-        PUSH HL
-        LD DE,(PHED)                    ; прежний конец таблицы
-        EX DE,HL
+        EX DE,HL                        ; DE — источник
+        LD HL,(PHED)                    ; прежний конец таблицы
         OR A
         SBC HL,DE                       ; длина хвоста после удаляемого слота
         LD B,H
         LD C,L
-        POP HL                          ; источник
-        POP DE                          ; приёмник
-        PUSH DE                         ; начало слота понадобится для перебора
+        POP HL                          ; приёмник
+        PUSH HL                         ; начало слота понадобится для перебора
+        EX DE,HL                        ; HL — источник, DE — приёмник
         LD A,B
         OR C
         JR Z,AX_HEADER_MOVED            ; LDIR с BC=0 скопировал бы 65536 байт
@@ -89,16 +95,42 @@ AX_REMOVE_HEADER:
 AX_HEADER_MOVED:
         LD (PHED),DE                    ; новый конец на 512 байт ниже
         POP HL
-        LD BC,197
+        LD C,197                        ; BC уже ноль: либо LDIR завершён, либо хвост пуст
         ADD HL,BC                       ; тип заголовка, занявшего удалённый слот
         LD BC,512
         RET
 
 ; Вернуть фактическое отображение окна #C000. PPGM мы не меняли.
 AX_DONE:
-        LD A,(AX_SAVED_PAGE)
-        CALL AX_MNGC
-        RET
+        POP AF
+        JP AX_MNGC
 
-AX_SAVED_PAGE:
-        DB 0
+; Первые 39 байтов INIT нужны только до загрузки плагинов. Их перенос в
+; свободный хвост освобождает постоянный диапазон #6A47..#6A6A под FILEX,
+; не меняя адреса INIT, L6011_139, TURBO и последующих процедур.
+INIT_RELOCATED:
+        LD      BC,#00AF
+        LD      A,#30
+        OUT     (C),A
+        LD      BC,#EFF7
+        LD      A,#80
+        OUT     (C),A
+        LD      B,#DF
+        LD      A,#0B
+        OUT     (C),A
+        LD      B,#BF
+        XOR     A
+        OUT     (C),A
+        LD      B,#DF
+        LD      A,#0C
+        OUT     (C),A
+        LD      B,#BF
+        LD      A,#01
+        OUT     (C),A
+        LD      B,#DF
+        JP      INIT_CONTINUE
+        DS      #BFFF-$,0
+        IFNDEF WDOS_SYMBOL_PASS
+        ASSERT  INIT_RELOCATED == #BFD4, изменился адрес перенесённого INIT
+        ASSERT  $ == #BFFF, изменился размер перенесённого INIT
+        ENDIF

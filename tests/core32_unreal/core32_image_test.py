@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
+import json
 import shutil
 import struct
 import types
@@ -21,6 +23,8 @@ APPEND_FILE = "FTPAPP.BIN"
 # Codex - 2026-07-27 - begin
 APPEND16_FILE = "APP16K.BIN"
 APPEND16_SIZE = 0x4000
+APPEND256_FILE = "APP256K.BIN"
+APPEND256_SIZE = 0x40000
 APPEND_GIPAG_RESULT_OFFSET = 13 + 20
 # Codex - 2026-07-27 - end
 APPEND_PAYLOAD = (
@@ -35,6 +39,16 @@ APPEND_PAYLOAD = (
 )
 # Codex - 2026-07-17 - end
 PLUGIN_NAME = "CORE32T.WMF"
+FILEX_PLUGIN_NAME = "FILEX.WMF"
+FILEX_TEST_PLUGIN_NAME = "FILEXT.WMF"
+FILEX_NO_SPACE_PLUGIN_NAME = "FILEXNST.WMF"
+FILEX_TEST_DIRECTORY = "FXT716"
+FILEX_RESULT = "FXRESULT.BIN"
+FILEX_MANIFEST = "FXPREP.BIN"
+FILEX_FULL_DIRECTORY = "FXFULL"
+FILEX_NO_SPACE_FILE = "NOSPACE.BIN"
+FILEX_NO_SPACE_RESULT = "NSRESULT.BIN"
+FILEX_FULL_FILLER = "FULLFILL.BIN"
 MAIN_RESULT = "C32RESULT.BIN"
 LONG_RESULT = "C32LONG.BIN"
 MARK_BEGIN = "; Codex - 2026-07-16 - begin"
@@ -65,6 +79,8 @@ def configure_ini(
     payload: bytes,
     left_driver: int | None = None,
     right_driver: int | None = None,
+    include_core32_test: bool = True,
+    filex_test_plugin_name: str = FILEX_TEST_PLUGIN_NAME,
 ) -> bytes:
 # Codex - 2026-07-17 - end
     text = payload.decode("cp866", errors="replace")
@@ -87,7 +103,12 @@ def configure_ini(
         if stripped == MARK_END and skip_marker:
             skip_marker = False
             continue
-        if upper == PLUGIN_NAME:
+        if upper in (
+            PLUGIN_NAME,
+            FILEX_PLUGIN_NAME,
+            FILEX_TEST_PLUGIN_NAME,
+            FILEX_NO_SPACE_PLUGIN_NAME,
+        ):
             continue
         if stripped.upper().startswith("SAVEPATHS="):
             line = "SavePaths=0; тест всегда начинается из корня"
@@ -112,7 +133,13 @@ def configure_ini(
             # сразу после заголовка превращался именно в такую строку, поэтому
             # маркер начала ставится перед секцией, а тестовый плагин остаётся
             # первой строкой внутри неё.
-            result.extend((MARK_BEGIN, line, PLUGIN_NAME, MARK_END))
+            # Провайдер API 77 — единственный одноразовый плагин типа #06.
+            # FILEXT запускается из меню как тип #03. Отдельный CORE32T можно
+            # исключить, чтобы автономный тест FILEX имел однозначный маршрут.
+            plugin_lines = [FILEX_PLUGIN_NAME, filex_test_plugin_name]
+            if include_core32_test:
+                plugin_lines.append(PLUGIN_NAME)
+            result.extend((MARK_BEGIN, line, *plugin_lines, MARK_END))
             inserted = True
         else:
             result.append(line)
@@ -131,15 +158,132 @@ def add_empty_short_entry(image: Fat32Image, directory_cluster: int, name: str) 
     return slot
 
 
+def write_fragmented_pair(
+    image: Fat32Image,
+    directory_cluster: int,
+    target_name: str,
+    target_payload: bytes,
+    filler_name: str,
+) -> tuple[list[int], list[int]]:
+    """Создать две чередующиеся двухкластерные цепочки без потерянных звеньев."""
+    if len(target_payload) != image.cluster_size * 2:
+        raise ValueError("Фрагментированный файл должен занимать ровно два кластера")
+    clusters = image.allocate_clusters(4)
+    target_chain = [clusters[0], clusters[2]]
+    filler_chain = [clusters[1], clusters[3]]
+    for chain in (target_chain, filler_chain):
+        image.set_fat(chain[0], chain[1])
+        image.set_fat(chain[1], 0x0FFFFFFF)
+
+    for index, cluster in enumerate(target_chain):
+        offset = image.cluster_offset(cluster)
+        begin = index * image.cluster_size
+        image.data[offset : offset + image.cluster_size] = target_payload[
+            begin : begin + image.cluster_size
+        ]
+    for index, cluster in enumerate(filler_chain):
+        offset = image.cluster_offset(cluster)
+        image.data[offset : offset + image.cluster_size] = bytes([0x70 + index]) * image.cluster_size
+
+    for name, chain, size in (
+        (target_name, target_chain, len(target_payload)),
+        (filler_name, filler_chain, image.cluster_size * 2),
+    ):
+        entries = UPDATE.make_file_entries(image, directory_cluster, name, chain[0], size)
+        slot = image.find_free_dir_slots(directory_cluster, len(entries))
+        image.write_dir_entries(directory_cluster, slot, entries)
+    return target_chain, filler_chain
+
+
+def prepare_filex_fixture(image: Fat32Image, root: int) -> None:
+    """Подготовить детерминированные объекты для автономного FILEXT.WMF."""
+    test_cluster = UPDATE.ensure_dir(image, root, FILEX_TEST_DIRECTORY)
+    cluster_size = image.cluster_size
+    UPDATE.write_file_any(image, test_cluster, FILEX_RESULT, b"HOSTPREP" + bytes(504))
+
+    fragmented = bytearray([0xA1]) * (cluster_size * 2)
+    fragmented[cluster_size - 17 : cluster_size] = bytes([0xB2]) * 17
+    fragmented[cluster_size : cluster_size * 2] = bytes([0xC3]) * cluster_size
+    fragmented[-20:] = bytes([0xD4]) * 20
+    fragment_chain, filler_chain = write_fragmented_pair(
+        image,
+        test_cluster,
+        "FRAGREAD.BIN",
+        bytes(fragmented),
+        "FRAGGAP.BIN",
+    )
+
+    UPDATE.write_file_any(image, test_cluster, "WRITE.BIN", bytes([0x11]) * (cluster_size * 2))
+    for name, value in (
+        ("TRUNCBG.BIN", 0x31),
+        ("TRUNCMID.BIN", 0x42),
+        ("TRUNCSEC.BIN", 0x53),
+        ("TRUNCCL.BIN", 0x64),
+        ("TRUNC0.BIN", 0x75),
+    ):
+        UPDATE.write_file_any(image, test_cluster, name, bytes([value]) * (cluster_size * 2))
+    zero_entry = image.find_entry(test_cluster, "TRUNC0.BIN")
+    if not zero_entry:
+        raise RuntimeError("Не удалось подготовить TRUNC0.BIN")
+    zero_chain = image.cluster_chain(zero_entry["cluster"])
+    UPDATE.write_file_any(image, test_cluster, "GROWZERO.BIN", bytes([0x5A]) * 13)
+
+    source_cluster = UPDATE.ensure_dir(image, test_cluster, "SRC")
+    destination_cluster = UPDATE.ensure_dir(image, test_cluster, "DST")
+    UPDATE.write_file_any(image, source_cluster, "MOVEA.BIN", b"MOVE-NEW-" * 73)
+    UPDATE.write_file_any(image, source_cluster, "REPLSRC.BIN", b"REPLACE-SOURCE-" * 61)
+    UPDATE.write_file_any(image, destination_cluster, "REPLDST.BIN", b"OLD-DESTINATION-" * 47)
+    replace_source = image.find_entry(source_cluster, "REPLSRC.BIN")
+    replace_old = image.find_entry(destination_cluster, "REPLDST.BIN")
+    if not replace_source or not replace_old:
+        raise RuntimeError("Не удалось подготовить файлы replace")
+    replace_source_chain = image.cluster_chain(replace_source["cluster"])
+    replace_old_chain = image.cluster_chain(replace_old["cluster"])
+
+    moved_directory = UPDATE.ensure_dir(image, source_cluster, "DIRSRC")
+    UPDATE.write_file_any(image, moved_directory, "INNER.TXT", b"directory payload")
+    UPDATE.ensure_dir(image, source_cluster, "EMPTYC")
+    nonempty = UPDATE.ensure_dir(image, destination_cluster, "NONEMPTY")
+    UPDATE.write_file_any(image, nonempty, "KEEP.TXT", b"must remain")
+    UPDATE.write_file_any(image, source_cluster, "COLLIDE.BIN", b"source collision")
+    UPDATE.write_file_any(image, destination_cluster, "COLLIDE.BIN", b"destination collision")
+    cycle = UPDATE.ensure_dir(image, source_cluster, "CYCLE")
+    UPDATE.ensure_dir(image, cycle, "CHILD")
+
+    UPDATE.write_file_any(image, test_cluster, "META.BIN", b"metadata")
+    UPDATE.write_file_any(image, test_cluster, "FAULTCAT.BIN", bytes([0x81]) * cluster_size)
+    UPDATE.write_file_any(image, test_cluster, "FAULTMET.BIN", b"metadata fault")
+    add_empty_short_entry(image, test_cluster, "FAULTFAT.BIN")
+    UPDATE.write_file_any(image, test_cluster, "FAULTFS.BIN", bytes([0x92]) * cluster_size)
+
+    manifest = {
+        "version": 1,
+        "cluster_size": cluster_size,
+        "fragment_chain": fragment_chain,
+        "filler_chain": filler_chain,
+        "zero_chain": zero_chain,
+        "replace_source_chain": replace_source_chain,
+        "replace_old_chain": replace_old_chain,
+    }
+    UPDATE.write_file_any(
+        image,
+        test_cluster,
+        FILEX_MANIFEST,
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("ascii"),
+    )
+
+
 # Codex - 2026-07-17 - begin
 def prepare_image(
     base: Path,
     image_path: Path,
     exe_root: Path,
     plugin: Path,
+    filex_test_plugin: Path,
     mode: str,
     left_driver: int | None = None,
     right_driver: int | None = None,
+    include_core32_test: bool = True,
 ) -> None:
 # Codex - 2026-07-17 - end
     if not base.is_file():
@@ -148,6 +292,8 @@ def prepare_image(
         raise FileNotFoundError(exe_root)
     if not plugin.is_file():
         raise FileNotFoundError(plugin)
+    if not filex_test_plugin.is_file():
+        raise FileNotFoundError(filex_test_plugin)
     image_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(base, image_path)
 
@@ -177,13 +323,19 @@ def prepare_image(
             raise RuntimeError("В корне образа отсутствует каталог WC")
         wc_cluster = wc_entry["cluster"]
         UPDATE.write_file_any(image, wc_cluster, PLUGIN_NAME, plugin.read_bytes())
+        UPDATE.write_file_any(
+            image,
+            wc_cluster,
+            FILEX_TEST_PLUGIN_NAME,
+            filex_test_plugin.read_bytes(),
+        )
         wc_ini = image.read_file(wc_cluster, "wc.ini")
 # Codex - 2026-07-17 - begin
         UPDATE.write_file_any(
             image,
             wc_cluster,
             "wc.ini",
-            configure_ini(wc_ini, left_driver, right_driver),
+            configure_ini(wc_ini, left_driver, right_driver, include_core32_test),
         )
 # Codex - 2026-07-17 - end
 
@@ -226,6 +378,8 @@ def prepare_image(
         if any(full_raw[offset] == 0 for offset in range(0, len(full_raw), 32)):
             raise RuntimeError("В полном каталоге EOC осталась запись #00")
 
+        prepare_filex_fixture(image, root)
+
         ext_flags = 0 if mode == "mirrored" else 0x0081
         put16(image.data, 40, ext_flags)
         first_free = next(
@@ -245,6 +399,142 @@ def prepare_image(
         print(f"Режим FAT: {mode}, BPB_ExtFlags=#{ext_flags:04X}")
         print(f"Первый свободный кластер перед Unreal: {first_free}")
         print(f"Каталог длинного имени: кластер {long_cluster}, целевой начальный слот 15")
+    finally:
+        image.save()
+
+
+def prepare_full_disk_image(
+    base: Path,
+    image_path: Path,
+    exe_root: Path,
+    filex_no_space_plugin: Path,
+    left_driver: int | None = None,
+    right_driver: int | None = None,
+) -> None:
+    """Создать FAT32-образ без единого свободного кластера для NO_SPACE."""
+    if not base.is_file():
+        raise FileNotFoundError(base)
+    if not exe_root.is_dir():
+        raise FileNotFoundError(exe_root)
+    if not filex_no_space_plugin.is_file():
+        raise FileNotFoundError(filex_no_space_plugin)
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(base, image_path)
+
+    image = Fat32Image(image_path)
+    try:
+        wc_entry = image.find_entry(image.root_cluster, "WC")
+        if not wc_entry:
+            wc_cluster = UPDATE.ensure_dir(image, image.root_cluster, "WC")
+            UPDATE.write_file_any(
+                image,
+                wc_cluster,
+                "wc.ini",
+                (exe_root / "WC" / "wc.ini").read_bytes(),
+            )
+        UPDATE.update_tree(image, exe_root)
+
+        root = image.root_cluster
+        wc_entry = image.find_entry(root, "WC")
+        if not wc_entry or not (wc_entry["attr"] & ATTR_DIRECTORY):
+            raise RuntimeError("В корне образа отсутствует каталог WC")
+        wc_cluster = wc_entry["cluster"]
+        UPDATE.write_file_any(
+            image,
+            wc_cluster,
+            FILEX_NO_SPACE_PLUGIN_NAME,
+            filex_no_space_plugin.read_bytes(),
+        )
+        wc_ini = image.read_file(wc_cluster, "wc.ini")
+        UPDATE.write_file_any(
+            image,
+            wc_cluster,
+            "wc.ini",
+            configure_ini(
+                wc_ini,
+                left_driver,
+                right_driver,
+                include_core32_test=False,
+                filex_test_plugin_name=FILEX_NO_SPACE_PLUGIN_NAME,
+            ),
+        )
+
+        full_cluster = UPDATE.ensure_dir(image, root, FILEX_FULL_DIRECTORY)
+        add_empty_short_entry(image, full_cluster, FILEX_NO_SPACE_FILE)
+        UPDATE.write_file_any(
+            image,
+            full_cluster,
+            FILEX_NO_SPACE_RESULT,
+            b"HOSTPREP" + bytes(504),
+        )
+
+        # Зарезервировать слот заполнителя до исчерпания FAT: расширить каталог
+        # после этого уже было бы невозможно.
+        filler_short = UPDATE.sanitize_short("FULLFILL", "BIN")
+        filler_slot = image.find_free_dir_slots(full_cluster, 1)
+        image.write_dir_entries(
+            full_cluster,
+            filler_slot,
+            [image.make_short_entry(filler_short, ATTR_ARCHIVE, 0, 0)],
+        )
+
+        cluster_limit = (
+            (image.total_sectors - image.first_data_sector) // image.spc + 2
+        )
+        free_clusters = [
+            cluster
+            for cluster in range(2, cluster_limit)
+            if image.get_fat(cluster) == 0
+        ]
+        if not free_clusters:
+            raise RuntimeError("Исходный образ уже не содержит свободных кластеров")
+        for index, cluster in enumerate(free_clusters):
+            next_cluster = (
+                free_clusters[index + 1]
+                if index + 1 < len(free_clusters)
+                else 0x0FFFFFFF
+            )
+            image.set_fat(cluster, next_cluster)
+
+        filler_size = len(free_clusters) * image.cluster_size
+        if filler_size > 0xFFFFFFFF:
+            raise RuntimeError("Заполнитель превышает 32-битный размер FAT")
+        image.write_dir_entries(
+            full_cluster,
+            filler_slot,
+            [
+                image.make_short_entry(
+                    filler_short,
+                    ATTR_ARCHIVE,
+                    free_clusters[0],
+                    filler_size,
+                )
+            ],
+        )
+
+        # FSInfo согласуется с реально заполненной FAT и не подсказывает
+        # несуществующий следующий свободный кластер.
+        fsinfo_sector = le16(image.data, 48)
+        backup_boot = le16(image.data, 50)
+        for sector in {fsinfo_sector, backup_boot + fsinfo_sector}:
+            if sector >= image.reserved:
+                continue
+            offset = sector * image.bps
+            put32(image.data, offset + 488, 0)
+            put32(image.data, offset + 492, 0xFFFFFFFF)
+
+        remaining = sum(
+            1
+            for cluster in range(2, cluster_limit)
+            if image.get_fat(cluster) == 0
+        )
+        if remaining != 0:
+            raise RuntimeError(f"После заполнения осталось кластеров: {remaining}")
+        print(f"Образ полного диска: {image_path}")
+        print(
+            f"Заполнитель: clusters={len(free_clusters)}, size={filler_size}, "
+            f"free=0, spc={image.spc}"
+        )
     finally:
         image.save()
 
@@ -269,6 +559,255 @@ def result_fields(payload: bytes) -> tuple[bytes, int, int, int, int, int]:
     return payload[:8], payload[8], payload[9], payload[10], payload[11], payload[12]
 
 
+def raw_short_entry(image: Fat32Image, directory_cluster: int, entry: dict) -> bytes:
+    raw = image.read_chain(directory_cluster)
+    offset = entry["index"] * 32
+    return raw[offset : offset + 32]
+
+
+def collect_orphan_clusters(image: Fat32Image) -> set[int]:
+    """Найти выделенные FAT-звенья, недоступные из дерева каталогов."""
+    reachable: set[int] = set()
+    visited_directories: set[int] = set()
+
+    def add_chain(start: int) -> None:
+        if start >= 2:
+            reachable.update(image.cluster_chain(start))
+
+    def visit_directory(cluster: int) -> None:
+        if cluster in visited_directories:
+            return
+        visited_directories.add(cluster)
+        add_chain(cluster)
+        for entry in image.parse_dir(cluster):
+            if entry["name"] in (".", "..") or entry["cluster"] < 2:
+                continue
+            add_chain(entry["cluster"])
+            if entry["attr"] & ATTR_DIRECTORY:
+                visit_directory(entry["cluster"])
+
+    visit_directory(image.root_cluster)
+    max_cluster = (image.total_sectors - image.first_data_sector) // image.spc + 1
+    allocated = {cluster for cluster in range(2, max_cluster + 1) if image.get_fat(cluster) != 0}
+    return allocated - reachable
+
+
+def inspect_filex_fixture(image: Fat32Image, failures: list[str]) -> None:
+    """Проверить результаты FILEXT после нового открытия FAT-образа хостом."""
+    root = image.root_cluster
+    test_entry = image.find_entry(root, FILEX_TEST_DIRECTORY)
+    if not test_entry or not (test_entry["attr"] & ATTR_DIRECTORY):
+        failures.append(f"Каталог {FILEX_TEST_DIRECTORY} не найден")
+        return
+    test_cluster = test_entry["cluster"]
+
+    try:
+        result = image.read_file(test_cluster, FILEX_RESULT)
+    except Exception as exc:
+        failures.append(f"Результат FILEX не читается: {exc}")
+        return
+    if len(result) < 80:
+        failures.append(f"Результат FILEX слишком короткий: {len(result)}")
+        return
+    signature, status, failed_test, api_error, stage, completed = result_fields(result)
+    if signature != b"FILEXT26":
+        failures.append(f"FILEX-тест не запускался: {signature!r}")
+    if status != 1 or failed_test != 0 or api_error != 0 or stage != 0xFF or completed != 7:
+        failures.append(
+            "FILEX-тест не прошёл: "
+            f"status=#{status:02X}, test={failed_test}, api=#{api_error:02X}, "
+            f"stage={stage}, completed={completed}"
+        )
+    read_calls = result[13]
+    if not 2 <= read_calls < 5:
+        failures.append(f"READ_AT выполнил {read_calls} низкоуровневых чтений вместо 2..4")
+    if result[14] == 0 or result[16] == 0 or result[17] == 0:
+        failures.append(
+            "Инъекция отказов не вернула ошибку: "
+            f"catalog=#{result[14]:02X}, FAT=#{result[16]:02X}, FSInfo=#{result[17]:02X}"
+        )
+    if result[15] != 0x21:
+        failures.append(f"Отказ SET_METADATA имеет status=#{result[15]:02X}, ожидался MEDIA #21")
+
+    fs = result[32 : 32 + 48]
+    expected_clusters = (image.total_sectors - image.first_data_sector) // image.spc
+    if fs[0] != 48 or fs[1] != 1 or le16(fs, 4) != 512 or fs[3] != image.spc:
+        failures.append("GET_FS_INFO вернул неверную версию или геометрию")
+    if le32(fs, 8) != expected_clusters:
+        failures.append(
+            f"GET_FS_INFO total_clusters={le32(fs, 8)}, ожидалось {expected_clusters}"
+        )
+
+    try:
+        manifest = json.loads(image.read_file(test_cluster, FILEX_MANIFEST).decode("ascii"))
+    except Exception as exc:
+        failures.append(f"Манифест FILEX не читается: {exc}")
+        return
+    cluster_size = manifest["cluster_size"]
+    if cluster_size != image.cluster_size:
+        failures.append(f"Манифест cluster_size={cluster_size}, образ={image.cluster_size}")
+
+    fragment_entry = image.find_entry(test_cluster, "FRAGREAD.BIN")
+    if not fragment_entry:
+        failures.append("FRAGREAD.BIN исчез")
+    else:
+        chain = image.cluster_chain(fragment_entry["cluster"])
+        if chain != manifest["fragment_chain"] or len(chain) != 2 or chain[1] == chain[0] + 1:
+            failures.append(f"Фрагментированная цепочка изменилась: {chain}")
+        expected = bytearray([0xA1]) * (cluster_size * 2)
+        expected[cluster_size - 17 : cluster_size] = bytes([0xB2]) * 17
+        expected[cluster_size : cluster_size * 2] = bytes([0xC3]) * cluster_size
+        expected[-20:] = bytes([0xD4]) * 20
+        if image.read_file(test_cluster, "FRAGREAD.BIN") != bytes(expected):
+            failures.append("FRAGREAD.BIN повреждён позиционным чтением")
+
+    write_expected = bytearray([0x11]) * (cluster_size * 2)
+    write_expected[3:23] = bytes([0xA1]) * 20
+    write_expected[509:519] = bytes([0xB2]) * 10
+    write_expected[cluster_size - 7 : cluster_size + 13] = bytes([0xC3]) * 20
+    write_expected[cluster_size * 2 - 8 : cluster_size * 2 + 24] = bytes([0xD4]) * 32
+    try:
+        write_actual = image.read_file(test_cluster, "WRITE.BIN")
+    except Exception as exc:
+        failures.append(f"WRITE.BIN не читается: {exc}")
+    else:
+        if write_actual != bytes(write_expected):
+            failures.append(
+                f"WRITE.BIN отличается: size={len(write_actual)}, "
+                f"SHA-256={hashlib.sha256(write_actual).hexdigest()}"
+            )
+
+    for name, expected_size in (
+        ("TRUNCBG.BIN", 1),
+        ("TRUNCMID.BIN", 513),
+        ("TRUNCSEC.BIN", 512),
+        ("TRUNCCL.BIN", cluster_size),
+    ):
+        entry = image.find_entry(test_cluster, name)
+        if not entry or entry["size"] != expected_size:
+            failures.append(f"{name}: размер {entry['size'] if entry else None}, ожидался {expected_size}")
+    begin_entry = image.find_entry(test_cluster, "TRUNCBG.BIN")
+    if begin_entry:
+        raw = image.read_chain(begin_entry["cluster"])
+        if any(raw[1:512]):
+            failures.append("TRUNCBG.BIN: хвост первого сектора не обнулён")
+    middle_entry = image.find_entry(test_cluster, "TRUNCMID.BIN")
+    if middle_entry:
+        raw = image.read_chain(middle_entry["cluster"])
+        if any(raw[513:1024]):
+            failures.append("TRUNCMID.BIN: хвост второго сектора не обнулён")
+
+    zero = image.find_entry(test_cluster, "TRUNC0.BIN")
+    if not zero or zero["size"] != 0 or zero["cluster"] != 0:
+        failures.append("TRUNC0.BIN не стал пустым файлом с cluster=0")
+    for cluster in manifest["zero_chain"]:
+        if image.get_fat(cluster) != 0:
+            failures.append(f"TRUNC0.BIN не освободил кластер {cluster}")
+
+    grow = image.find_entry(test_cluster, "GROWZERO.BIN")
+    if not grow:
+        failures.append("GROWZERO.BIN исчез")
+    else:
+        payload = image.read_file(test_cluster, "GROWZERO.BIN")
+        if payload != bytes([0x5A]) * 13 + bytes(cluster_size + 37 - 13):
+            failures.append("GROWZERO.BIN имеет неверный размер или ненулевой новый диапазон")
+
+    source = image.find_entry(test_cluster, "SRC")
+    destination = image.find_entry(test_cluster, "DST")
+    if not source or not destination:
+        failures.append("После MOVE отсутствует SRC или DST")
+    else:
+        src_cluster = source["cluster"]
+        dst_cluster = destination["cluster"]
+        for old_name in ("MOVEA.BIN", "REPLSRC.BIN", "DIRSRC"):
+            if image.find_entry(src_cluster, old_name):
+                failures.append(f"Источник {old_name} остался после MOVE")
+        moved = image.find_entry(dst_cluster, "MOVED.BIN")
+        if not moved or image.read_file(dst_cluster, "MOVED.BIN") != b"MOVE-NEW-" * 73:
+            failures.append("MOVED.BIN отсутствует или повреждён")
+        replaced = image.find_entry(dst_cluster, "REPLDST.BIN")
+        if not replaced or image.read_file(dst_cluster, "REPLDST.BIN") != b"REPLACE-SOURCE-" * 61:
+            failures.append("REPLDST.BIN не содержит данные источника")
+        elif image.cluster_chain(replaced["cluster"]) != manifest["replace_source_chain"]:
+            failures.append("REPLDST.BIN получил не исходную FAT-цепочку")
+        for cluster in manifest["replace_old_chain"]:
+            if image.get_fat(cluster) != 0:
+                failures.append(f"Replace не освободил старый кластер назначения {cluster}")
+        moved_dir = image.find_entry(dst_cluster, "DIRMOVED")
+        if not moved_dir or not (moved_dir["attr"] & ATTR_DIRECTORY):
+            failures.append("DIRMOVED не найден после межкаталожного MOVE")
+        else:
+            inner = image.find_entry(moved_dir["cluster"], "INNER.TXT")
+            if not inner or image.read_file(moved_dir["cluster"], "INNER.TXT") != b"directory payload":
+                failures.append("Содержимое DIRMOVED повреждено")
+            raw = image.read_chain(moved_dir["cluster"])
+            parent_cluster = (le16(raw, 52) << 16) | le16(raw, 58)
+            if parent_cluster != dst_cluster:
+                failures.append(f"DIRMOVED/..={parent_cluster}, ожидался {dst_cluster}")
+        if not image.find_entry(src_cluster, "EMPTYC"):
+            failures.append("EMPTYC исчез после отказа замены непустого каталога")
+        nonempty = image.find_entry(dst_cluster, "NONEMPTY")
+        if not nonempty or not image.find_entry(nonempty["cluster"], "KEEP.TXT"):
+            failures.append("NONEMPTY изменён после ожидаемого NOT_EMPTY")
+        for parent_cluster, payload in (
+            (src_cluster, b"source collision"),
+            (dst_cluster, b"destination collision"),
+        ):
+            collision = image.find_entry(parent_cluster, "COLLIDE.BIN")
+            if not collision or image.read_file(parent_cluster, "COLLIDE.BIN") != payload:
+                failures.append("Collision без replace изменил один из файлов")
+        cycle = image.find_entry(src_cluster, "CYCLE")
+        if not cycle or not image.find_entry(cycle["cluster"], "CHILD"):
+            failures.append("Циклический MOVE изменил CYCLE/CHILD")
+
+    metadata = image.find_entry(test_cluster, "META.BIN")
+    if not metadata:
+        failures.append("META.BIN исчез")
+    else:
+        raw = raw_short_entry(image, test_cluster, metadata)
+        checks = {
+            "attr": (raw[11], 0x26),
+            "create_tenth": (raw[13], 0x37),
+            "create_time": (le16(raw, 14), 0x1234),
+            "create_date": (le16(raw, 16), 0x5678),
+            "access_date": (le16(raw, 18), 0x3456),
+            "write_time": (le16(raw, 22), 0x4567),
+            "write_date": (le16(raw, 24), 0x789A),
+        }
+        for field, (actual, expected) in checks.items():
+            if actual != expected:
+                failures.append(f"META.BIN {field}=#{actual:X}, ожидалось #{expected:X}")
+
+    for name, expected_size, expected_payload in (
+        ("FAULTCAT.BIN", cluster_size, bytes([0x81]) * cluster_size),
+        ("FAULTFS.BIN", cluster_size, bytes([0x92]) * cluster_size),
+    ):
+        entry = image.find_entry(test_cluster, name)
+        if not entry or entry["size"] != expected_size:
+            failures.append(f"{name} опубликовал ложный размер")
+        elif image.read_file(test_cluster, name) != expected_payload:
+            failures.append(f"{name} изменил видимые данные после отката")
+    fault_fat = image.find_entry(test_cluster, "FAULTFAT.BIN")
+    if not fault_fat or fault_fat["size"] != 0 or fault_fat["cluster"] != 0:
+        failures.append("FAULTFAT.BIN изменился после отказа FAT")
+    fault_meta = image.find_entry(test_cluster, "FAULTMET.BIN")
+    if fault_meta:
+        raw = raw_short_entry(image, test_cluster, fault_meta)
+        if raw[11] != ATTR_ARCHIVE or any(raw[13:20]) or any(raw[22:26]):
+            failures.append("FAULTMET.BIN опубликовал метаданные после отказа каталога")
+
+    orphans = collect_orphan_clusters(image)
+    if orphans:
+        failures.append(f"После транзакций остались потерянные FAT-кластеры: {sorted(orphans)[:16]}")
+
+    print(
+        "FILEX: "
+        f"status=#{status:02X}, completed={completed}, read_calls={read_calls}, "
+        f"faults={result[14]:02X}/{result[15]:02X}/{result[16]:02X}/{result[17]:02X}, "
+        f"WRITE SHA-256={hashlib.sha256(bytes(write_expected)).hexdigest()}"
+    )
+
+
 def inspect_image(image_path: Path) -> int:
     failures: list[str] = []
     image = Fat32Image(image_path)
@@ -283,6 +822,7 @@ def inspect_image(image_path: Path) -> int:
             )
         # Codex - 2026-07-17 - end
         active_fat, mirrored = select_active_fat(image)
+        inspect_filex_fixture(image, failures)
         root = image.root_cluster
         test_entry = image.find_entry(root, TEST_DIRECTORY)
         if not test_entry or not (test_entry["attr"] & ATTR_DIRECTORY):
@@ -294,6 +834,8 @@ def inspect_image(image_path: Path) -> int:
         main_fields = None
         main_append_gipag_calls = None
         long_fields = None
+        append256_evidence = None
+        append256_chain: list[int] = []
         persistent_entries = []
         if test_cluster:
             try:
@@ -424,6 +966,71 @@ def inspect_image(image_path: Path) -> int:
                                 f"Прочитано {len(payload)} байт {APPEND16_FILE}, "
                                 f"ожидалось {APPEND16_SIZE}"
                             )
+
+            # Шестнадцать APPEND по 16 КиБ обязаны расширить один и тот же файл
+            # до 256 КиБ, выделив точное число кластеров для текущего SPC.
+            # Проверка выполняется уже после штатного закрытия Unreal, напрямую
+            # по каталогу и FAT, поэтому опубликованный размер не подменяет
+            # доказательство реально построенной цепочки и читаемых данных.
+            append256_entry = image.find_entry(test_cluster, APPEND256_FILE)
+            if not append256_entry:
+                failures.append(f"Файл дописывания {APPEND256_FILE} не создан")
+            else:
+                persistent_entries.append(append256_entry)
+                if append256_entry["size"] != APPEND256_SIZE:
+                    failures.append(
+                        f"Размер {APPEND256_FILE} равен {append256_entry['size']}, "
+                        f"ожидалось {APPEND256_SIZE}"
+                    )
+                if append256_entry["cluster"] < 2:
+                    failures.append(
+                        f"У непустого {APPEND256_FILE} отсутствует первый кластер"
+                    )
+                else:
+                    chain = image.cluster_chain(append256_entry["cluster"])
+                    append256_chain = chain
+                    bytes_per_cluster = image.bps * image.spc
+                    expected_clusters = (
+                        APPEND256_SIZE + bytes_per_cluster - 1
+                    ) // bytes_per_cluster
+                    if len(chain) != expected_clusters:
+                        failures.append(
+                            f"Цепочка {APPEND256_FILE} содержит {len(chain)} кластеров, "
+                            f"ожидалось {expected_clusters}"
+                        )
+                    if len(set(chain)) != len(chain):
+                        failures.append(
+                            f"Цепочка {APPEND256_FILE} содержит повторный кластер"
+                        )
+                    try:
+                        payload = image.read_file(test_cluster, APPEND256_FILE)
+                    except Exception as exc:
+                        failures.append(
+                            f"Файл {APPEND256_FILE} не читается: {exc}"
+                        )
+                    else:
+                        append256_evidence = (
+                            append256_entry["size"],
+                            len(chain),
+                            expected_clusters,
+                            hashlib.sha256(payload).hexdigest(),
+                        )
+                        if len(payload) != APPEND256_SIZE:
+                            failures.append(
+                                f"Прочитано {len(payload)} байт {APPEND256_FILE}, "
+                                f"ожидалось {APPEND256_SIZE}"
+                            )
+                        elif any(
+                            payload[offset : offset + APPEND16_SIZE]
+                            != payload[:APPEND16_SIZE]
+                            for offset in range(
+                                APPEND16_SIZE, APPEND256_SIZE, APPEND16_SIZE
+                            )
+                        ):
+                            failures.append(
+                                f"Не все 16 окон APPEND в {APPEND256_FILE} "
+                                "совпадают побайтово"
+                            )
             # Codex - 2026-07-27 - end
             # Codex - 2026-07-17 - end
 
@@ -545,6 +1152,26 @@ def inspect_image(image_path: Path) -> int:
                     failures.append(
                         f"Неактивная FAT0 была изменена для кластера {cluster}: #{inactive_value:08X}"
                     )
+            # Для большого APPEND проверяется каждое выделенное звено, а не
+            # только первый кластер каталожной записи. Это ловит частичную
+            # запись цепочки одновременно в активную и запрещённую FAT.
+            for cluster in append256_chain:
+                active_value = le32(
+                    image.data, image.fat_offset(cluster, 1)
+                ) & 0x0FFFFFFF
+                inactive_value = le32(
+                    image.data, image.fat_offset(cluster, 0)
+                ) & 0x0FFFFFFF
+                if active_value == 0:
+                    failures.append(
+                        f"Активная FAT1 не содержит звено {cluster} "
+                        f"цепочки {APPEND256_FILE}"
+                    )
+                if inactive_value != 0:
+                    failures.append(
+                        f"Неактивная FAT0 изменена в звене {cluster} "
+                        f"цепочки {APPEND256_FILE}: #{inactive_value:08X}"
+                    )
 
         # Codex - 2026-07-16 - begin
         fsinfo_sector = le16(image.data, 48)
@@ -561,6 +1188,13 @@ def inspect_image(image_path: Path) -> int:
         # Codex - 2026-07-16 - end
 
         print(f"Активная FAT: {active_fat}; зеркалирование: {'да' if mirrored else 'нет'}")
+        if append256_evidence is not None:
+            size, cluster_count, expected_clusters, digest = append256_evidence
+            print(
+                f"{APPEND256_FILE}: size={size}, clusters={cluster_count}/"
+                f"{expected_clusters}, sectors={cluster_count * image.spc}, "
+                f"SHA-256={digest}"
+            )
     finally:
         image.save()
 
@@ -570,6 +1204,130 @@ def inspect_image(image_path: Path) -> int:
             print(f"  - {failure}")
         return 1
     print("ПРОЙДЕНО: образ и результаты CORE32 согласованы")
+    return 0
+
+
+def inspect_filex_image(image_path: Path) -> int:
+    """Проверить только автономный FILEXT после штатного закрытия Unreal."""
+    failures: list[str] = []
+    image = Fat32Image(image_path)
+    try:
+        expected_image_size = image.total_sectors * image.bps
+        if len(image.data) != expected_image_size:
+            failures.append(
+                f"Размер образа {len(image.data)} байт, ожидалось {expected_image_size}"
+            )
+        select_active_fat(image)
+        inspect_filex_fixture(image, failures)
+    finally:
+        image.save()
+
+    if failures:
+        print("FILEX UNREAL FAIL:")
+        for failure in failures:
+            print(f"  - {failure}")
+        return 1
+    print("FILEX UNREAL PASS")
+    return 0
+
+
+def inspect_full_disk_image(image_path: Path) -> int:
+    """Проверить NO_SPACE и атомарность размера после нового открытия образа."""
+    failures: list[str] = []
+    image = Fat32Image(image_path)
+    try:
+        expected_image_size = image.total_sectors * image.bps
+        if len(image.data) != expected_image_size:
+            failures.append(
+                f"Размер образа {len(image.data)} байт, ожидалось {expected_image_size}"
+            )
+        select_active_fat(image)
+        root = image.root_cluster
+        directory = image.find_entry(root, FILEX_FULL_DIRECTORY)
+        if not directory or not (directory["attr"] & ATTR_DIRECTORY):
+            failures.append(f"Каталог {FILEX_FULL_DIRECTORY} не найден")
+            full_cluster = 0
+        else:
+            full_cluster = directory["cluster"]
+
+        result = b""
+        if full_cluster:
+            try:
+                result = image.read_file(full_cluster, FILEX_NO_SPACE_RESULT)
+            except Exception as exc:
+                failures.append(f"Результат полного диска не читается: {exc}")
+            no_space = image.find_entry(full_cluster, FILEX_NO_SPACE_FILE)
+            if not no_space:
+                failures.append(f"Файл {FILEX_NO_SPACE_FILE} не найден")
+            elif no_space["size"] != 0 or no_space["cluster"] != 0:
+                failures.append(
+                    f"После NO_SPACE опубликованы size={no_space['size']} "
+                    f"cluster={no_space['cluster']}"
+                )
+
+            filler = image.find_entry(full_cluster, FILEX_FULL_FILLER)
+            if not filler or filler["cluster"] < 2:
+                failures.append(f"Заполнитель {FILEX_FULL_FILLER} не найден")
+                filler_clusters = 0
+            else:
+                filler_chain = image.cluster_chain(filler["cluster"])
+                filler_clusters = len(filler_chain)
+                if filler["size"] != filler_clusters * image.cluster_size:
+                    failures.append(
+                        f"Размер заполнителя {filler['size']} не совпадает с "
+                        f"цепочкой {filler_clusters} кластеров"
+                    )
+        else:
+            filler_clusters = 0
+
+        if len(result) < 12:
+            failures.append(f"Результат полного диска слишком короткий: {len(result)}")
+            status = api_status = stage = block_status = 0
+        else:
+            signature = result[:8]
+            status, api_status, stage, block_status = result[8:12]
+            if signature != b"FILEXNS1":
+                failures.append(f"Тест полного диска не запускался: {signature!r}")
+            if status != 1 or stage != 0xFF:
+                failures.append(
+                    f"Тест полного диска не завершён: status=#{status:02X}, "
+                    f"stage=#{stage:02X}"
+                )
+            if api_status != 0x22 or block_status != 0x22:
+                failures.append(
+                    f"SET_EOF32 вернул A=#{api_status:02X}, "
+                    f"block=#{block_status:02X}, ожидался NO_SPACE #22"
+                )
+
+        cluster_limit = (
+            (image.total_sectors - image.first_data_sector) // image.spc + 2
+        )
+        free_clusters = sum(
+            1
+            for cluster in range(2, cluster_limit)
+            if image.get_fat(cluster) == 0
+        )
+        if free_clusters != 0:
+            failures.append(f"После теста свободно кластеров: {free_clusters}, ожидался 0")
+        orphans = collect_orphan_clusters(image)
+        if orphans:
+            failures.append(
+                f"После NO_SPACE остались потерянные FAT-кластеры: {sorted(orphans)[:16]}"
+            )
+        print(
+            f"FILEX FULL: status=#{status:02X}, api=#{api_status:02X}, "
+            f"block=#{block_status:02X}, free={free_clusters}, "
+            f"filler_clusters={filler_clusters}"
+        )
+    finally:
+        image.save()
+
+    if failures:
+        print("FILEX FULL UNREAL FAIL:")
+        for failure in failures:
+            print(f"  - {failure}")
+        return 1
+    print("FILEX FULL UNREAL PASS")
     return 0
 
 
@@ -711,14 +1469,42 @@ def main() -> int:
     prepare_parser.add_argument("--image", type=Path, required=True)
     prepare_parser.add_argument("--exe", type=Path, required=True)
     prepare_parser.add_argument("--plugin", type=Path, required=True)
+    prepare_parser.add_argument(
+        "--filex-test-plugin",
+        type=Path,
+        default=PROJECT_ROOT / "Build" / FILEX_TEST_PLUGIN_NAME,
+    )
     prepare_parser.add_argument("--mode", choices=("mirrored", "active1"), default="mirrored")
+    prepare_parser.add_argument(
+        "--filex-only",
+        action="store_true",
+        help="не добавлять CORE32T в wc.ini; оставить один автозапуск FILEX",
+    )
 # Codex - 2026-07-17 - begin
     prepare_parser.add_argument("--left-driver", type=int, choices=range(7))
     prepare_parser.add_argument("--right-driver", type=int, choices=range(7))
 # Codex - 2026-07-17 - end
 
+    prepare_full_parser = subparsers.add_parser("prepare-full")
+    prepare_full_parser.add_argument("--base", type=Path, required=True)
+    prepare_full_parser.add_argument("--image", type=Path, required=True)
+    prepare_full_parser.add_argument("--exe", type=Path, required=True)
+    prepare_full_parser.add_argument(
+        "--filex-no-space-plugin",
+        type=Path,
+        default=PROJECT_ROOT / "Build" / FILEX_NO_SPACE_PLUGIN_NAME,
+    )
+    prepare_full_parser.add_argument("--left-driver", type=int, choices=range(7))
+    prepare_full_parser.add_argument("--right-driver", type=int, choices=range(7))
+
     inspect_parser = subparsers.add_parser("inspect")
     inspect_parser.add_argument("--image", type=Path, required=True)
+
+    inspect_filex_parser = subparsers.add_parser("inspect-filex")
+    inspect_filex_parser.add_argument("--image", type=Path, required=True)
+
+    inspect_full_parser = subparsers.add_parser("inspect-full")
+    inspect_full_parser.add_argument("--image", type=Path, required=True)
 
 # Codex - 2026-07-17 - begin
     ui_parser = subparsers.add_parser("inspect-ui")
@@ -736,21 +1522,37 @@ def main() -> int:
     if args.command == "format-base":
         return format_fat32_base(args.image, args.total_sectors, args.spc)
 # Codex - 2026-07-17 - end
+    if args.command == "prepare-full":
+        prepare_full_disk_image(
+            args.base,
+            args.image,
+            args.exe,
+            args.filex_no_space_plugin,
+            args.left_driver,
+            args.right_driver,
+        )
+        return 0
     if args.command == "prepare":
         prepare_image(
             args.base,
             args.image,
             args.exe,
             args.plugin,
+            args.filex_test_plugin,
             args.mode,
             args.left_driver,
             args.right_driver,
+            not args.filex_only,
         )
         return 0
 # Codex - 2026-07-17 - begin
     if args.command == "inspect-ui":
         return inspect_ui_image(args.image, args.scenario)
 # Codex - 2026-07-17 - end
+    if args.command == "inspect-filex":
+        return inspect_filex_image(args.image)
+    if args.command == "inspect-full":
+        return inspect_full_disk_image(args.image)
     return inspect_image(args.image)
 
 

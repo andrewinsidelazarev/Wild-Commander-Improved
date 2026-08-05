@@ -1,0 +1,2 @@
+# История релиза должна оставаться текстом: Git хранит LF, Windows выдаёт CRLF.
+exe/WC_History.txt text eol=crlf

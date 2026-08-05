@@ -1670,25 +1670,44 @@ L6011_137:
 
 INIT:
 L6011_138:
-        LD      BC,#00AF
-        LD      A,#30
-        OUT     (C),A
-        LD      BC,#EFF7
-        LD      A,#80
-        OUT     (C),A
-        LD      B,#DF
-        LD      A,#0B
-        OUT     (C),A
-        LD      B,#BF
-        XOR     A
-        OUT     (C),A
-        LD      B,#DF
-        LD      A,#0C
-        OUT     (C),A
-        LD      B,#BF
-        LD      A,#01
-        OUT     (C),A
-        LD      B,#DF
+        JP      INIT_RELOCATED
+
+; После одноразового INIT этот диапазон остаётся резидентным и не переписывается
+; PLresCP. Шлюз API 77 доступен одновременно с плагином в #8000..#BFFF и
+; провайдером FILEX в #C000..#FFFF. Возвращённые A и флаги временно проходят
+; через BC: провайдер вправе менять альтернативный AF, а MNGC сохраняет BC.
+WDOS_FILEX_GATE:
+FILEX_PROVIDER_PAGE_LOAD:
+        LD      A,#00                   ; операнд патчит установщик FILEX.WMF
+FILEX_PROVIDER_PAGE_PATCH EQU FILEX_PROVIDER_PAGE_LOAD+1
+        ASSERT  FILEX_PROVIDER_PAGE_PATCH == FILEX_PROVIDER_PAGE_ADDR, изменился адрес страницы FILEX
+        OR      A
+        JR      Z,FILEX_NOT_INSTALLED
+        LD      B,A
+        LD      A,(#6003)
+        PUSH    AF
+        LD      A,B
+        CALL    L6011_114
+        CALL    FILEX_PROVIDER_ENTRY
+        PUSH    AF
+        POP     BC
+        POP     AF
+        CALL    L6011_114
+        PUSH    BC
+        POP     AF
+        RET
+
+FILEX_NOT_INSTALLED:
+        LD      A,#15                   ; FILEX_STATUS_NO_CONTEXT
+        LD      DE,28                   ; FILEX_P_STATUS
+        ADD     HL,DE
+        LD      (HL),A
+        OR      A
+        RET
+        DS      #6A6B-$,0
+        ASSERT  $ == #6A6B, шлюз FILEX сдвинул продолжение INIT
+
+INIT_CONTINUE:
         LD      A,#F0
         OUT     (C),A
         LD      B,#BF
@@ -1799,10 +1818,13 @@ XTMRKFL:
         CALL    L6011_188
         JP      L6011_146
 
-; API 55: зарезервированный шлюз TMRKNXT; точная реализация ничего не делает.
-XTMRKNX:
+; API 77: подключить текущую файловую страницу к #0000, вызвать резидентный
+; шлюз FILEX в таблице CORE32 и восстановить прежнюю страницу.
+; Девятибайтовый слот прежнего зарезервированного API 55 переиспользован без
+; сдвига всех последующих адресов MD20; API 55 теперь указывает прямо на FEX.
+XFILEX:
         CALL    L6011_145
-        CALL    L6011_202
+        CALL    #402D
         JP      L6011_146
 
 ; API 56: открыть каталог, описанный сохранённым путём/кластером.
@@ -2734,7 +2756,7 @@ FUN:
 
 FEX:
 ; Codex - 2026-07-17 - begin
-        RET                             ; Пункты 53, 77 и 82 используют этот пустой обработчик.
+        RET                             ; Пункты 53, 55 и 82 используют этот пустой обработчик.
 ; Codex - 2026-07-17 - end
 
 ; 87 двухбайтовых адресов API. Диапазон #6FEF..#709C является данными,
@@ -2798,7 +2820,7 @@ FUX:
         DW      FEX                     ; 53 FEX       — зарезервированный пустой шлюз.
 ; Codex - 2026-07-17 - end
         DW      XTMRKFL                 ; 54 XTMRKFL   — найти и отметить файл.
-        DW      XTMRKNX                 ; 55 XTMRKNX   — зарезервированный пустой шлюз.
+        DW      FEX                     ; 55 FEX       — зарезервированный пустой шлюз.
         DW      XADIR                   ; 56 XADIR     — открыть сохранённый каталог.
         DW      XSTREAM                 ; 57 XSTREAM   — выполнить потоковую файловую команду.
         DW      XXTETY2                 ; 58 XXTETY2   — получить запись через NXTETY2.
@@ -2822,7 +2844,7 @@ FUX:
 ; Codex - 2026-07-17 - begin
         DW      XAPPEND                 ; 76 XAPPEND   — дописать байты в конец найденного файла.
 ; Codex - 2026-07-17 - end
-        DW      FEX                     ; 77 FEX       — пустой обработчик.
+        DW      XFILEX                  ; 77 XFILEX    — единый расширенный файловый API.
         DW      MNG0_PL                 ; 78 MNG0_PL   — подключить страницу плагина к #0000.
         DW      MNG8_PL                 ; 79 MNG8_PL   — подключить страницу плагина к #8000.
         DW      MNG0VPL                 ; 80 MNG0VPL   — подключить видеостраницу к #0000.

@@ -41,5 +41,6 @@ ID_ZERO_CLUSTER_TAIL          EQU 36
 ID_COPY_ENTRY_AND_CAPTURE     EQU 37
 ID_APPEND_BYTES               EQU 38
 ID_COPY_TO_ENTRY              EQU 39
-ID_COUNT                      EQU 40
+ID_FILEX_CONTEXT_BRIDGE       EQU 40
+ID_COUNT                      EQU 41
 ; Codex - 2026-07-17 - end
