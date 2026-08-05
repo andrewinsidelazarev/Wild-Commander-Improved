@@ -166,9 +166,18 @@ PLUGIN  LD (DAHL),HL,(DADE),DE
 
         LD BC,CYC,A,CACHE:OUT (C),A; Cache ON (#8000-#BFFF only)
 
-        CALL LOAD
+        CALL LOAD:JR Z,PLUGIN_LOAD_OK
 
+; При ошибке чтения не открываем редактор с частично заполненным буфером.
         CALL GEDPL
+        LD IX,ERWND:CALL PRWOW
+        LD HL,MSG_READ_ERROR,DE,#0100:CALL TXTPR
+        CALL USPO,NUSP
+        CALL RRESB
+        XOR A
+        RET
+
+PLUGIN_LOAD_OK CALL GEDPL
         LD IX,PLWND:CALL PRWOW
 
         CALL NAMETOH
@@ -551,7 +560,11 @@ COLORS  LD L,E,E,%10000000
 ;Default Color to Line
         PUSH HL
         LD A,DFCOL
- .90     LD (HL),A:INC L
+; В исходном ALASM префикс .90 повторял всю цепочку команд в строке.
+; Для sjasmplus это нужно записать явно, иначе INC L выполняется только один раз.
+        DUP 90
+        LD (HL),A:INC L
+        EDUP
         POP BC
         RET
 
@@ -970,6 +983,12 @@ INCLCR  ;Increment Left Cursor
 ;           C - OK
 
         PUSH AF
+; На последнем байте последней страницы нельзя даже временно перейти на #40.
+; Проверяем границу до записи символа, чтобы отказ не менял буфер.
+        LD A,(LHLCR+2):CP PGM:JR NZ,INCLCR_MAP
+        LD HL,(LHLCR):INC HL
+        LD A,H:CP #40:JR NC,INCLCR_FULL
+INCLCR_MAP
         LD A,(LHLCR+2)
         EXA:LD A,80:CALL WLD;=CALL MNG0VPL
         POP DE
@@ -988,7 +1007,9 @@ LEQR    LD (LHLCR+2),A
 ;-------
 GRAD    AND %00111111:LD H,A
         LD A,(LHLCR+2):INC A
+        CP PGM+1:RET NC
         JP GRADB
+INCLCR_FULL POP AF:OR A:RET
 ;---------------------------------------
 DECLCRN LD C,A
         LD HL,(LHLCR):DEC HL
@@ -1110,7 +1131,13 @@ GENERATE_FILE LD HL,1
 ;-------
 LOAD    LD A,(F10MENU):OR A:JR NZ,GENERATE_FILE
 
-        CALL LOADFL
+; Пустой файл не имеет кластерной цепочки. Для работы редактора создаём только
+; внутренний пробел; без пользовательского изменения файл на диске не меняется.
+        LD HL,(DAHL)
+        LD DE,(DADE)
+        LD A,L:OR H,E,D:JR Z,GENERATE_FILE
+
+        CALL LOADFL:RET NZ
 
 LOOAD   LD HL,(DAHL)
         LD DE,(DADE)
@@ -1129,17 +1156,24 @@ LOOAD   LD HL,(DAHL)
 
         XOR A:LD (LHLCR+2),A
         LD HL,0,(LHLCR),HL
+        XOR A
         RET
 ;-------
 LOADFL  XOR A:LD (APG),A
 
 LFL     LD A,(APG):CALL MNGCVPL
         LD HL,#C000,B,32:CALL LOAD512
-        CP #0F:RET Z
+        JR C,LOADFL_ERROR
+        CP #FF:JR Z,LOADFL_ERROR
+        CP #0F:JR Z,LOADFL_OK
+        OR A:JR NZ,LOADFL_ERROR
 
         LD HL,APG:INC (HL)
-        LD A,(HL):CP PGM+1:RET NC
+        LD A,(HL):CP PGM+1:JR NC,LOADFL_ERROR
         JR LFL
+
+LOADFL_ERROR LD A,#FF:OR A:RET
+LOADFL_OK    XOR A:RET
 
 ;---------------------------------------
 LDDRR   ;i: [DE,HL] - Lenght
@@ -1279,7 +1313,10 @@ LNT3    ;i: [DE,HL] - File Lenght
         OR A:SBC HL,BC:JR NC,$+3:DEC DE
 
         LD A,H
- .2      SLA A:RL E
+; В исходном ALASM префикс .2 повторял обе команды, а не только SLA A.
+        DUP 2
+        SLA A:RL E
+        EDUP
 
         LD A,H:AND %00111111
         LD H,A
@@ -2030,7 +2067,11 @@ PDIV    SBC HL,BC:INC DE:JR C,Pdiv
         JP PDIV
 Pdiv    PUSH DE:EXX:JP POL
 
-EDIV    EXX:LD A,26:OR A:SCF
+; POLSK работает на временном стеке SPSAFE. При делении на ноль старый код
+; выполнял RET с этого стека и уходил по случайному адресу.
+EDIV    EXX
+        DI:LD SP,(DSP)
+        LD A,26:OR A:SCF
         RET
 
 CPMOD   EXX
@@ -2135,7 +2176,8 @@ SRH13DD   LD A,(HL):OR A:JR Z,SRHFOUND
 SRHFASTB  LD A,(DE),(BC),A:CP (HL):JR Z,SRHNXT
           LD HL,STRBUFF
 SRHNXTB   INC BC:BIT 6,B:JR NZ,SRHFAST2
-SRHFAST2B CP #0D+1:JP NC,SRH13DD
+SRHFAST2B OR A:JP Z,SRHZZT
+          CP #0D+1:JP NC,SRH13DD
           JP SRHFRST
 SRHNXT    INC HL:JP SRHNXTB
 SRHFOUND  SCF
@@ -2217,7 +2259,7 @@ CUT     LD A,(MARKED):OR A:RET Z
 
 CLIPBOARD_ERROR PUSH IX
                 LD IX,ERWND:CALL PRWOW
-                LD HL,MESSAGES,DE,#0100,A,0:CALL MEZZ
+                LD HL,MSG_CLIPBOARD,DE,#0100:CALL TXTPR
                 CALL USPO,NUSP
                 CALL RRESB
                 POP IX
@@ -2263,34 +2305,38 @@ QSAVE   LD A,(F10MENU):OR A:JP NZ,SAVEAS
         LD (DAHL),HL
         LD (DADE),DE
 
-        LD HL,FLLOAD,(HL),#00
-        CALL DELFL:JR Z,NFER
-
+; Сначала полностью записываем новый файл под свободным служебным именем.
+; Исходный файл до успешного завершения SAVE512 не изменяется.
         CALL FILE_SIZE_COPY
-        LD HL,FLMAKE,(HL),#00
-        CALL MKFILE:JR NZ,MKER
-        CALL SAVEDAT
+        CALL SAFE_STORE:JR NZ,MKER
 
         LD A,3,(ESTA),A
         XOR A:LD (CHANGES),A,(SVERFLG),A
 BTZF    CALL TOWORK
         CALL RRESB
+QSAVE_EXIT
         POP IX
-        CALL REFRESH
+        CALL REFRESH_EDITOR
         XOR A
         RET
 ;-------
-NFER    
 MKER    LD (SVERFLG),A
+
+; Окно "Saving..." закрываем до окна ошибки, чтобы у каждого диалога был
+; отдельный законченный цикл PRWOW/RRESB.
+        CALL TOWORK
+        CALL RRESB
         PUSH IX
         LD IX,ERWND:CALL PRWOW
-        LD HL,MESSAGES,DE,#0100,A,1:CALL MEZZ
+        LD HL,MSG_SAVE_ERROR,DE,#0100:CALL TXTPR
         CALL USPO,NUSP
         CALL RRESB
         POP IX
-        JR BTZF
+        JR QSAVE_EXIT
 ;---------------------------------------
 SAVEAS  PUSH IX
+; При ошибке Save As редактор должен продолжать работать со старым именем.
+        LD HL,ENTRYN,DE,SAVEAS_OLD_NAME,BC,256:LDIR
         LD IX,SAVEASWND:CALL PRWOW
 
 ; Input File Name
@@ -2303,28 +2349,50 @@ SAVEAS  PUSH IX
         CALL FILE_SIZE_COPY
         LD HL,FLMAKE,(HL),#00
         CALL MKFILE:JR NZ,MKER2
-        CALL SAVEDAT
+        LD A,3,(ESTA),A
+        CALL SAVEDAT:JR Z,SAVEAS_WRITTEN
 
+; MKFILE уже создал новое имя, но данные записались не полностью. Такой файл
+; нельзя оставлять пользователю как будто это успешный Save As.
+        CALL DROP_ACTIVE_SAVEAS:JR MKER2
+
+SAVEAS_WRITTEN
         LD A,3,(ESTA),A
         XOR A:LD (CHANGES),A,(F10MENU),A,(SVERFLG),A
 BTZF2   CALL TOWORK
 SASEXIT CALL RRESB
+SAVEAS_FINISH
         POP IX
 
-        CALL REFRESH
+; После успешного Save As обновляем имя и режим подсветки в заголовке окна.
+        LD A,(SVERFLG):OR A:CALL Z,NAMETOH
+        CALL REFRESH_EDITOR
         XOR A
         RET
 ;-------
 SASABRT LD A,SASAEC,(SVERFLG),A:JR SASEXIT
-MKER2   LD (SVERFLG),A
+MKER2   PUSH AF
+        LD HL,SAVEAS_OLD_NAME,DE,ENTRYN,BC,256:LDIR
+        POP AF:LD (SVERFLG),A
 
+; Сначала закрываем окно Save As, затем показываем ошибку отдельным циклом.
+        CALL TOWORK
+        CALL RRESB
         PUSH IX
         LD IX,ERWND:CALL PRWOW
-        LD HL,MESSAGES,DE,#0100,A,1:CALL MEZZ
+        LD HL,MSG_SAVE_ERROR,DE,#0100:CALL TXTPR
         CALL USPO,NUSP
         CALL RRESB
         POP IX
-        JR BTZF2
+        JR SAVEAS_FINISH
+;-------
+; QSAVE может быть вызван из диалога выхода, где IX указывает на WMWND.
+; REFRESH с этим IX рисовал строки редактора внутри координат диалога и оставлял
+; на экране прямоугольный мусор. Для полной перерисовки всегда нужен PLWND.
+REFRESH_EDITOR PUSH IX
+               LD IX,PLWND:CALL REFRESH
+               POP IX
+               RET
 ;-------
 SAVEASI CALL ENTRY_TO_STRING
 
@@ -2344,6 +2412,8 @@ STRING_TO_ENTRY LD HL,SASBUF+SASBUFL
                 LD B,SASBUFL
 STE             DEC HL:LD A,(HL):CP " ":JR NZ,STE2
                 DJNZ STE
+; Пустая строка раньше запускала LDIR с BC=0, то есть копирование 65536 байт.
+                LD A,1:OR A:RET
 STE2            LD HL,SASBUF
                 LD DE,ENTRYN
                 LD C,B,B,0:LDIR
@@ -2362,15 +2432,21 @@ ETSFILL         LD A," "
                 LD (DE),A:INC DE:DJNZ $-2
                 RET
 ;---------------------------------------
+; Возврат: Z — все требуемые страницы записаны, NZ — драйвер сообщил ошибку.
 SAVEDAT LD A,PGZ,(SVD+1),A
 SVD     LD A,0
         CALL MNGCVPL
         LD HL,SVD+1:INC (HL)
         LD HL,#C000,B,32:CALL SAVE512
-        CP #0F:RET Z
+        JR C,SAVEDAT_ERROR
+        CP #FF:JR Z,SAVEDAT_ERROR
+        CP #0F:JR Z,SAVEDAT_OK
+        OR A:JR NZ,SAVEDAT_ERROR
         LD BC,(DHLA+2):INC C
-        LD A,(SVD+1):CP C:RET NC
+        LD A,(SVD+1):CP C:JR NC,SAVEDAT_OK
         JP SVD
+SAVEDAT_ERROR LD A,#FF:OR A:RET
+SAVEDAT_OK    XOR A:RET
 ;---------------------------------------
 FILE_SIZE_COPY LD HL,(DAHL)
                LD DE,(DADE)
@@ -2383,6 +2459,70 @@ FILE_SIZE_COPY LD HL,(DAHL)
 SIZE_NOT_ZERO  LD (FLMAKE+1+0),HL
                LD (FLMAKE+1+2),DE
                RET
+;---------------------------------------
+; Удалить недописанный файл Save As. ENTRYN пока содержит введённое новое имя.
+; Возвращаем NZ независимо от результата DELFL: операция сохранения не удалась.
+DROP_ACTIVE_SAVEAS
+        LD HL,FLLOAD,(HL),#00
+        CALL DELFL
+        LD A,#FF:OR A:RET
+;---------------------------------------
+; Полный контур безопасной замены. Возврат: Z — новое содержимое опубликовано
+; под исходным именем; NZ — данные оставлены под исходным или служебным именем.
+SAFE_STORE
+        CALL SAFE_NAMES:RET NZ
+
+        LD HL,FLMAKE+1,DE,TMPMAKE+1,BC,4:LDIR
+        LD HL,TMPMAKE:CALL MKFILE:RET NZ
+        LD A,3,(ESTA),A
+        CALL SAVEDAT:JR Z,SAFE_STORE_WRITTEN
+
+; При ошибке SAVE512 временный файл содержит недописанные либо старые сектора,
+; поэтому не выдаём его за recovery-копию и пытаемся убрать из каталога.
+        LD HL,TMPQUERY:CALL DELFL
+        LD A,1:OR A:RET
+
+; Фиксация: старую цепочку оставляем под резервным именем, затем публикуем
+; записанную временную копию под исходным именем.
+SAFE_STORE_WRITTEN
+        LD HL,FLLOAD,(HL),#00
+        LD DE,BAKQUERY_NAME
+        CALL RENAM:JR Z,SAFE_STORE_ERROR
+
+        LD HL,TMPQUERY
+        LD DE,ENTRYN
+        CALL RENAM:JR NZ,SAFE_STORE_DONE
+
+; Если второе переименование не удалось, возвращаем старому файлу его имя.
+; Даже при неудаче отката обе цепочки остаются в каталоге под служебными именами.
+        LD HL,BAKQUERY
+        LD DE,ENTRYN
+        CALL RENAM
+SAFE_STORE_ERROR LD A,1:OR A:RET
+
+SAFE_STORE_DONE
+; Новое содержимое уже доступно под исходным именем. Ошибка удаления резервной
+; копии не угрожает данным: файл WCEBAK?.$$$ останется для восстановления.
+        LD HL,BAKQUERY:CALL DELFL
+        XOR A:RET
+;---------------------------------------
+; Выбираем пару свободных имён WCETMP0.$$$/WCEBAK0.$$$ ... 9.
+; Существующие служебные файлы никогда не удаляются: это могут быть данные
+; после прежнего аварийного сохранения.
+SAFE_NAMES LD A,"0"
+SAFE_NAMES_LOOP
+        LD (SAFE_SLOT),A
+        LD (TMPMAKE_DIGIT),A
+        LD (TMPQUERY_DIGIT),A
+        LD (BAKQUERY_DIGIT),A
+
+        LD HL,TMPQUERY:CALL FENTRY:JR NZ,SAFE_NAMES_NEXT
+        LD HL,BAKQUERY:CALL FENTRY:JR NZ,SAFE_NAMES_NEXT
+        XOR A:RET
+
+SAFE_NAMES_NEXT
+        LD A,(SAFE_SLOT):INC A:CP ":":JR C,SAFE_NAMES_LOOP
+        LD A,1:OR A:RET
 ;---------------------------------------
 PRM_PL  EXA:LD A,83:JP WLD
 
@@ -2440,6 +2580,7 @@ SAVE512 LD A,49:JP WLD
 FENTRY  LD A,59:JP WLD
 GFILE   LD A,62:JP WLD
 MKFILE  LD A,72:JP WLD
+RENAM   LD A,74:JP WLD
 DELFL   LD A,75:JP WLD
 ;-------
 MNGV_PL EXA:LD A,64:JP WLD
@@ -2546,8 +2687,9 @@ ERWND   DB 4+16+128,0
 ERT     DB #9,#E,"ERROR:",0
 ERB     DB #9,#E,"press any key",0
 
-MESSAGES DB #E,"Clipboard overflow!!!",0
-         DB #E,"Make File ERROR!!!",0
+MSG_CLIPBOARD  DB #E,"Clipboard overflow!!!",0
+MSG_SAVE_ERROR DB #E,"Save ERROR! Original file preserved.",0
+MSG_READ_ERROR DB #E,"Read ERROR! File was not opened.",0
 ;-------
 ME01    DB #0E,"Save changes?",0
 ;-------
@@ -2644,6 +2786,28 @@ HIGHLGT NOP; =1 if syntax highlight is on
 REFFLG  NOP
 
 SVERFLG NOP; save error flag (QSAVE,SAVEAS)
+
+; Служебные имена безопасного сохранения. Цифра выбирается SAFE_NAMES.
+TMPMAKE DB 0                       ; атрибут
+        DS 4,0                    ; размер файла LE32
+TMPMAKE_NAME DB "WCETMP"
+TMPMAKE_DIGIT DB "0"
+        DB ".$$$",0
+
+TMPQUERY DB 0                     ; искать только файл
+TMPQUERY_NAME DB "WCETMP"
+TMPQUERY_DIGIT DB "0"
+        DB ".$$$",0
+
+BAKQUERY DB 0                     ; искать только файл
+BAKQUERY_NAME DB "WCEBAK"
+BAKQUERY_DIGIT DB "0"
+        DB ".$$$",0
+
+SAFE_SLOT DB "0"
+
+; Имя активного файла восстанавливается, если Save As завершился ошибкой.
+SAVEAS_OLD_NAME DS 256
 
 ;File-size
 DAHL    DS 2; Low

@@ -293,6 +293,36 @@ if (-not (Test-Path -LiteralPath $FilexOutput -PathType Leaf)) {
 if ((Get-Item -LiteralPath $FilexOutput).Length -gt (512 + 0x4000)) {
     throw 'FILEX.WMF exceeds one 16-KiB runtime page.'
 }
+
+# TXTEDIT больше не берётся как непрозрачный готовый бинарник: безопасное
+# сохранение и проверки границ обязаны собираться из проверяемого исходника.
+$TxtEditSource = Join-Path $ProjectRoot 'source\plugins\txt_editor\TXTEDIT.ASM'
+$TxtEditOutput = Join-Path $BuildDir 'TXTEDIT.WMF'
+$TxtEditSymbols = Join-Path $BuildDir 'TXTEDIT.sym'
+$TxtEditListing = Join-Path $BuildDir 'TXTEDIT.lst'
+Remove-Item -LiteralPath $TxtEditOutput, $TxtEditSymbols, $TxtEditListing `
+    -Force -ErrorAction SilentlyContinue
+Push-Location -LiteralPath $ProjectRootAlias
+try {
+    & $SjasmPlus '--nologo' '--msg=err' `
+        "--raw=$ProjectRootAscii/Build/TXTEDIT.WMF" `
+        "--sym=$ProjectRootAscii/Build/TXTEDIT.sym" `
+        "--lst=$ProjectRootAscii/Build/TXTEDIT.lst" `
+        "$ProjectRootAscii/source/plugins/txt_editor/TXTEDIT.ASM"
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT.ASM assembly failed.' }
+if (-not (Test-Path -LiteralPath $TxtEditOutput -PathType Leaf)) {
+    throw 'TXTEDIT.WMF was not created.'
+}
+# Заголовок занимает 512 байт, код начинается с #8000 и не должен дойти до
+# ENTRYN=#A600, где менеджер передаёт редактору имя файла.
+if ((Get-Item -LiteralPath $TxtEditOutput).Length -gt (512 + 0x2600)) {
+    throw 'TXTEDIT.WMF overlaps ENTRYN at #A600.'
+}
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_txtedit_safety.py')
+if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT machine safety tests failed.' }
 # Codex - 2026-07-17 - end
 
 # Codex - 2026-07-16 - begin
@@ -399,7 +429,9 @@ if ($LASTEXITCODE -ne 0) { throw 'HoBeta packing failed.' }
 # boot.$C собирается выше, а WC_History.txt и WC_todo.txt ведутся самим
 # Improved; остальные неизменяемые файлы берутся из локального эталона.
 # Все они входят в хэш-аудит.
-$ProjectOwnedRuntime = @('boot.$C', 'WC_History.txt', 'WC_todo.txt')
+$ProjectOwnedRuntime = @(
+    'boot.$C', 'WC_History.txt', 'WC_todo.txt', 'WC\TXTEDIT.WMF'
+)
 Get-ChildItem -LiteralPath $ReferenceExe -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($ReferenceExe.Length + 1)
     if ($ProjectOwnedRuntime -inotcontains $relative) {
@@ -417,6 +449,9 @@ Get-ChildItem -LiteralPath $ReferenceExe -Recurse -File | ForEach-Object {
     --wc-dir (Join-Path $ExeDir 'WC')
 if ($LASTEXITCODE -ne 0) { throw 'FILEX runtime installation failed.' }
 
+$TxtEditRuntime = Join-Path $ExeDir 'WC\TXTEDIT.WMF'
+[IO.File]::Copy($TxtEditOutput, $TxtEditRuntime, $true)
+
 $HashReport = Join-Path $BuildDir 'hash-report.tsv'
 & python (Join-Path $ProjectRoot 'tools\verify_hashes.py') `
     --actual $ExeDir `
@@ -432,7 +467,7 @@ if ($HashExitCode -ne 0) {
     )
     $ExpectedMismatchPaths = @(
         'boot.$C', 'WC_History.txt', 'WC_todo.txt',
-        'WC/FILEX.WMF', 'WC/wc.ini'
+        'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -441,7 +476,7 @@ if ($HashExitCode -ne 0) {
         $Mismatches.Count -ne $ExpectedMismatchPaths.Count) {
         throw "Hash verification failed. See $HashReport"
     }
-    Write-Warning 'boot.$C, FILEX runtime/config and Improved history files intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, runtime config and Improved history files intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.
