@@ -92,7 +92,10 @@ def main() -> int:
     for symbol, expected in (
         ("FILEX_API_VERSION", 1),
         ("FILEX_BLOCK_SIZE", 32),
-        ("FILEX_OP_COUNT", 7),
+        ("FILEX_OP_COUNT", 8),
+        ("FILEX_CAP_MOVE_CURRENT_DIR", 0x40),
+        ("FILEX_CAP_READ_FAT", 0x80),
+        ("FILEX_FLAG_CURRENT_DIR", 0x02),
         ("FILEX_STATUS_OK", 0x00),
         ("FILEX_STATUS_FAT", 0x20),
         ("FILEX_STATUS_MEDIA", 0x21),
@@ -104,7 +107,7 @@ def main() -> int:
 
     print(
         "FILEX ABI PASS: API77=#6AFD, gate=#6A47, provider=#06, "
-        "tests=#03, block=32, operations=7"
+        "tests=#03, block=32, operations=8, caps=#FF"
     )
     return 0
 

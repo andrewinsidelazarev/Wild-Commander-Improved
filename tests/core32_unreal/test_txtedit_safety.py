@@ -9,6 +9,7 @@ import z80
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TXTEDIT_SOURCE = PROJECT_ROOT / "source" / "plugins" / "txt_editor" / "TXTEDIT.ASM"
 TXTEDIT_BIN = PROJECT_ROOT / "Build" / "TXTEDIT.WMF"
 TXTEDIT_SYMBOLS = PROJECT_ROOT / "Build" / "TXTEDIT.sym"
 CODE_BASE = 0x8000
@@ -36,6 +37,10 @@ def put16(memory: memoryview, address: int, value: int) -> None:
 
 def get16(memory: memoryview, address: int) -> int:
     return memory[address] | memory[address + 1] << 8
+
+
+def get32(memory: memoryview, address: int) -> int:
+    return get16(memory, address) | get16(memory, address + 2) << 16
 
 
 def c_string(memory: memoryview, address: int) -> str:
@@ -109,6 +114,10 @@ def find_key(files: dict[str, str], name: str) -> str | None:
 @dataclass
 class SaveScenario:
     files: dict[str, str] = field(default_factory=lambda: {"wc.ini": "old"})
+    filex_caps: int = 0x7F
+    filex_version: int = 1
+    filex_query_status: int = 0
+    filex_move_status: int = 0
     write_error: bool = False
     write_status: int | None = None
     create_error: bool = False
@@ -121,6 +130,60 @@ class SaveScenario:
         machine = harness.machine
         memory = harness.memory
         api = machine.a
+
+        if api == 77:  # FILEX
+            block = machine.hl
+            operation = memory[block + 2]
+            if operation == 0:  # QUERY_CAPS
+                self.calls.append((api, "QUERY_CAPS"))
+                memory[block + 24 : block + 28] = self.filex_caps.to_bytes(4, "little")
+                memory[block + 28] = self.filex_query_status
+                memory[block + 29] = self.filex_version
+                machine.a = self.filex_query_status
+                machine.f = 0x40 if machine.a == 0 else 0
+                return
+
+            if operation == 5:  # MOVE_RENAME
+                source_pointer = get16(memory, block + 8)
+                source_length = get16(memory, block + 10)
+                destination_pointer = get16(memory, block + 12)
+                destination_length = get16(memory, block + 14)
+                source = c_string(memory, source_pointer + 1)
+                destination = c_string(memory, destination_pointer + 1)
+                flags = memory[block + 3]
+                source_directory = get32(memory, block + 16)
+                destination_directory = get32(memory, block + 20)
+                self.calls.append(
+                    (
+                        api,
+                        "MOVE_RENAME",
+                        flags,
+                        source,
+                        destination,
+                        source_length,
+                        destination_length,
+                        source_directory,
+                        destination_directory,
+                    )
+                )
+
+                if self.filex_move_status in (0, 0x25):
+                    source_key = find_key(self.files, source)
+                    destination_key = find_key(self.files, destination)
+                    if source_key is None:
+                        raise AssertionError("FILEX MOVE_RENAME не нашёл temp")
+                    new_contents = self.files.pop(source_key)
+                    if destination_key is not None:
+                        del self.files[destination_key]
+                    self.files[destination] = new_contents
+
+                memory[block + 24 : block + 28] = (1).to_bytes(4, "little")
+                memory[block + 28] = self.filex_move_status
+                machine.a = self.filex_move_status
+                machine.f = 0x40 if machine.a == 0 else 0
+                return
+
+            raise AssertionError(f"неожиданная операция FILEX {operation}")
 
         if api == 59:  # FENTRY
             name = c_string(memory, machine.hl + 1)
@@ -150,7 +213,7 @@ class SaveScenario:
             return
 
         if api == 49:  # SAVE512
-            self.calls.append((api,))
+            self.calls.append((api, machine.b))
             if self.write_error:
                 machine.a = 0xFF
                 machine.f = 0x01
@@ -209,30 +272,41 @@ def run_safe_store(scenario: SaveScenario) -> tuple[bool, SaveScenario]:
 
 
 def test_safe_store() -> None:
+    source = TXTEDIT_SOURCE.read_text(encoding="utf-8")
+    dispatch_start = source.index("\nSAFE_STORE\n") + 1
+    dispatch_end = source.index("\nSAFE_STORE_LEGACY\n", dispatch_start) + 1
+    dispatch = source[dispatch_start:dispatch_end]
+    if "JP SAFE_STORE_LEGACY" not in dispatch:
+        raise AssertionError("SAFE_STORE не закреплён за аппаратно безопасным legacy path")
+    if "FILEX_FAST_AVAILABLE" in dispatch or "FILEX_SAFE_STORE" in dispatch:
+        raise AssertionError("SAFE_STORE снова вызывает зависающий FILEX fast path")
+
     success, scenario = run_safe_store(SaveScenario())
-    expect("успешный SAFE_STORE", success, True)
-    expect("опубликован новый wc.ini", scenario.files, {"wc.ini": "new"})
+    expect("успешный аппаратно безопасный SAFE_STORE", success, True)
+    expect("legacy replace опубликовал новый wc.ini", scenario.files, {"wc.ini": "new"})
     file_calls = [call for call in scenario.calls if call[0] != 65]
     expect(
-        "порядок файловых API",
+        "порядок API безопасного сохранения",
         file_calls,
         [
             (59, "WCETMP0.$$$"),
             (59, "WCEBAK0.$$$"),
             (72, "WCETMP0.$$$"),
-            (49,),
+            (49, 1),
             (74, "wc.ini", "WCEBAK0.$$$"),
             (74, "WCETMP0.$$$", "wc.ini"),
             (75, "WCEBAK0.$$$"),
         ],
     )
+    if any(call[0] == 77 for call in scenario.calls):
+        raise AssertionError("аппаратно безопасный SAFE_STORE вызвал FILEX API")
 
     success, scenario = run_safe_store(SaveScenario(write_error=True))
     expect("ошибка записи возвращена", success, False)
     expect("исходник после ошибки записи", scenario.files["wc.ini"], "old")
     expect("недописанный временный файл удалён", scenario.files, {"wc.ini": "old"})
     if any(call[0] == 74 for call in scenario.calls):
-        raise AssertionError("после ошибки SAVE512 выполнено переименование")
+        raise AssertionError("после ошибки SAVE512 выполнен RENAME")
     expect(
         "очистка после ошибки SAVE512",
         [call for call in scenario.calls if call[0] == 75],
@@ -253,30 +327,33 @@ def test_safe_store() -> None:
         "new",
     )
 
-    success, scenario = run_safe_store(SaveScenario(rename_failures={1}))
-    expect("ошибка первого RENAME", success, False)
-    expect("исходник после первого RENAME", scenario.files["wc.ini"], "old")
-    expect("новые данные после первого RENAME", scenario.files["WCETMP0.$$$"], "new")
-
-    success, scenario = run_safe_store(SaveScenario(rename_failures={2}))
-    expect("ошибка публикации", success, False)
-    expect("откат вернул исходник", scenario.files["wc.ini"], "old")
-    expect("новые данные сохранены во временном файле", scenario.files["WCETMP0.$$$"], "new")
-
-    success, scenario = run_safe_store(SaveScenario(rename_failures={2, 3}))
-    expect("ошибка отката", success, False)
-    expect("старые данные доступны в backup", scenario.files["WCEBAK0.$$$"], "old")
-    expect("новые данные доступны во временном файле", scenario.files["WCETMP0.$$$"], "new")
-
-    success, scenario = run_safe_store(SaveScenario(delete_error=True))
-    expect("ошибка удаления backup не отменяет commit", success, True)
-    expect("новый исходный файл", scenario.files["wc.ini"], "new")
-    expect("старый backup сохранён", scenario.files["WCEBAK0.$$$"], "old")
+    success, scenario = run_safe_store(SaveScenario(create_error=True))
+    expect("ошибка создания temp возвращена", success, False)
+    expect("исходник после ошибки создания temp", scenario.files, {"wc.ini": "old"})
+    expect(
+        "ошибка MKFILE возвращена после выбора свободной пары",
+        [call for call in scenario.calls if call[0] != 65],
+        [
+            (59, "WCETMP0.$$$"),
+            (59, "WCEBAK0.$$$"),
+            (72, "WCETMP0.$$$"),
+        ],
+    )
 
     stale = {"wc.ini": "old", "WCETMP0.$$$": "stale"}
     success, scenario = run_safe_store(SaveScenario(files=stale))
     expect("выбор следующего служебного имени", success, True)
     expect("старый recovery не удалён", scenario.files["WCETMP0.$$$"], "stale")
+    expect(
+        "коллизия обработана с безопасной парой temp/backup",
+        [call for call in scenario.calls if call[0] != 65][:4],
+        [
+            (59, "WCETMP0.$$$"),
+            (59, "WCETMP1.$$$"),
+            (59, "WCEBAK1.$$$"),
+            (72, "WCETMP1.$$$"),
+        ],
+    )
 
     full = {"wc.ini": "old"}
     full.update({f"WCETMP{index}.$$$": "stale" for index in range(10)})
@@ -284,7 +361,37 @@ def test_safe_store() -> None:
     expect("исчерпание служебных имён", success, False)
     expect("исходник при исчерпании имён", scenario.files["wc.ini"], "old")
     if any(call[0] != 59 for call in scenario.calls):
-        raise AssertionError("при занятых именах выполнена запись каталога")
+        raise AssertionError("при занятых именах началась запись данных")
+
+
+def test_safe_store_legacy_fallback() -> None:
+    success, scenario = run_safe_store(
+        SaveScenario(rename_failures={1})
+    )
+    expect("ошибка первого RENAME", success, False)
+    expect("исходник после первого RENAME", scenario.files["wc.ini"], "old")
+    expect("новые данные после первого RENAME", scenario.files["WCETMP0.$$$"], "new")
+
+    success, scenario = run_safe_store(
+        SaveScenario(rename_failures={2})
+    )
+    expect("ошибка публикации", success, False)
+    expect("откат вернул исходник", scenario.files["wc.ini"], "old")
+    expect("новые данные сохранены во временном файле", scenario.files["WCETMP0.$$$"], "new")
+
+    success, scenario = run_safe_store(
+        SaveScenario(rename_failures={2, 3})
+    )
+    expect("ошибка отката", success, False)
+    expect("старые данные доступны в backup", scenario.files["WCEBAK0.$$$"], "old")
+    expect("новые данные доступны во временном файле", scenario.files["WCETMP0.$$$"], "new")
+
+    success, scenario = run_safe_store(
+        SaveScenario(delete_error=True)
+    )
+    expect("ошибка удаления backup не отменяет commit", success, True)
+    expect("новый исходный файл", scenario.files["wc.ini"], "new")
+    expect("старый backup сохранён", scenario.files["WCEBAK0.$$$"], "old")
 
 
 def test_save_as_partial_cleanup() -> None:
@@ -310,6 +417,61 @@ def test_save_as_partial_cleanup() -> None:
         {"new.ini": "partial"},
     )
     expect("ошибка Save As возвращена", bool(harness.machine.f & 0x40), False)
+
+
+def test_save_writes_only_logical_sectors() -> None:
+    cases = (
+        (1, [1]),
+        (512, [1]),
+        (513, [2]),
+        (541, [2]),
+        (16 * 1024, [32]),
+        (16 * 1024 + 1, [32, 1]),
+        (32 * 1024 + 17, [32, 32, 1]),
+    )
+
+    for size, expected_counts in cases:
+        harness = MachineHarness()
+        symbols = harness.symbols
+        harness.memory[
+            symbols["FLMAKE"] + 1 : symbols["FLMAKE"] + 5
+        ] = size.to_bytes(4, "little")
+        counts: list[int] = []
+
+        def handler(local: MachineHarness) -> None:
+            if local.machine.a == 65:  # MNGCVPL
+                local.machine.a = 0
+                local.machine.f = 0x40
+                return
+            if local.machine.a != 49:
+                raise AssertionError(f"неожиданный API SAVEDAT {local.machine.a}")
+            counts.append(local.machine.b)
+            local.machine.a = 0
+            local.machine.f = 0x40
+
+        harness.invoke("SAVEDAT", handler)
+        expect(f"SAVEDAT size={size} status", bool(harness.machine.f & 0x40), True)
+        expect(f"SAVEDAT size={size} sector counts", counts, expected_counts)
+
+    harness = MachineHarness()
+    symbols = harness.symbols
+    harness.memory[
+        symbols["FLMAKE"] + 1 : symbols["FLMAKE"] + 5
+    ] = (16 * 1024 + 1).to_bytes(4, "little")
+    counts = []
+
+    def early_eoc(local: MachineHarness) -> None:
+        if local.machine.a == 65:
+            local.machine.a = 0
+            local.machine.f = 0x40
+            return
+        counts.append(local.machine.b)
+        local.machine.a = 0x0F
+        local.machine.f = 0
+
+    harness.invoke("SAVEDAT", early_eoc)
+    expect("ранний EOC является ошибкой", bool(harness.machine.f & 0x40), False)
+    expect("после раннего EOC запись остановлена", counts, [32])
 
 
 def test_error_messages() -> None:
@@ -473,7 +635,9 @@ def main() -> int:
             raise AssertionError(f"в TXTEDIT.sym отсутствует {required}")
 
     test_safe_store()
+    test_safe_store_legacy_fallback()
     test_save_as_partial_cleanup()
+    test_save_writes_only_logical_sectors()
     test_error_messages()
     test_empty_save_as_name()
     test_load_error_and_page_limit()
@@ -481,8 +645,9 @@ def main() -> int:
     test_search_stops_at_eof()
     test_inspector_division_stack()
     print(
-        "TXTEDIT safety unit PASS: commit/fault rollback and cleanup, "
-        "Save As cleanup, visible errors, empty name, LOAD512 errors, "
+        "TXTEDIT safety unit PASS: hardware-safe transactional save, fault rollback, cleanup, "
+        "logical-sector SAVE512 bounds, Save As cleanup, visible errors, empty name, "
+        "LOAD512 errors, "
         "page #3F guard, EOF search, Inspector division"
     )
     return 0

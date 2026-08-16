@@ -27,6 +27,11 @@ ID_LOAD_FAT_CONFIG            EQU 22
 ID_VALIDATE_NAME              EQU 23
 ID_MAP_OLDER_LFN_POINTER      EQU 24
 ID_UNPACK_DRIVER              EQU 25
+
+; Экспериментальный source/DSDZC.ASM исторически использует номера 26..35.
+; Диагностическая сборка сохраняет эту ABI и прежние номера следующих строк.
+; В боевой сборке эти десять шлюзов отсутствуют, а рабочие строки сдвинуты вниз.
+        IFDEF WDOS_EXPERIMENTAL_ZC_RUNTIME
 ID_ZC_WAIT_READY              EQU 26
 ID_ZC_WAIT_TOKEN              EQU 27
 ID_ZC_WAIT_BUSY               EQU 28
@@ -42,5 +47,21 @@ ID_COPY_ENTRY_AND_CAPTURE     EQU 37
 ID_APPEND_BYTES               EQU 38
 ID_COPY_TO_ENTRY              EQU 39
 ID_FILEX_CONTEXT_BRIDGE       EQU 40
-ID_COUNT                      EQU 41
+ID_LOAD_FREE_HINT             EQU 41
+ID_NOTE_FREED_CHAIN           EQU 42
+ID_SAVE_NEXT_FREE_HINT        EQU 43
+ID_GET_DATA_CLUSTER_LIMIT     EQU 44
+ID_COUNT                      EQU 45
+        ELSE
+ID_ZERO_CLUSTER_TAIL          EQU 26
+ID_COPY_ENTRY_AND_CAPTURE     EQU 27
+ID_APPEND_BYTES               EQU 28
+ID_COPY_TO_ENTRY              EQU 29
+ID_FILEX_CONTEXT_BRIDGE       EQU 30
+ID_LOAD_FREE_HINT             EQU 31
+ID_NOTE_FREED_CHAIN           EQU 32
+ID_SAVE_NEXT_FREE_HINT        EQU 33
+ID_GET_DATA_CLUSTER_LIMIT     EQU 34
+ID_COUNT                      EQU 35
+        ENDIF
 ; Codex - 2026-07-17 - end

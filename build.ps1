@@ -351,6 +351,12 @@ if ((Get-Item -LiteralPath $Payload).Length -ne 0x7C00) {
     throw "Unexpected boot payload size: $((Get-Item -LiteralPath $Payload).Length)"
 }
 
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_fat_allocator_hint.py')
+if ($LASTEXITCODE -ne 0) { throw 'FAT allocator hint machine tests failed.' }
+
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_wcfx_copy_bounds.py')
+if ($LASTEXITCODE -ne 0) { throw 'WCFX COPYF bounds machine tests failed.' }
+
 # Codex - 2026-07-16 - begin
 # Регрессионный плагин обязан пересобираться вместе с ядром, иначе автономный
 # прогон в Unreal может незаметно проверить устаревший бинарный файл.

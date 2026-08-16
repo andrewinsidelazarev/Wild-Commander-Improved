@@ -43,11 +43,12 @@ FILEX_ENTRY:
         DEC A:JP Z,FILEX_SET_EOF32
         DEC A:JP Z,FILEX_GET_FS_INFO
         DEC A:JP Z,FILEX_MOVE_RENAME
-        JP FILEX_SET_METADATA
+        DEC A:JP Z,FILEX_SET_METADATA
+        JP FILEX_READ_FAT
 
 FILEX_QUERY_CAPS:
         LD A,(IY+FILEX_P_FLAGS):OR A:JP NZ,FILEX_BAD_BLOCK
-        LD A,FILEX_CAP_READ_AT|FILEX_CAP_WRITE_AT|FILEX_CAP_SET_EOF32|FILEX_CAP_GET_FS_INFO|FILEX_CAP_MOVE_RENAME|FILEX_CAP_SET_METADATA
+        LD A,FILEX_CAP_READ_AT|FILEX_CAP_WRITE_AT|FILEX_CAP_SET_EOF32|FILEX_CAP_GET_FS_INFO|FILEX_CAP_MOVE_RENAME|FILEX_CAP_SET_METADATA|FILEX_CAP_MOVE_CURRENT_DIR|FILEX_CAP_READ_FAT
         LD (FILEX_RESULT),A
         LD A,FILEX_API_VERSION
         LD (FILEX_RESULT_FLAGS),A
@@ -609,55 +610,37 @@ FILEX_PREFLIGHT_GROWTH:
         LD HL,(FILEX_REQUIRED_CLUSTERS)
         OR H:OR L:JP Z,.no_growth
 
-        ; Прочитать BPB заново: LOBU является рабочим буфером и не считается
-        ; постоянной копией boot sector после обычных файловых операций.
-        LD HL,(@WDOS.ADDTOP),DE,(@WDOS.ADDTOP+2)
-        CALL @WDOS.XPOZI
-        LD HL,@WDOS.LOBU
-        CALL FILEX_READ_ONE
-        RET NZ
-        LD HL,(@WDOS.LOBU+19)
-        LD A,H:OR L:JR NZ,.total16
-        LD HL,(@WDOS.LOBU+32),DE,(@WDOS.LOBU+34)
-        JR .total_ready
-.total16:
-        LD DE,0
-.total_ready:
-        LD A,D:OR E:OR H:OR L:JP Z,.fat_error
-        LD BC,(@WDOS.SDFAT)
-        OR A:SBC HL,BC
-        EX DE,HL
-        LD BC,(@WDOS.SDFAT+2)
-        SBC HL,BC
-        EX DE,HL
-        JP C,.fat_error
-        LD A,(@WDOS.BSECPC)
-.divide_clusters:
-        CP 1:JR Z,.cluster_count_ready
-        SRL D:RR E:RR H:RR L
-        SRL A
-        JR .divide_clusters
-.cluster_count_ready:
-        LD BC,2
-        CALL @WDOS.ADD4B
+        ; CORE32 вычисляет реальную границу data-кластеров один раз при
+        ; монтировании. Сохраняем текущую подсказку: preflight должен доказать
+        ; наличие места, но фактический MKSG обязан затем повторить тот же путь.
+        LD HL,(@WDOS.FSTFRC),DE,(@WDOS.FSTFRC+2)
+        LD (FILEX_SCAN_START),HL
+        LD (FILEX_SCAN_START+2),DE
+        XOR A:LD (FILEX_SCAN_WRAPPED),A
+        FILEX_CALL_EXTENSION ID_GET_DATA_CLUSTER_LIMIT
+        JP NZ,.fat_error
         LD (FILEX_SCAN_LIMIT),HL
         LD (FILEX_SCAN_LIMIT+2),DE
 
-        ; Искать строго от кластера 2 и продвигать подсказку после каждого
-        ; найденного свободного кластера. Записи не меняются: это preflight.
-        LD HL,2:LD (@WDOS.FSTFRC),HL
-        LD HL,0:LD (@WDOS.FSTFRC+2),HL
+        ; Продвигаться от постоянной подсказки. Поскольку preflight не помечает
+        ; найденные записи занятыми, отдельно отслеживается единственный wrap:
+        ; после возврата к исходной позиции повторно считать кластеры нельзя.
 .scan:
+        LD HL,(@WDOS.FSTFRC),DE,(@WDOS.FSTFRC+2)
+        LD (FILEX_SCAN_CURSOR),HL
+        LD (FILEX_SCAN_CURSOR+2),DE
         CALL @WDOS.SRHFCL
         JR C,.scan_failed
         LD (FILEX_SCAN_CLUSTER),HL
         LD (FILEX_SCAN_CLUSTER+2),DE
         LD HL,(FILEX_SCAN_CLUSTER+2),DE,(FILEX_SCAN_LIMIT+2)
         OR A:SBC HL,DE:JR C,.valid_cluster
-        JR NZ,.no_space
+        JR NZ,.wrap_data
         LD HL,(FILEX_SCAN_CLUSTER),DE,(FILEX_SCAN_LIMIT)
-        OR A:SBC HL,DE:JR NC,.no_space
+        OR A:SBC HL,DE:JR NC,.wrap_data
 .valid_cluster:
+        CALL FILEX_SCAN_CLUSTER_UNIQUE
+        JR NZ,.no_space
         LD HL,(FILEX_REQUIRED_CLUSTERS)
         DEC HL
         LD (FILEX_REQUIRED_CLUSTERS),HL
@@ -668,29 +651,63 @@ FILEX_PREFLIGHT_GROWTH:
 .count_ready:
         LD HL,(FILEX_REQUIRED_CLUSTERS),DE,(FILEX_REQUIRED_CLUSTERS+2)
         LD A,D:OR E:OR H:OR L:JR Z,.ready
-        LD HL,(FILEX_SCAN_CLUSTER),DE,(FILEX_SCAN_CLUSTER+2)
-        INC HL
-        LD A,H:OR L:JR NZ,.next_hint_ready
-        INC DE
-.next_hint_ready:
-        LD (@WDOS.FSTFRC),HL
-        LD (@WDOS.FSTFRC+2),DE
+        FILEX_CALL_EXTENSION ID_SAVE_NEXT_FREE_HINT
         JR .scan
-.ready:
-        ; Фактический APPEND тоже начинает с 2 и потому не увидит padding FAT:
-        ; preflight уже доказал наличие нужного числа более ранних записей.
+.wrap_data:
+        LD A,(FILEX_SCAN_WRAPPED):OR A:JR NZ,.no_space
+        INC A:LD (FILEX_SCAN_WRAPPED),A
         LD HL,2:LD (@WDOS.FSTFRC),HL
         LD HL,0:LD (@WDOS.FSTFRC+2),HL
+        JR .scan
+.ready:
+        CALL FILEX_RESTORE_SCAN_HINT
 .no_growth:
         XOR A
         RET
 .scan_failed:
+        CALL FILEX_RESTORE_SCAN_HINT
         LD A,(@WDOS.ABT):OR A
         LD A,FILEX_STATUS_MEDIA:RET NZ
 .no_space:
+        CALL FILEX_RESTORE_SCAN_HINT
         LD A,FILEX_STATUS_NO_SPACE:OR A:RET
 .fat_error:
+        CALL FILEX_RESTORE_SCAN_HINT
         LD A,FILEX_STATUS_FAT:OR A:RET
+
+; Z — найденный кластер ещё не учитывался этим preflight. Возврат ниже
+; текущего курсора означает wrap; после него исходная позиция является границей
+; уже просмотренного диапазона.
+FILEX_SCAN_CLUSTER_UNIQUE:
+        LD HL,(FILEX_SCAN_CLUSTER),DE,(FILEX_SCAN_CLUSTER+2)
+        LD BC,(FILEX_SCAN_CURSOR)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(FILEX_SCAN_CURSOR+2)
+        SBC HL,BC
+        JR NC,.wrap_known
+        LD A,1:LD (FILEX_SCAN_WRAPPED),A
+.wrap_known:
+        LD A,(FILEX_SCAN_WRAPPED):OR A:JR Z,.unique
+        LD HL,(FILEX_SCAN_CLUSTER),DE,(FILEX_SCAN_CLUSTER+2)
+        LD BC,(FILEX_SCAN_START)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(FILEX_SCAN_START+2)
+        SBC HL,BC
+        JR NC,.duplicate
+.unique:
+        XOR A
+        RET
+.duplicate:
+        LD A,1:OR A
+        RET
+
+FILEX_RESTORE_SCAN_HINT:
+        LD HL,(FILEX_SCAN_START),DE,(FILEX_SCAN_START+2)
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
+        RET
 
 FILEX_SIZE_TO_CLUSTERS:
         CALL @WDOS.DEL512
@@ -1258,7 +1275,7 @@ FILEX_WRITE_EXISTING:
 ; цепочка освобождается только после успешного удаления исходной ссылки.
 FILEX_MOVE_RENAME:
         LD A,(IY+FILEX_P_FLAGS)
-        AND ~FILEX_FLAG_REPLACE:JP NZ,.bad_block
+        AND ~(FILEX_FLAG_REPLACE|FILEX_FLAG_CURRENT_DIR):JP NZ,.bad_block
         LD L,(IY+FILEX_P_BUFFER+0)
         LD H,(IY+FILEX_P_BUFFER+1)
         LD C,(IY+FILEX_P_LENGTH+0)
@@ -1291,6 +1308,13 @@ FILEX_MOVE_RENAME:
         LD H,(IY+FILEX_P_DEST_DIR+3)
         LD (FILEX_DEST_DIR+2),HL
         CALL FILEX_SAVE_ACTIVE_DIRECTORY
+        ; Обычный плагин не должен читать приватный LSTCAT из переключаемой
+        ; страницы WildDOS. CURRENT_DIR безопасно подставляет один сохранённый
+        ; активный каталог для обеих сторон операции.
+        LD A,(IY+FILEX_P_FLAGS):BIT 1,A:JR Z,.directories_ready
+        LD HL,FILEX_SAVED_ACTIVE_DIR,DE,FILEX_SOURCE_DIR,BC,4:LDIR
+        LD HL,FILEX_SAVED_ACTIVE_DIR,DE,FILEX_DEST_DIR,BC,4:LDIR
+.directories_ready:
         CALL FILEX_MOVE_WORKER
         PUSH AF
         CALL FILEX_RESTORE_ACTIVE_DIRECTORY
@@ -1925,6 +1949,82 @@ FILEX_RESTORE_DOTDOT:
         XOR A:LD (FILEX_DOTDOT_CHANGED),A
         RET
 
+; Прочитать секторно выровненное окно выбранной активной FAT. При включённом
+; зеркалировании читается FAT0; при BPB_ExtFlags.bit7=1 — указанная активная
+; копия. offset задаётся в байтах от начала FAT, length=512..16384.
+FILEX_READ_FAT:
+        LD A,(IY+FILEX_P_FLAGS):OR A:JP NZ,FILEX_BAD_BLOCK
+        LD L,(IY+FILEX_P_LENGTH+0)
+        LD H,(IY+FILEX_P_LENGTH+1)
+        LD A,H:OR L:JP Z,.bad_length
+        LD A,L:OR A:JP NZ,.bad_length
+        LD A,H:AND 1:JP NZ,.bad_length
+        LD DE,#4001
+        OR A:SBC HL,DE:JP NC,.bad_length
+
+        LD C,(IY+FILEX_P_LENGTH+0)
+        LD B,(IY+FILEX_P_LENGTH+1)
+        LD L,(IY+FILEX_P_BUFFER+0)
+        LD H,(IY+FILEX_P_BUFFER+1)
+        CALL FILEX_VALIDATE_BUFFER
+        JP NZ,FILEX_FINISH
+        LD (FILEX_FAT_BUFFER),HL
+
+        ; И offset, и длина обязаны быть кратны сектору 512 байт.
+        LD A,(IY+FILEX_P_OFFSET+0):OR A:JP NZ,.bad_length
+        LD A,(IY+FILEX_P_OFFSET+1):AND 1:JP NZ,.bad_length
+        LD L,(IY+FILEX_P_OFFSET+0)
+        LD H,(IY+FILEX_P_OFFSET+1)
+        LD E,(IY+FILEX_P_OFFSET+2)
+        LD D,(IY+FILEX_P_OFFSET+3)
+        LD B,9
+.shift_sector:
+        SRL D:RR E:RR H:RR L
+        DJNZ .shift_sector
+        LD (FILEX_FAT_SECTOR),HL
+        LD (FILEX_FAT_SECTOR+2),DE
+
+        LD A,(IY+FILEX_P_LENGTH+1)
+        SRL A
+        LD (FILEX_FAT_COUNT),A
+        LD C,A:LD B,0
+        ADD HL,BC
+        EX DE,HL
+        LD BC,0
+        ADC HL,BC
+        EX DE,HL
+        LD (FILEX_FAT_END),HL
+        LD (FILEX_FAT_END+2),DE
+
+        ; Конец окна может совпадать с BFTSZ, но не переходить за него.
+        LD HL,(FILEX_FAT_END+2)
+        LD BC,(@WDOS.BFTSZ+2)
+        OR A:SBC HL,BC:JR C,.range_ok
+        JP NZ,.bad_length
+        LD HL,(FILEX_FAT_END)
+        LD BC,(@WDOS.BFTSZ)
+        OR A:SBC HL,BC:JR C,.range_ok
+        JP NZ,.bad_length
+.range_ok:
+        LD HL,(FILEX_FAT_SECTOR)
+        LD DE,(FILEX_FAT_SECTOR+2)
+        FILEX_CALL_EXTENSION ID_POSITION_FAT_READ
+        LD HL,(FILEX_FAT_BUFFER)
+        LD A,(FILEX_FAT_COUNT)
+        FILEX_CALL_EXTENSION ID_READ_SECTORS
+        JR NZ,.media_error
+        LD L,(IY+FILEX_P_LENGTH+0)
+        LD H,(IY+FILEX_P_LENGTH+1)
+        LD (FILEX_RESULT),HL
+        XOR A
+        JP FILEX_FINISH
+.media_error:
+        LD A,FILEX_STATUS_MEDIA
+        JP FILEX_FINISH
+.bad_length:
+        LD A,FILEX_STATUS_BAD_LENGTH
+        JP FILEX_FINISH
+
 ; Вернуть геометрию FAT32 и проверенные подсказки FSInfo. Неизвестное число
 ; свободных кластеров обозначается #FFFFFFFF и отсутствием FREE_KNOWN.
 FILEX_GET_FS_INFO:
@@ -2247,6 +2347,9 @@ FILEX_WRITE_END:            DS 4
 FILEX_REQUIRED_CLUSTERS:    DS 4
 FILEX_SCAN_CLUSTER:         DS 4
 FILEX_SCAN_LIMIT:           DS 4
+FILEX_SCAN_START:           DS 4
+FILEX_SCAN_CURSOR:          DS 4
+FILEX_SCAN_WRAPPED:         DS 1
 FILEX_WRITE_TAIL_COUNT:     DS 2
 FILEX_ABSOLUTE_OFFSET:      DS 4
 FILEX_AVAILABLE:            DS 4
@@ -2277,6 +2380,10 @@ FILEX_FS_DATA_SECTORS:      DS 4
 FILEX_FS_TOTAL_CLUSTERS:    DS 4
 FILEX_FS_FREE_TEMP:         DS 4
 FILEX_FS_OUTPUT:            DS FILEX_FS_SIZE
+FILEX_FAT_BUFFER:           DS 2
+FILEX_FAT_SECTOR:           DS 4
+FILEX_FAT_END:              DS 4
+FILEX_FAT_COUNT:            DS 1
 FILEX_META_POINTER:         DS 2
 FILEX_META_ATTR_MASK:       DS 1
 FILEX_META_ATTR_VALUE:      DS 1

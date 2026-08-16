@@ -111,42 +111,35 @@ WDOS_INSTALL_COPY:
         LDIR                            ; исходный CORE32 #C00C -> #4000
         LD BC,#13AF
         IN A,(C)
+        PUSH BC
         PUSH AF
         LD A,WC_PHYS_CORE32_EXT_PAGE
         OUT (C),A
 ; Codex - 2026-07-17 - begin
         ; DEHR уже скопирован по #5AAA. Он распаковывает проверенный HR-поток
         ; прямо в подключённую страницу #E8, начиная с runtime-адреса #C000.
-        ; В отличие от прежнего LDIR, DEHR разрушает IX и альтернативные
-        ; регистры; временно сохранить их в ещё не используемых данных CORE32.
-        LD (#5115),IX
+        ; DEHR разрушает IX и альтернативные BC/DE/HL. Стек WC находится по
+        ; #5FFE, вне переключаемого окна #C000, и DEHR полностью балансирует
+        ; собственные PUSH/POP, поэтому сохраняем контекст прямо на стеке.
+        ; Точный DEHR2 не выполняет EX AF,AF' и не изменяет AF'.
+        PUSH IX
         EXX
-        LD (#5117),BC
-        LD (#5119),DE
-        LD (#511B),HL
+        PUSH BC
+        PUSH DE
+        PUSH HL
         EXX
-        EX AF,AF'
-        PUSH AF
-        POP HL
-        LD (#511D),HL
-        EX AF,AF'
         LD HL,WDOS_EXTENSION_PACKED
         LD DE,WDOS_EXT.RUNTIME_START
         CALL #5AAA
-        LD IX,(#5115)
-        EX AF,AF'
-        LD HL,(#511D)
-        PUSH HL
-        POP AF
-        EX AF,AF'
         EXX
-        LD BC,(#5117)
-        LD DE,(#5119)
-        LD HL,(#511B)
+        POP HL
+        POP DE
+        POP BC
         EXX
+        POP IX
 ; Codex - 2026-07-17 - end
         POP AF
-        LD BC,#13AF
+        POP BC
         OUT (C),A
         RET
 
@@ -154,7 +147,10 @@ WDOS_INSTALL_COPY:
 WDOS_EXTENSION_PACKED:
         INCBIN "../Build/CORE32_EXT.CPD"
 WDOS_EXTENSION_PACKED_END:
-        ASSERT WDOS_EXTENSION_PACKED_END <= #C000, упакованное расширение WildDOS не помещается
+        ; AUTOEXEC имеет фиксированные внешние адреса и не должен зависеть от
+        ; степени сжатия расширения. #BF69 — его доказанное штатное начало.
+        ASSERT WDOS_EXTENSION_PACKED_END <= #BF69, упакованное расширение WildDOS не помещается
+        DS #BF69-$,0
 ; Автозапуск типа #06 живёт в нулевой области: точные модули не двигаются.
         INCLUDE "AUTOEXEC.ASM"
         DS #C000-$,0

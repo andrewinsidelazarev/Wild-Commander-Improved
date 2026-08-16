@@ -230,6 +230,14 @@ def prepare_filex_fixture(image: Fat32Image, root: int) -> None:
 
     source_cluster = UPDATE.ensure_dir(image, test_cluster, "SRC")
     destination_cluster = UPDATE.ensure_dir(image, test_cluster, "DST")
+    UPDATE.write_file_any(image, test_cluster, "CURRSRC.BIN", b"CURRENT-DIR-SOURCE-" * 37)
+    UPDATE.write_file_any(image, test_cluster, "CURRDST.BIN", b"OLD-CURRENT-DIR-DEST-" * 29)
+    current_source = image.find_entry(test_cluster, "CURRSRC.BIN")
+    current_old = image.find_entry(test_cluster, "CURRDST.BIN")
+    if not current_source or not current_old:
+        raise RuntimeError("Не удалось подготовить файлы current-dir replace")
+    current_source_chain = image.cluster_chain(current_source["cluster"])
+    current_old_chain = image.cluster_chain(current_old["cluster"])
     UPDATE.write_file_any(image, source_cluster, "MOVEA.BIN", b"MOVE-NEW-" * 73)
     UPDATE.write_file_any(image, source_cluster, "REPLSRC.BIN", b"REPLACE-SOURCE-" * 61)
     UPDATE.write_file_any(image, destination_cluster, "REPLDST.BIN", b"OLD-DESTINATION-" * 47)
@@ -262,6 +270,8 @@ def prepare_filex_fixture(image: Fat32Image, root: int) -> None:
         "fragment_chain": fragment_chain,
         "filler_chain": filler_chain,
         "zero_chain": zero_chain,
+        "current_source_chain": current_source_chain,
+        "current_old_chain": current_old_chain,
         "replace_source_chain": replace_source_chain,
         "replace_old_chain": replace_old_chain,
     }
@@ -565,28 +575,37 @@ def raw_short_entry(image: Fat32Image, directory_cluster: int, entry: dict) -> b
     return raw[offset : offset + 32]
 
 
-def collect_orphan_clusters(image: Fat32Image) -> set[int]:
-    """Найти выделенные FAT-звенья, недоступные из дерева каталогов."""
-    reachable: set[int] = set()
+def collect_cluster_owners(image: Fat32Image) -> dict[int, set[str]]:
+    """Сопоставить каждому достижимому кластеру его единственного владельца."""
+    owners: dict[int, set[str]] = {}
     visited_directories: set[int] = set()
 
-    def add_chain(start: int) -> None:
+    def add_chain(start: int, owner: str) -> None:
         if start >= 2:
-            reachable.update(image.cluster_chain(start))
+            for cluster in image.cluster_chain(start):
+                owners.setdefault(cluster, set()).add(owner)
 
-    def visit_directory(cluster: int) -> None:
+    def visit_directory(cluster: int, path: str) -> None:
         if cluster in visited_directories:
             return
         visited_directories.add(cluster)
-        add_chain(cluster)
         for entry in image.parse_dir(cluster):
             if entry["name"] in (".", "..") or entry["cluster"] < 2:
                 continue
-            add_chain(entry["cluster"])
+            owner = f"{path}/{entry['name']}"
+            add_chain(entry["cluster"], owner)
             if entry["attr"] & ATTR_DIRECTORY:
-                visit_directory(entry["cluster"])
+                visit_directory(entry["cluster"], owner)
 
-    visit_directory(image.root_cluster)
+    add_chain(image.root_cluster, "/")
+    visit_directory(image.root_cluster, "")
+    return owners
+
+
+def collect_orphan_clusters(image: Fat32Image) -> set[int]:
+    """Найти выделенные FAT-звенья, недоступные из дерева каталогов."""
+    reachable = set(collect_cluster_owners(image))
+
     max_cluster = (image.total_sectors - image.first_data_sector) // image.spc + 1
     allocated = {cluster for cluster in range(2, max_cluster + 1) if image.get_fat(cluster) != 0}
     return allocated - reachable
@@ -697,12 +716,13 @@ def inspect_filex_fixture(image: Fat32Image, failures: list[str]) -> None:
         if any(raw[513:1024]):
             failures.append("TRUNCMID.BIN: хвост второго сектора не обнулён")
 
+    owners = collect_cluster_owners(image)
     zero = image.find_entry(test_cluster, "TRUNC0.BIN")
     if not zero or zero["size"] != 0 or zero["cluster"] != 0:
         failures.append("TRUNC0.BIN не стал пустым файлом с cluster=0")
     for cluster in manifest["zero_chain"]:
-        if image.get_fat(cluster) != 0:
-            failures.append(f"TRUNC0.BIN не освободил кластер {cluster}")
+        if image.get_fat(cluster) != 0 and cluster not in owners:
+            failures.append(f"Кластер TRUNC0.BIN {cluster} не освобождён и не переиспользован")
 
     grow = image.find_entry(test_cluster, "GROWZERO.BIN")
     if not grow:
@@ -711,6 +731,17 @@ def inspect_filex_fixture(image: Fat32Image, failures: list[str]) -> None:
         payload = image.read_file(test_cluster, "GROWZERO.BIN")
         if payload != bytes([0x5A]) * 13 + bytes(cluster_size + 37 - 13):
             failures.append("GROWZERO.BIN имеет неверный размер или ненулевой новый диапазон")
+
+    if image.find_entry(test_cluster, "CURRSRC.BIN"):
+        failures.append("CURRSRC.BIN остался после CURRENT_DIR replace")
+    current = image.find_entry(test_cluster, "CURRDST.BIN")
+    if not current or image.read_file(test_cluster, "CURRDST.BIN") != b"CURRENT-DIR-SOURCE-" * 37:
+        failures.append("CURRDST.BIN не содержит данные CURRENT_DIR источника")
+    elif image.cluster_chain(current["cluster"]) != manifest["current_source_chain"]:
+        failures.append("CURRDST.BIN получил не исходную FAT-цепочку")
+    for cluster in manifest["current_old_chain"]:
+        if image.get_fat(cluster) != 0 and cluster not in owners:
+            failures.append(f"Старый кластер CURRENT_DIR {cluster} не освобождён и не переиспользован")
 
     source = image.find_entry(test_cluster, "SRC")
     destination = image.find_entry(test_cluster, "DST")
@@ -731,8 +762,8 @@ def inspect_filex_fixture(image: Fat32Image, failures: list[str]) -> None:
         elif image.cluster_chain(replaced["cluster"]) != manifest["replace_source_chain"]:
             failures.append("REPLDST.BIN получил не исходную FAT-цепочку")
         for cluster in manifest["replace_old_chain"]:
-            if image.get_fat(cluster) != 0:
-                failures.append(f"Replace не освободил старый кластер назначения {cluster}")
+            if image.get_fat(cluster) != 0 and cluster not in owners:
+                failures.append(f"Старый кластер Replace {cluster} не освобождён и не переиспользован")
         moved_dir = image.find_entry(dst_cluster, "DIRMOVED")
         if not moved_dir or not (moved_dir["attr"] & ATTR_DIRECTORY):
             failures.append("DIRMOVED не найден после межкаталожного MOVE")
@@ -796,6 +827,14 @@ def inspect_filex_fixture(image: Fat32Image, failures: list[str]) -> None:
         if raw[11] != ATTR_ARCHIVE or any(raw[13:20]) or any(raw[22:26]):
             failures.append("FAULTMET.BIN опубликовал метаданные после отказа каталога")
 
+    crosslinks = {
+        cluster: sorted(paths)
+        for cluster, paths in owners.items()
+        if len(paths) > 1
+    }
+    if crosslinks:
+        cluster = min(crosslinks)
+        failures.append(f"Перекрёстная FAT-цепочка {cluster}: {crosslinks[cluster]}")
     orphans = collect_orphan_clusters(image)
     if orphans:
         failures.append(f"После транзакций остались потерянные FAT-кластеры: {sorted(orphans)[:16]}")

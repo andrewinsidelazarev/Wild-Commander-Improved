@@ -3,12 +3,12 @@
 ; Основные процедуры:
 ;   F36 #8531 — обработка Ctrl-команд и выбор сортировки;
 ;   MarkALL/MarkMUL/Mark #8567/#8575/#85B4 — групповая и одиночная отметка;
-;   STATUS #8747 — строка состояния и счётчики панели;
-;   F12 #8809 — выбор устройства для левой или правой панели;
-;   HELP #88AB — окно справки; COPY #8983 — копирование объектов;
-;   COPYF/DIRCOPY #8ACC/#8B79 — копирование файла и дерева каталогов;
-;   MkDir/Move/DelFl #8CCB/#8D4D/#8E40 — создание, перенос и удаление;
-;   DLME/ERR0 #902F/#90DE — диалог подтверждения и сообщение об ошибке;
+;   STATUS #8723 — строка состояния и счётчики панели;
+;   F12 #87E5 — выбор устройства для левой или правой панели;
+;   HELP #8887 — окно справки; COPY #895F — копирование объектов;
+;   COPYF/DIRCOPY #8AA6/#8BB8 — копирование файла и дерева каталогов;
+;   MkDir/Move/DelFl #8D07/#8D89/#8E7C — создание, перенос и удаление;
+;   DLME/ERR0 #906A/#90DE — диалог подтверждения и сообщение об ошибке;
 ;   F2MENU/EDIT #90FB/#9100 — выбор и запуск редактора.
 ; Карта ниже закрепляет аппаратные константы и адреса ABI соседних модулей.
 ; Файл включается в MODULE WCFX, поэтому короткие исторические имена изолированы.
@@ -157,12 +157,10 @@ ERK     EXX
         RET
 ;---------------------------------------
 DEL64
+        LD B,6
+DEL64_LOOP
         SRL D:RR E,H,L
-        SRL D:RR E,H,L
-        SRL D:RR E,H,L
-        SRL D:RR E,H,L
-        SRL D:RR E,H,L
-        SRL D:RR E,H,L
+        DJNZ DEL64_LOOP
         RET
 
 DLT4PCH LD BC,(PBSTH+1),A,B:OR C
@@ -439,8 +437,7 @@ COPY    CALL CURSER
 TERM    CALL SWPPAND
         LD DE,BRRR:CALL TLSTCAT
         CALL PANELI,FOLD
-        CALL SWPPAND
-        RET
+        JP SWPPAND
 ;*******
 CPDI    PUSH IX
         LD IX,F5WND:CALL PRWOW
@@ -512,8 +509,7 @@ FLOf    LDI:CP (HL):JR Z,$+4:DJNZ FLOf
 
 NAMEBG  EX DE,HL
         LD DE,LOBU+4
-        LD A,(HL):AND #10
-        XOR #10:LD (DE),A
+        LD A,(HL):CPL:AND #10:LD (DE),A
         INC HL,DE
         PUSH HL:LD BC,256:LDIR
         POP HL
@@ -557,22 +553,67 @@ COPYFD  LD (PBWND+5),A
         CALL MKfile:JR NZ,CER0
 
         LD A,BUFPG:CALL MNGC
-        CALL PBSHW
-SVNG    CALL PBPR
+        PUSH IX
+        LD A,(PGC)
+        PUSH AF
+        LD IX,PBWND:CALL PRWOW
+        LD HL,(ENTRY+28)
+        LD DE,(ENTRY+30)
+        CALL DEL64
+        LD (PBSTL+1),HL
+        LD (PBSTH+1),DE
+        LD HL,0,(PBNOW),HL,(PBNOW+2),HL
+        POP AF:CALL MNGC
+        POP IX
+SVNG    CALL COPY_CHUNK
+        LD A,B:OR A:JR Z,COPYF_DATA_DONE
+        PUSH BC
+        CALL PBPR
 
         CALL SWPPAND
         LD HL,#C000
-        LD B,32:CALL LOAD512
+        POP BC:PUSH BC
+        CALL LOAD512
 
         CALL SWPPAND
         LD HL,#C000
-        LD B,32:CALL SAVE512
-        CP #0F:JR NZ,SVNG
+        POP BC:PUSH BC
+        CALL SAVE512
+        POP BC
+        LD A,C:OR A:JR Z,SVNG
 
-        CALL PBHTW
+COPYF_DATA_DONE
+        PUSH IX
+        LD IX,PBWND:CALL RRESB
+        POP IX
 
         CALL SWPPAND
         XOR A
+        RET
+
+; Выбрать следующий логический фрагмент COPYF. LOBU+1 хранит оставшиеся
+; байты исходного файла: B=1..32 — число секторов текущего прохода,
+; C=0 — после него есть ещё данные, C=1 — это последний проход.
+; Для пустого файла возвращаются B=0/C=1, поэтому LOAD512 с B=0 невозможен.
+COPY_CHUNK
+        LD HL,(LOBU+1),DE,(LOBU+3)
+        LD A,D:OR E:JR NZ,COPY_CHUNK_FULL
+        LD A,H:CP #40:JR C,COPY_CHUNK_LAST,NZ,COPY_CHUNK_FULL
+        LD A,L:OR A:JR Z,COPY_CHUNK_LAST
+
+COPY_CHUNK_FULL
+        LD A,H:SUB #40:LD H,A:JR NC,$+3:DEC DE
+        LD (LOBU+1),HL,(LOBU+3),DE
+        LD BC,#2000
+        RET
+
+COPY_CHUNK_LAST
+        LD C,1
+        LD A,H:SRL A:LD B,A
+        JR C,COPY_CHUNK_ROUND
+        LD A,L:OR A:RET Z
+COPY_CHUNK_ROUND
+        INC B
         RET
 
 ; Коды ошибок в B:
@@ -587,16 +628,20 @@ SVNG    CALL PBPR
 ;   254 — операция отменена пользователем;
 ;   255 — COPYF уже показал сообщение об ошибке.
 
-FEEM2   DEC B:LD HL,TERC1:RET Z
-        DEC B:LD HL,TERC2:RET Z
-        DEC B:LD HL,TERC3:RET Z
-        DEC B:LD HL,TERC4:RET Z
-        DEC B:LD HL,TERC5:RET Z
-        DEC B:LD HL,TERC6:RET Z
-        DEC B:LD HL,TERD7:RET Z
-        DEC B:LD HL,TERD8:RET Z
-        LD HL,TERCU
+FEEM2   LD A,B:DEC A:CP 8:JR C,FEEM2_INDEX
+        LD A,8
+FEEM2_INDEX
+        LD E,A,D,0
+        LD HL,FEEM2_LOW:ADD HL,DE:LD L,(HL)
+        LD H,high TERC1
+        LD A,E:CP 4:RET C
+        INC H
         RET
+FEEM2_LOW
+        DB low TERC1,low TERC2,low TERC3,low TERC4
+        DB low TERC5,low TERC6,low TERD7,low TERD8,low TERCU
+        ASSERT high TERC1 == #82 && high TERC4 == #82
+        ASSERT high TERC5 == #83 && high TERCU == #83
 
 ERALT   PUSH AF,BC
         CALL LOADCD2
@@ -613,7 +658,8 @@ ERSKIPO XOR A:INC A
 DIRCOPY CALL FLOF
 
         CALL SAVECD
-        CALL SWPPAND,SAVECD2
+        CALL SWPPAND
+        LD DE,ERRR:CALL TLSTCAT
         CALL SWPPAND
 
         LD HL,#C000,(DDIRS+1),HL
@@ -717,7 +763,6 @@ ERMAIN  PUSH AF,BC:CALL CDIREX
 
 RECBUF  LD A,TVBPG:JP MNGC
 SWPPAND CALL SWPPAN:JP DRACT
-SAVECD2 LD DE,ERRR:JP TLSTCAT
 LOADCD2 LD HL,ERRR:JP GLSTCAT
 CLONEZ  LD A,(PG0),(FEP2),A
         LD HL,#3000,DE,HL
@@ -855,8 +900,7 @@ DelFl   CALL CURSER
         CALL DLDI:RET Z
 
         LD DE,BRRR:CALL TLSTCAT
-        CALL PANELI,FOLD
-        RET
+        CALL PANELI:JP FOLD
 
 DELDIR  CALL SAVECD
 
@@ -1032,25 +1076,6 @@ DLME    PUSH IX
         POP BC,DE,HL:CALL TXTPR
         JR MMEN
 ;---------------------------------------
-PBSHW   PUSH IX
-        LD A,(PGC)
-        PUSH AF
-        LD IX,PBWND:CALL PRWOW
-        LD HL,(ENTRY+28)
-        LD DE,(ENTRY+30)
-        CALL DEL64
-        LD (PBSTL+1),HL
-        LD (PBSTH+1),DE
-        LD HL,0,(PBNOW),HL,(PBNOW+2),HL
-        POP AF
-        CALL MNGC
-        POP IX
-        RET
-PBHTW   PUSH IX
-        LD IX,PBWND:CALL RRESB
-        POP IX
-        RET
-;-------
 PBPR    PUSH IX
         LD A,(PGC)
         PUSH AF
@@ -1084,9 +1109,8 @@ DOL
         LD A,(IX+5):SUB 2
         LD D,A,E,#01,BC,64:CALL PRSRW
         POP AF
-        CALL MNGC
         POP IX
-        RET
+        JP MNGC
 ;-------
 ERR0    ; Вход: HL — адрес текста сообщения.
 

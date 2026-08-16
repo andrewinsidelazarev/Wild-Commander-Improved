@@ -29,6 +29,8 @@ WLD     EQU #6006; Plugin System Call Point
 TMN     EQU #6009; Timer
 HEI     EQU #600E; Height (25,30,36)
 
+        INCLUDE "../../CORE32_FILEX_API.ASM"
+
 CYC     EQU #2BAF;      Cache
 CACHE   EQU %00000100; #8000 Only!
 
@@ -2432,18 +2434,40 @@ ETSFILL         LD A," "
                 LD (DE),A:INC DE:DJNZ $-2
                 RET
 ;---------------------------------------
-; Возврат: Z — все требуемые страницы записаны, NZ — драйвер сообщил ошибку.
-SAVEDAT LD A,PGZ,(SVD+1),A
+; Возврат: Z — записаны ровно ceil(file_size/512) секторов, NZ — ошибка.
+; SAVE512 ограничен физическим концом FAT-цепочки, а не логическим размером.
+; Прежний B=32 поэтому записывал до 16 КиБ кластерного хвоста даже для wc.ini.
+; DAHL/DADE после FILE_SIZE_COPY больше не нужны как размер и служат счётчиком.
+SAVEDAT LD HL,(FLMAKE+1),DE,(FLMAKE+3)
+        LD BC,511:ADD HL,BC:JR NC,$+3:INC DE
+        DUP 9
+         SRL D:RR E:RR H:RR L
+        EDUP
+        LD A,D:OR E:JR NZ,SAVEDAT_ERROR
+        LD A,H:OR L:JR Z,SAVEDAT_ERROR
+        LD (DAHL),HL
+
+        LD A,PGZ,(SVD+1),A
 SVD     LD A,0
         CALL MNGCVPL
         LD HL,SVD+1:INC (HL)
-        LD HL,#C000,B,32:CALL SAVE512
+
+        LD HL,(DAHL),B,32
+        LD A,H:OR A:JR NZ,SAVEDAT_COUNT_READY
+        LD A,L:CP 32:JR NC,SAVEDAT_COUNT_READY
+        LD B,A
+SAVEDAT_COUNT_READY
+        LD A,B:LD (DADE),A
+        LD HL,#C000:CALL SAVE512
         JR C,SAVEDAT_ERROR
-        CP #FF:JR Z,SAVEDAT_ERROR
-        CP #0F:JR Z,SAVEDAT_OK
-        OR A:JR NZ,SAVEDAT_ERROR
-        LD BC,(DHLA+2):INC C
-        LD A,(SVD+1):CP C:JR NC,SAVEDAT_OK
+        OR A:JR Z,SAVEDAT_STATUS_OK
+        CP #0F:JR NZ,SAVEDAT_ERROR
+SAVEDAT_STATUS_OK
+        LD (DADE+1),A
+        LD A,(DADE):LD C,A,B,0
+        LD HL,(DAHL):OR A:SBC HL,BC:LD (DAHL),HL
+        LD A,H:OR L:JR Z,SAVEDAT_OK
+        LD A,(DADE+1):OR A:JR NZ,SAVEDAT_ERROR
         JP SVD
 SAVEDAT_ERROR LD A,#FF:OR A:RET
 SAVEDAT_OK    XOR A:RET
@@ -2467,12 +2491,17 @@ DROP_ACTIVE_SAVEAS
         CALL DELFL
         LD A,#FF:OR A:RET
 ;---------------------------------------
-; Полный контур безопасной замены. Возврат: Z — новое содержимое опубликовано
-; под исходным именем; NZ — данные оставлены под исходным или служебным именем.
+; Реальная SD-ZC зависает внутри FILEX MOVE_RENAME даже после холодной
+; перезагрузки EVO. Используем проверенную транзакционную замену через
+; RENAME/rollback. Быстрый COPY-подобный allocator hint остаётся в MKFILE.
+; Возврат: Z — новое содержимое опубликовано; NZ — сохранение не завершено.
 SAFE_STORE
+        LD HL,FLMAKE+1,DE,TMPMAKE+1,BC,4:LDIR
+        JP SAFE_STORE_LEGACY
+
+SAFE_STORE_LEGACY
         CALL SAFE_NAMES:RET NZ
 
-        LD HL,FLMAKE+1,DE,TMPMAKE+1,BC,4:LDIR
         LD HL,TMPMAKE:CALL MKFILE:RET NZ
         LD A,3,(ESTA),A
         CALL SAVEDAT:JR Z,SAFE_STORE_WRITTEN
@@ -2506,6 +2535,66 @@ SAFE_STORE_DONE
         LD HL,BAKQUERY:CALL DELFL
         XOR A:RET
 ;---------------------------------------
+; FILEX заранее записывает новый файл, затем одной операцией перенаправляет
+; существующую directory entry и только после commit освобождает старую цепь.
+FILEX_SAFE_STORE
+        CALL FILEX_CREATE_TEMP:RET NZ
+        LD A,3,(ESTA),A
+        CALL SAVEDAT:JR Z,FILEX_SAFE_STORE_WRITTEN
+        LD HL,TMPQUERY:CALL DELFL
+        LD A,1:OR A:RET
+
+FILEX_SAFE_STORE_WRITTEN
+        JP FILEX_REPLACE_CURRENT
+;---------------------------------------
+; В нормальном случае MKFILE сам проверяет имя: отдельные FENTRY для temp и
+; ненужного быстрому пути backup лишь повторно читали каталог. При коллизии
+; пробуем следующую цифру; существующие recovery-копии не удаляются.
+FILEX_CREATE_TEMP
+        LD A,"0"
+FILEX_CREATE_TEMP_LOOP
+        LD (SAFE_SLOT),A
+        LD (TMPMAKE_DIGIT),A
+        LD (TMPQUERY_DIGIT),A
+        LD HL,TMPMAKE:CALL MKFILE:RET Z
+        LD A,(SAFE_SLOT):INC A:CP ":":JR C,FILEX_CREATE_TEMP_LOOP
+FILEX_CREATE_TEMP_ERROR
+        OR A:RET
+;---------------------------------------
+; QUERY_CAPS не меняет диск. Z означает, что провайдер понимает новый флаг;
+; любая старая версия либо отсутствие FILEX выбирает legacy fallback.
+FILEX_FAST_AVAILABLE
+        CALL FILEX_RESET_BLOCK
+        LD A,FILEX_OP_QUERY_CAPS:LD (FILEX_BLOCK+FILEX_P_OPERATION),A
+        CALL FILEX
+        OR A:RET NZ
+        LD A,(FILEX_BLOCK+FILEX_P_RESULT_FLAGS):CP FILEX_API_VERSION:RET NZ
+        LD A,(FILEX_BLOCK+FILEX_P_RESULT_COUNT)
+        AND FILEX_CAP_MOVE_CURRENT_DIR
+        CP FILEX_CAP_MOVE_CURRENT_DIR
+        RET
+;---------------------------------------
+FILEX_REPLACE_CURRENT
+        CALL FILEX_RESET_BLOCK
+        LD A,FILEX_OP_MOVE_RENAME:LD (FILEX_BLOCK+FILEX_P_OPERATION),A
+        LD A,FILEX_FLAG_REPLACE|FILEX_FLAG_CURRENT_DIR
+        LD (FILEX_BLOCK+FILEX_P_FLAGS),A
+        LD HL,TMPQUERY:LD (FILEX_BLOCK+FILEX_P_BUFFER),HL
+        LD HL,TMPQUERY_END-TMPQUERY:LD (FILEX_BLOCK+FILEX_P_LENGTH),HL
+        LD HL,FLLOAD:LD (FILEX_BLOCK+FILEX_P_AUX),HL
+        LD HL,257:LD (FILEX_BLOCK+FILEX_P_AUX_LENGTH),HL
+        CALL FILEX
+        OR A:RET Z
+        CP FILEX_STATUS_COMMITTED_CLEANUP:RET NZ
+        XOR A:RET
+;---------------------------------------
+FILEX_RESET_BLOCK
+        LD HL,FILEX_BLOCK,DE,FILEX_BLOCK+1,BC,FILEX_BLOCK_SIZE-1
+        XOR A:LD (HL),A:LDIR
+        LD A,FILEX_BLOCK_SIZE:LD (FILEX_BLOCK+FILEX_P_SIZE),A
+        LD A,FILEX_API_VERSION:LD (FILEX_BLOCK+FILEX_P_VERSION),A
+        RET
+;---------------------------------------
 ; Выбираем пару свободных имён WCETMP0.$$$/WCEBAK0.$$$ ... 9.
 ; Существующие служебные файлы никогда не удаляются: это могут быть данные
 ; после прежнего аварийного сохранения.
@@ -2529,6 +2618,7 @@ PRM_PL  EXA:LD A,83:JP WLD
 MNGC_PL EXA:LD A,0:JP WLD
 MNG0_PL EXA:LD A,78:JP WLD
 MNG8_PL EXA:LD A,79:JP WLD
+FILEX   PUSH IX:LD HL,FILEX_BLOCK:LD A,77:CALL WLD:POP IX:RET
 PRWOW   LD A,1:JP WLD
 RRESB   LD A,2:JP WLD
 PRSRW   LD A,3:JP WLD
@@ -2798,6 +2888,7 @@ TMPQUERY DB 0                     ; искать только файл
 TMPQUERY_NAME DB "WCETMP"
 TMPQUERY_DIGIT DB "0"
         DB ".$$$",0
+TMPQUERY_END
 
 BAKQUERY DB 0                     ; искать только файл
 BAKQUERY_NAME DB "WCEBAK"
@@ -2807,7 +2898,8 @@ BAKQUERY_DIGIT DB "0"
 SAFE_SLOT DB "0"
 
 ; Имя активного файла восстанавливается, если Save As завершился ошибкой.
-SAVEAS_OLD_NAME DS 256
+SAVEAS_OLD_NAME
+FILEX_BLOCK     DS 256
 
 ;File-size
 DAHL    DS 2; Low

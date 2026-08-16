@@ -41,6 +41,7 @@ ENTRY_TABLE:
         JP VALIDATE_NAME
         JP MAP_OLDER_LFN_POINTER
         JP UNPACK_DRIVER
+        IFDEF WDOS_EXPERIMENTAL_ZC_RUNTIME
         JP ZC_WAIT_READY
         JP ZC_WAIT_TOKEN
         JP ZC_WAIT_BUSY
@@ -51,12 +52,17 @@ ENTRY_TABLE:
         JP ZC_WRITE_READY
         JP ZC_START_WRITE
         JP ZC_CHECK_TOKEN
+        ENDIF
         JP ZERO_CLUSTER_TAIL
 ; Codex - 2026-07-17 - begin
         JP COPY_ENTRY_AND_CAPTURE
         JP APPEND_BYTES
         JP COPY_TO_ENTRY
         JP FILEX_CONTEXT_BRIDGE
+        JP LOAD_FREE_HINT
+        JP NOTE_FREED_CHAIN
+        JP SAVE_NEXT_FREE_HINT
+        JP GET_DATA_CLUSTER_LIMIT
 ; Codex - 2026-07-17 - end
 ; Codex - 2026-07-16 - end
 ENTRY_TABLE_END:
@@ -1128,9 +1134,21 @@ COMPARE_LFN_CHAR:
 
 ; MKFILE(0): корректный пустой файл имеет нулевой первый кластер и не должен
 ; входить в MKSG, где DEC превращает младшее слово счётчика в #FFFF.
+; После успешного MKSG сохранить уже вычисленный FSTFRC. Без этого шага
+; FSI_Nxt_Free оставался старым: первый COPYF каждого запуска линейно читал
+; FAT, тогда как следующие копии использовали быстрое состояние только в RAM.
+; FSInfo является необязательной подсказкой, поэтому его плохая сигнатура или
+; отдельная ошибка обновления не превращает уже выделенную цепочку в ошибку.
 ALLOCATE_FILE:
         LD A,D:OR E,H,L
-        JP NZ,@WDOS.MKSG
+        JR Z,.empty
+        CALL @WDOS.MKSG
+        RET NZ
+        CALL RFRH_SAFE
+        XOR A
+        LD (@WDOS.ABT),A
+        RET
+.empty:
         LD (@WDOS.FCTS),HL
         LD (@WDOS.FCTS+2),HL
         RET
@@ -1165,6 +1183,118 @@ LOAD_FAT_CONFIG:
         RET
 .bad:
         LD A,1:OR A
+        RET
+
+; Проверить значение DE:HL как начальную подсказку поиска. Допустимы только
+; настоящие data-кластеры, для которых существует сектор внутри текущей FAT.
+; Регистры DE:HL сохраняются; Z означает допустимое значение.
+VALIDATE_FREE_HINT:
+        PUSH HL,DE
+        LD A,D:OR E:OR H:JR NZ,.minimum_ok
+        LD A,L:CP 2:JR C,.bad_restore
+.minimum_ok:
+        LD BC,(FAT_DATA_CLUSTER_LIMIT)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(FAT_DATA_CLUSTER_LIMIT+2)
+        SBC HL,BC
+        EX DE,HL
+        JR NC,.bad_restore
+        POP DE,HL
+
+        PUSH HL,DE
+        CALL @WDOS.DEL128
+        CALL FAT_SECTOR_IN_RANGE
+        POP DE,HL
+        JR NC,.bad
+        XOR A
+        RET
+.bad_restore:
+        POP DE,HL
+.bad:
+        LD A,1:OR A
+        RET
+
+; Прочитать FSI_Nxt_Free. FSInfo является подсказкой: плохой сектор, сигнатуры,
+; #FFFFFFFF или выход за область данных не мешают монтированию и дают fallback 2.
+LOAD_FREE_HINT:
+        LD HL,2:LD (@WDOS.FSTFRC),HL
+        LD (FAT_DATA_CLUSTER_LIMIT),HL
+        LD HL,0:LD (@WDOS.FSTFRC+2),HL
+        LD (FAT_DATA_CLUSTER_LIMIT+2),HL
+
+        ; SDFAT уже вычислен основной частью как первый data-сектор. Получить
+        ; верхнюю границу кластеров непосредственно из ещё сохранённого BPB.
+        LD HL,(@WDOS.LOBU+19)
+        LD A,H:OR L:JR Z,.total32
+        LD DE,0
+        JR .total_ready
+.total32:
+        LD HL,(@WDOS.LOBU+32),DE,(@WDOS.LOBU+34)
+.total_ready:
+        LD BC,(@WDOS.SDFAT)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.SDFAT+2)
+        SBC HL,BC
+        EX DE,HL
+        JR C,.done
+        LD A,(@WDOS.BSECPC)
+.divide:
+        CP 1:JR Z,.limit_ready
+        SRL D:RR E:RR H:RR L
+        SRL A
+        JR .divide
+.limit_ready:
+        LD BC,2:CALL @WDOS.ADD4B
+        LD (FAT_DATA_CLUSTER_LIMIT),HL
+        LD (FAT_DATA_CLUSTER_LIMIT+2),DE
+
+        LD HL,(@WDOS.FSINF),DE,(@WDOS.FSINF+2)
+        CALL @WDOS.XPOZI
+        LD HL,@WDOS.LOBU,A,1
+        CALL READ_SECTORS
+        JR NZ,.done
+        CALL VALIDATE_FSINFO_SECTOR
+        JR NZ,.done
+        LD HL,(@WDOS.LOBU+492),DE,(@WDOS.LOBU+494)
+        CALL VALIDATE_FREE_HINT
+        JR NZ,.done
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
+.done:
+        XOR A
+        LD (@WDOS.ABT),A
+        RET
+
+GET_DATA_CLUSTER_LIMIT:
+        LD HL,(FAT_DATA_CLUSTER_LIMIT),DE,(FAT_DATA_CLUSTER_LIMIT+2)
+        XOR A
+        RET
+
+; Для read-only preflight FILEX хранить уже увеличенный CADE:CAHL. Если
+; найденный кластер был последним в области данных, следующая подсказка
+; безопасно оборачивается к 2. Сам MKSG эту точку не вызывает: его FAT-итератор
+; одновременно живёт в альтернативном наборе регистров.
+SAVE_NEXT_FREE_HINT:
+        PUSH AF,BC,DE,HL
+        LD HL,(@WDOS.CAHL),DE,(@WDOS.CADE)
+        CALL VALIDATE_FREE_HINT
+        JR Z,.store
+        LD HL,2:LD DE,0
+.store:
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
+        POP HL,DE,BC,AF
+        RET
+
+; Освобождение не уничтожает подсказку. Ненулевая голова цепочки гарантированно
+; станет свободной после успешной записи FAT и является точной новой позицией.
+NOTE_FREED_CHAIN:
+        LD HL,(@WDOS.LOBU),DE,(@WDOS.LOBU+2)
+        LD A,D:OR E:OR H:OR L:RET Z
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
         RET
 
 ; Позиционировать устройство на сектор DE:HL относительно начала FAT с индексом
@@ -1472,6 +1602,26 @@ RFRH_SAFE:
         CALL READ_SECTORS
         RET NZ
 
+        CALL VALIDATE_FSINFO_SECTOR
+        JR NZ,.bad
+
+        LD HL,#FFFF
+        LD (@WDOS.LOBU+488),HL
+        LD (@WDOS.LOBU+490),HL
+        LD HL,(@WDOS.FSTFRC),DE,(@WDOS.FSTFRC+2)
+        CALL VALIDATE_FREE_HINT
+        JR Z,.have_hint
+        LD HL,#FFFF,DE,HL
+.have_hint:
+        LD (@WDOS.LOBU+492),HL
+        LD (@WDOS.LOBU+494),DE
+        LD HL,@WDOS.LOBU,A,1
+        JP WRITE_SECTORS
+.bad:
+        LD A,1:OR A
+        RET
+
+VALIDATE_FSINFO_SECTOR:
         LD HL,(@WDOS.LOBU+0),DE,#5252
         OR A:SBC HL,DE:JR NZ,.bad
         LD HL,(@WDOS.LOBU+2),DE,#4161
@@ -1484,18 +1634,8 @@ RFRH_SAFE:
         OR A:SBC HL,DE:JR NZ,.bad
         LD HL,(@WDOS.LOBU+510),DE,#AA55
         OR A:SBC HL,DE:JR NZ,.bad
-
-        LD HL,#FFFF
-        LD (@WDOS.LOBU+488),HL
-        LD (@WDOS.LOBU+490),HL
-        LD HL,(@WDOS.FSTFRC),DE,(@WDOS.FSTFRC+2)
-        LD A,D:OR E,H,L:JR NZ,.have_hint
-        LD HL,#FFFF,DE,HL
-.have_hint:
-        LD (@WDOS.LOBU+492),HL
-        LD (@WDOS.LOBU+494),DE
-        LD HL,@WDOS.LOBU,A,1
-        JP WRITE_SECTORS
+        XOR A
+        RET
 .bad:
         LD A,1:OR A
         RET
@@ -1529,6 +1669,11 @@ UNPACK_DRIVER:
         LD A,B
         RET
 ; Codex - 2026-07-17 - end
+
+; Боевой CORE32 распаковывает точный штатный DOSpSDZC35.CPD и не вызывает эти
+; экспериментальные точки. Их реализация и дополнительные номера шлюза
+; добавляются только специальной диагностической сборкой.
+        IFDEF WDOS_EXPERIMENTAL_ZC_RUNTIME
 
 ; Общий аварийный выход SD-ZC: зафиксировать ошибку и снять chip-select.
 ZC_MARK_ERROR:
@@ -1728,6 +1873,12 @@ ZC_CHECK_TOKEN:
 .failed:
         JP ZC_MARK_ERROR
 ; Codex - 2026-07-16 - end
+
+        ENDIF
+
+; Геометрия FAT32 и временное состояние подсказки аллокатора. Верхняя граница
+; является исключительной: допустимы кластеры 2..limit-1.
+FAT_DATA_CLUSTER_LIMIT:       DS 4
 
 ; Codex - 2026-07-17 - begin
 ; Постоянный контекст APPEND хранится в выделенной странице расширения и не
