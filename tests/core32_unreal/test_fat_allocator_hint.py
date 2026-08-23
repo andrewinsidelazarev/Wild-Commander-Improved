@@ -72,14 +72,21 @@ class ExtensionHarness:
             EXTENSION_BASE, (BUILD / "CORE32_EXT.bin").read_bytes()
         )
         self.read_sector = make_fsinfo(2)
+        self.sector_overrides: dict[int, bytes] = {}
+        self.position = 0
+        self.read_calls: list[tuple[int, int, int]] = []
+        self.fat_entries: dict[int, int] = {}
+        self.curit_calls: list[int] = []
         self.written_sectors: list[bytes] = []
         self.mock_mksg_hint = 0
         self.callouts = {
-            self.core["XPOZI"]: self._return,
+            self.core["XPOZI"]: self._position,
+            self.core["XSPOZ"]: self._return,
             self.core["RDDSE"]: self._read,
             self.core["SDDSE"]: self._write,
             self.core["ADD4B"]: self._add4b,
             self.core["DEL128"]: self._del128,
+            self.core["CURIT"]: self._curit,
             self.core["MKSG"]: self._mksg,
         }
         for address in self.callouts:
@@ -94,9 +101,20 @@ class ExtensionHarness:
         self.machine.sp = self.machine.sp + 2 & 0xFFFF
         self.machine.pc = return_address
 
+    def _position(self) -> None:
+        self.position = self.machine.de << 16 | self.machine.hl
+        self._return()
+
     def _read(self) -> None:
         target = self.machine.hl
-        self.memory[target : target + 512] = self.read_sector
+        count = self.machine.a
+        self.read_calls.append((self.position, count, target))
+        for index in range(count):
+            sector = self.sector_overrides.get(
+                self.position + index, self.read_sector
+            )
+            start = target + index * 512
+            self.memory[start : start + 512] = sector
         self.memory[self.core["ABT"]] = 0
         self._return()
 
@@ -121,6 +139,15 @@ class ExtensionHarness:
         self.machine.bc = remainder
         self.machine.a = remainder
         self.machine.f = ZERO_FLAG if remainder == 0 else 0
+        self._return()
+
+    def _curit(self) -> None:
+        cluster = self.machine.de << 16 | self.machine.hl
+        self.curit_calls.append(cluster)
+        pointer = self.core["SECBU"]
+        put32(self.memory, pointer, self.fat_entries.get(cluster, 0))
+        self.machine.hl = pointer
+        self.machine.f &= ~1
         self._return()
 
     def _mksg(self) -> None:
@@ -159,10 +186,17 @@ class ExtensionHarness:
         put16(self.memory, lobu + 19, 0)
         put32(self.memory, lobu + 32, total_sectors)
         put32(self.memory, self.core["SDFAT"], first_data_sector)
+        put16(self.memory, self.core["SFAT"], 32)
         put32(self.memory, self.core["BFTSZ"], 1_600)
         self.memory[self.core["BSECPC"]] = 1
+        self.memory[self.core["BFATS"]] = 1
+        self.memory[self.core["FATFLAGS"]] = 0
         put32(self.memory, self.core["FSINF"], 1)
         self.read_sector = make_fsinfo(next_free, valid=valid_fsinfo)
+        self.sector_overrides.clear()
+        self.read_calls.clear()
+        self.fat_entries.clear()
+        self.curit_calls.clear()
         return data_limit
 
 
@@ -270,21 +304,36 @@ def main() -> int:
     memory = harness.memory
 
     data_limit = harness.configure_volume(4_456)
+    cold_fallback = data_limit - (data_limit >> 4)
     harness.invoke("LOAD_FREE_HINT")
     expect("вычисленная data-граница", get32(memory, harness.ext_address("FAT_DATA_CLUSTER_LIMIT")), data_limit)
     expect("валидный FSI_Nxt_Free", get32(memory, core["FSTFRC"]), 4_456)
+    expect("валидный FSI_Nxt_Free проверяется по FAT", harness.curit_calls, [4_456])
 
     harness.configure_volume(0xFFFFFFFF)
     harness.invoke("LOAD_FREE_HINT")
-    expect("неизвестный FSI_Nxt_Free", get32(memory, core["FSTFRC"]), 2)
+    expect("неизвестный FSI_Nxt_Free", get32(memory, core["FSTFRC"]), cold_fallback)
 
     harness.configure_volume(data_limit)
     harness.invoke("LOAD_FREE_HINT")
-    expect("подсказка за data-границей", get32(memory, core["FSTFRC"]), 2)
+    expect("подсказка за data-границей", get32(memory, core["FSTFRC"]), cold_fallback)
 
     harness.configure_volume(4_456, valid_fsinfo=False)
     harness.invoke("LOAD_FREE_HINT")
-    expect("плохая сигнатура FSInfo", get32(memory, core["FSTFRC"]), 2)
+    expect("плохая сигнатура FSInfo", get32(memory, core["FSTFRC"]), cold_fallback)
+
+    # Формально допустимый, но уже занятый FSI_Nxt_Free не должен запускать
+    # холодный линейный проход от начала большой FAT. Проверка только читает
+    # одну FAT-запись и выбирает безопасную RAM-точку 15/16 тома.
+    stale_hint = 3
+    harness.configure_volume(stale_hint)
+    harness.fat_entries[stale_hint] = 0x0FFFFFFF
+    harness.written_sectors.clear()
+    harness.invoke("LOAD_FREE_HINT")
+    expect("занятая FSInfo-подсказка заменяется холодной", get32(memory, core["FSTFRC"]), cold_fallback)
+    expect("занятая FSInfo-подсказка проверяется один раз", harness.curit_calls, [stale_hint])
+    expect("FSInfo читается один раз до отдельной FAT-проверки", len(harness.read_calls), 1)
+    expect("холодная проверка не пишет носитель", len(harness.written_sectors), 0)
 
     put32(memory, core["FSTFRC"], 7_000)
     put32(memory, core["LOBU"], 321)
@@ -316,11 +365,11 @@ def main() -> int:
     written = memoryview(harness.written_sectors[0])
     expect("FSInfo отвергает padding", get32(written, 492), 0xFFFFFFFF)
 
-    # Полный холодный цикл: неизвестная подсказка даёт fallback 2, успешное
+    # Полный холодный цикл: неизвестная подсказка даёт fallback 15/16, успешное
     # выделение сохраняет следующий кандидат, новое монтирование читает его.
     harness.configure_volume(0xFFFFFFFF)
     harness.invoke("LOAD_FREE_HINT")
-    expect("холодный старт поиска", get32(memory, core["FSTFRC"]), 2)
+    expect("холодный старт поиска", get32(memory, core["FSTFRC"]), cold_fallback)
     put32(memory, core["CAHL"], 4_457)
     harness.invoke("SAVE_NEXT_FREE_HINT")
     harness.written_sectors.clear()
@@ -342,13 +391,8 @@ def main() -> int:
     harness.machine.hl = 541
     harness.machine.de = 0
     harness.invoke("ALLOCATE_FILE")
-    expect("MKFILE allocation пишет FSInfo", len(harness.written_sectors), 1)
-    expect(
-        "MKFILE allocation сохраняет FSTFRC",
-        get32(memoryview(harness.written_sectors[0]), 492),
-        7_001,
-    )
-    expect("ошибка необязательной подсказки не остаётся в ABT", memory[core["ABT"]], 0)
+    expect("MKFILE allocation не пишет FSInfo", len(harness.written_sectors), 0)
+    expect("MKFILE allocation сохраняет RAM-подсказку", get32(memory, core["FSTFRC"]), 7_001)
 
     harness.written_sectors.clear()
     harness.machine.hl = 0
@@ -403,8 +447,8 @@ def main() -> int:
     expect("FILEX READ_FAT bound no I/O", filex.read_sectors, [])
 
     print(
-        "FAT allocator hint PASS: mount Next_Free, fallback, data limit, "
-        "delete hint, MKSG inline cursor, next preflight candidate, MKFILE FSInfo/remount, "
+        "FAT allocator hint PASS: mount Next_Free, stale-entry check, 15/16 fallback, data limit, "
+        "delete hint, MKSG inline cursor, next preflight candidate, explicit FSInfo/remount, "
         "FILEX unique wrap and active FAT windows"
     )
     return 0

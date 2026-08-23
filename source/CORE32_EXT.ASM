@@ -1134,19 +1134,13 @@ COMPARE_LFN_CHAR:
 
 ; MKFILE(0): корректный пустой файл имеет нулевой первый кластер и не должен
 ; входить в MKSG, где DEC превращает младшее слово счётчика в #FFFF.
-; После успешного MKSG сохранить уже вычисленный FSTFRC. Без этого шага
-; FSI_Nxt_Free оставался старым: первый COPYF каждого запуска линейно читал
-; FAT, тогда как следующие копии использовали быстрое состояние только в RAM.
-; FSInfo является необязательной подсказкой, поэтому его плохая сигнатура или
-; отдельная ошибка обновления не превращает уже выделенную цепочку в ошибку.
+; После MKSG не записывать FSInfo автоматически. На реальном SD-ZC этот
+; дополнительный I/O зависал и в F5 COPY, и в транзакционном сохранении
+; TXTEDIT. Найденная позиция остаётся в FSTFRC для текущего сеанса.
 ALLOCATE_FILE:
         LD A,D:OR E,H,L
         JR Z,.empty
         CALL @WDOS.MKSG
-        RET NZ
-        CALL RFRH_SAFE
-        XOR A
-        LD (@WDOS.ABT),A
         RET
 .empty:
         LD (@WDOS.FCTS),HL
@@ -1216,7 +1210,9 @@ VALIDATE_FREE_HINT:
         RET
 
 ; Прочитать FSI_Nxt_Free. FSInfo является подсказкой: плохой сектор, сигнатуры,
-; #FFFFFFFF или выход за область данных не мешают монтированию и дают fallback 2.
+; #FFFFFFFF, занятый кластер или выход за область данных не мешают монтированию.
+; Для такого холодного старта RAM-курсор ставится в 15/16 области данных:
+; штатный SRHFCL всё равно проверяет FAT и при необходимости делает полный wrap.
 LOAD_FREE_HINT:
         LD HL,2:LD (@WDOS.FSTFRC),HL
         LD (FAT_DATA_CLUSTER_LIMIT),HL
@@ -1249,6 +1245,7 @@ LOAD_FREE_HINT:
         LD BC,2:CALL @WDOS.ADD4B
         LD (FAT_DATA_CLUSTER_LIMIT),HL
         LD (FAT_DATA_CLUSTER_LIMIT+2),DE
+        CALL SET_COLD_FREE_HINT
 
         LD HL,(@WDOS.FSINF),DE,(@WDOS.FSINF+2)
         CALL @WDOS.XPOZI
@@ -1260,11 +1257,41 @@ LOAD_FREE_HINT:
         LD HL,(@WDOS.LOBU+492),DE,(@WDOS.LOBU+494)
         CALL VALIDATE_FREE_HINT
         JR NZ,.done
+        LD (@WDOS.CAHL),HL
+        LD (@WDOS.CADE),DE
+        CALL @WDOS.CURIT
+        JR C,.done
+        LD A,(HL):INC HL
+        OR (HL):INC HL
+        OR (HL):INC HL
+        OR (HL):JR NZ,.done
+        LD HL,(@WDOS.CAHL),DE,(@WDOS.CADE)
         LD (@WDOS.FSTFRC),HL
         LD (@WDOS.FSTFRC+2),DE
 .done:
         XOR A
         LD (@WDOS.ABT),A
+        RET
+
+; Выбрать безопасную read-only стартовую точку рядом с концом тома. CADE:CAHL
+; здесь служит только временной копией limit/16; перед первым SRHFCL курсор всё
+; равно заново загружается из FSTFRC.
+SET_COLD_FREE_HINT:
+        LD HL,(FAT_DATA_CLUSTER_LIMIT),DE,(FAT_DATA_CLUSTER_LIMIT+2)
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
+        LD B,4
+.divide:
+        SRL D:RR E:RR H:RR L
+        DJNZ .divide
+        LD (@WDOS.CAHL),HL
+        LD (@WDOS.CADE),DE
+        LD HL,(@WDOS.FSTFRC),BC,(@WDOS.CAHL)
+        OR A:SBC HL,BC
+        LD (@WDOS.FSTFRC),HL
+        LD HL,(@WDOS.FSTFRC+2),BC,(@WDOS.CADE)
+        SBC HL,BC
+        LD (@WDOS.FSTFRC+2),HL
         RET
 
 GET_DATA_CLUSTER_LIMIT:

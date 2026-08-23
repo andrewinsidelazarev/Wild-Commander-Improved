@@ -2493,7 +2493,7 @@ DROP_ACTIVE_SAVEAS
 ;---------------------------------------
 ; Реальная SD-ZC зависает внутри FILEX MOVE_RENAME даже после холодной
 ; перезагрузки EVO. Используем проверенную транзакционную замену через
-; RENAME/rollback. Быстрый COPY-подобный allocator hint остаётся в MKFILE.
+; RENAME/rollback. MKFILE также не выполняет дополнительную запись FSInfo.
 ; Возврат: Z — новое содержимое опубликовано; NZ — сохранение не завершено.
 SAFE_STORE
         LD HL,FLMAKE+1,DE,TMPMAKE+1,BC,4:LDIR

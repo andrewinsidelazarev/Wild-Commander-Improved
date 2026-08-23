@@ -1009,7 +1009,11 @@ DDIRS   LD DE,0
         LD A,2
         PUSH DE:CALL NXTETY2:POP DE
 
-        LD A,2
+        ; Рекурсивному F8 имя нужно только для повторного FENTRY/DELFL, а не
+        ; для создания нового объекта. Берём гарантированный FAT short alias:
+        ; LFN из страницы стека #C000 нельзя сравнивать, пока шлюз расширения
+        ; WildDOS временно использует то же окно #C000.
+        LD A,#82
         PUSH DE:CALL NXTETY2
         POP HL:JR Z,NODIRS
         EX DE,HL

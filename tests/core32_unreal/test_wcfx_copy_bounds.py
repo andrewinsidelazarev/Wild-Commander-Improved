@@ -50,10 +50,20 @@ class BootHarness:
         self.machine = z80.Z80Machine()
         self.memory = self.machine.memory
         self.machine.set_memory_block(PAYLOAD_BASE, PAYLOAD.read_bytes())
+        core_source = self.symbols["WDOS.CORE32"]
+        core_start = self.symbols["WDOS.START"]
+        core_length = self.symbols["WDOS.END"] - core_start
+        self.machine.set_memory_block(
+            core_start,
+            bytes(self.memory[core_source : core_source + core_length]),
+        )
         self.machine.set_breakpoint(RETURN_SENTINEL)
 
     def address(self, name: str) -> int:
         return self.symbols[f"WCFX.{name}"]
+
+    def wdos_address(self, name: str) -> int:
+        return self.symbols[f"WDOS.{name}"]
 
     def invoke(self, address: int, *, hl: int = 0, de: int = 0, b: int = 0) -> None:
         self.machine.sp = STACK_BASE
@@ -246,6 +256,97 @@ def test_compacted_helpers() -> None:
         expect(f"FEEM2 B={code}", harness.machine.hl, harness.symbols[target])
 
 
+def read_c_string(memory: memoryview, address: int, limit: int = 256) -> bytes:
+    result = bytearray()
+    for offset in range(limit):
+        value = memory[address + offset]
+        if value == 0:
+            return bytes(result)
+        result.append(value)
+    raise AssertionError(f"строка по #{address:04X} не завершена за {limit} байт")
+
+
+def test_sfn_name_output() -> None:
+    cases = (
+        (b"BOOT    $C ", 0x00, b"boot.$c"),
+        (b"ONE     C  ", 0x00, b"one.c"),
+        (b"TWO     GZ ", 0x00, b"two.gz"),
+        (b"THREE   BIN", 0x00, b"three.bin"),
+        (b"NOEXT      ", 0x00, b"noext"),
+        (b"LEVEL1     ", 0x10, b"level1"),
+    )
+    for short_name, attr, expected in cases:
+        harness = BootHarness()
+        source = 0xB200
+        output = 0xB300
+        harness.memory[source : source + 11] = short_name
+        harness.memory[source + 11] = attr
+        harness.invoke(harness.wdos_address("Snm"), hl=source, de=output)
+        expect(
+            f"SFN {short_name!r}: NXTETY",
+            read_c_string(harness.memory, output),
+            expected,
+        )
+        expect(
+            f"SFN {short_name!r}: DE после имени",
+            harness.machine.de,
+            output + len(expected) + 1,
+        )
+
+
+def test_copy_rename_name_normalization() -> None:
+    cases = (
+        b"boot.$c",
+        b"one.c",
+        b"two.gz",
+        b"three.bin",
+        b"noext",
+        b"Long Name.GZ",
+        b"Long Name.extension",
+    )
+    for panel_name in cases:
+        harness = BootHarness()
+        source = 0x9000
+        source_payload = bytes((0x10,)) + panel_name + b"\0"
+        harness.memory[source : source + len(source_payload)] = source_payload
+        before = bytes(harness.memory[source : source + len(source_payload)])
+
+        harness.invoke(harness.address("NAMEBG"), de=source)
+
+        query = harness.address("LOBU") + 4
+        expect(f"{panel_name!r}: тип запроса FENTRY", harness.memory[query], 0)
+        expect(
+            f"{panel_name!r}: NAMEBG сохраняет выдачу NXTETY",
+            read_c_string(harness.memory, query + 1),
+            panel_name,
+        )
+        expect(
+            f"{panel_name!r}: панельная строка не изменена",
+            bytes(harness.memory[source : source + len(source_payload)]),
+            before,
+        )
+        expect(f"{panel_name!r}: HL NAMEBG", harness.machine.hl, source + 1)
+        expect(
+            f"{panel_name!r}: DE NAMEBG",
+            harness.machine.de,
+            query + 1 + 256,
+        )
+        expect(f"{panel_name!r}: BC NAMEBG", harness.machine.bc, 0)
+
+
+def test_recursive_delete_uses_short_directory_alias() -> None:
+    harness = BootHarness()
+    start = harness.address("DDIRS")
+    end = harness.address("NODIRS")
+    block = bytes(harness.memory[start:end])
+    marker = bytes((0x3E, 0x82, 0xD5, 0xCD, 0x5A, 0x40))
+    expect(
+        "DIRTREM перечисляет дочерний каталог как SFN для безопасного FENTRY/DELFL",
+        block.count(marker),
+        1,
+    )
+
+
 def main() -> int:
     symbols = load_symbols()
     required = (
@@ -255,10 +356,17 @@ def main() -> int:
         "WCFX.SWPPAND",
         "WCFX.DEL64",
         "WCFX.FEEM2",
+        "WCFX.NAMEBG",
+        "WCFX.DDIRS",
+        "WCFX.NODIRS",
         "WCFX.LOAD512",
         "WCFX.SAVE512",
         "WCFX.RRESB",
         "WCFX.LOBU",
+        "WDOS.CORE32",
+        "WDOS.START",
+        "WDOS.END",
+        "WDOS.Snm",
         "TERC1",
         "TERC2",
         "TERC3",
@@ -281,9 +389,13 @@ def main() -> int:
     test_copy_chunk()
     test_copy_loop_uses_chunk_counts()
     test_compacted_helpers()
+    test_sfn_name_output()
+    test_copy_rename_name_normalization()
+    test_recursive_delete_uses_short_directory_alias()
     print(
         "WCFX COPYF bounds PASS: logical sector counts, zero-size guard, "
-        "32-bit remaining bytes, loop B values, DEL64 and FEEM2"
+        "32-bit remaining bytes, loop B values, DEL64, FEEM2 and "
+        "NXTETY/F5/F6 short-extension name normalization and F8 LFN traversal"
     )
     return 0
 

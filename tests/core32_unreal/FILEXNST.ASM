@@ -33,7 +33,9 @@ START_CODE:
 FILEXNST_PLUGIN_NAME:
         DB "FILEX full disk regression"
         DS 32-($-FILEXNST_PLUGIN_NAME)," "
-        DB #03
+        ; Одноразовый тип #06 запускает тест после установки FILEX provider
+        ; без ненадёжного ручного подтверждения меню на полностью занятом FAT.
+        DB #06
         DB #00
 
         ALIGN 512,0
