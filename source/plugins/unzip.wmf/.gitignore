@@ -1,0 +1,4 @@
+/build/
+/hardware-backups/
+**/__pycache__/
+*.py[cod]

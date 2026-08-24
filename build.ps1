@@ -325,6 +325,21 @@ if ((Get-Item -LiteralPath $TxtEditOutput).Length -gt (512 + 0x2600)) {
 if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT machine safety tests failed.' }
 # Codex - 2026-07-17 - end
 
+# UNZIP хранится вместе с остальными исходниками плагинов и входит в runtime WC.
+# Сборка здесь не позволяет следующему обновлению exe вернуть старый wc.ini
+# без строки плагина или оставить устаревший бинарник.
+$UnzipProject = Join-Path $ProjectRoot 'source\plugins\unzip.wmf'
+$UnzipBuildScript = Join-Path $UnzipProject 'build.ps1'
+$UnzipOutput = Join-Path $UnzipProject 'build\UNZIP.WMF'
+if (-not (Test-Path -LiteralPath $UnzipBuildScript -PathType Leaf)) {
+    throw "UNZIP build script not found: $UnzipBuildScript"
+}
+& $UnzipBuildScript
+if ($LASTEXITCODE -ne 0) { throw 'UNZIP.WMF build failed.' }
+if (-not (Test-Path -LiteralPath $UnzipOutput -PathType Leaf)) {
+    throw 'UNZIP.WMF was not created.'
+}
+
 # Codex - 2026-07-16 - begin
 $MainSourceAscii = "$ProjectRootAscii/source/BOOT.ASM"
 $PayloadAscii = "$ProjectRootAscii/Build/boot.payload.bin"
@@ -436,7 +451,8 @@ if ($LASTEXITCODE -ne 0) { throw 'HoBeta packing failed.' }
 # Improved; остальные неизменяемые файлы берутся из локального эталона.
 # Все они входят в хэш-аудит.
 $ProjectOwnedRuntime = @(
-    'boot.$C', 'WC_History.txt', 'WC_todo.txt', 'WC\TXTEDIT.WMF'
+    'boot.$C', 'WC_History.txt', 'WC_todo.txt',
+    'WC\TXTEDIT.WMF', 'WC\UNZIP.WMF'
 )
 Get-ChildItem -LiteralPath $ReferenceExe -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($ReferenceExe.Length + 1)
@@ -458,6 +474,13 @@ if ($LASTEXITCODE -ne 0) { throw 'FILEX runtime installation failed.' }
 $TxtEditRuntime = Join-Path $ExeDir 'WC\TXTEDIT.WMF'
 [IO.File]::Copy($TxtEditOutput, $TxtEditRuntime, $true)
 
+# UNZIP запускается по Enter на расширении ZIP и располагается сразу после
+# обязательного FILEX, который обязан сохранять первую позицию в списке.
+& python (Join-Path $ProjectRoot 'tools\install_unzip_runtime.py') `
+    --plugin $UnzipOutput `
+    --wc-dir (Join-Path $ExeDir 'WC')
+if ($LASTEXITCODE -ne 0) { throw 'UNZIP runtime installation failed.' }
+
 $HashReport = Join-Path $BuildDir 'hash-report.tsv'
 & python (Join-Path $ProjectRoot 'tools\verify_hashes.py') `
     --actual $ExeDir `
@@ -473,7 +496,7 @@ if ($HashExitCode -ne 0) {
     )
     $ExpectedMismatchPaths = @(
         'boot.$C', 'WC_History.txt', 'WC_todo.txt',
-        'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/wc.ini'
+        'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/UNZIP.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -482,7 +505,7 @@ if ($HashExitCode -ne 0) {
         $Mismatches.Count -ne $ExpectedMismatchPaths.Count) {
         throw "Hash verification failed. See $HashReport"
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, runtime config and Improved history files intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, UNZIP, runtime config and Improved history files intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.
