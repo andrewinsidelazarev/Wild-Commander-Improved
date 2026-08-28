@@ -231,10 +231,21 @@ JI      LD HL,INIB,DE,LOBU,BC,#1000:LDIR
 
         LD HL,SFINI
         CALL MKfile:JR NZ,SEXT
+; Патч AlexKorochinskiy 28.08.2026 - исправляет недозапись последнего
+; неполного 512-байтного сектора при сохранении wc.ini. Прежний расчёт
+; округлял число секторов вниз, хотя MKfile уже объявлял полный размер SFIS,
+; поэтому в хвосте файла могли оставаться старые данные дискового сектора.
+; ceil(SFIS/512) вычисляется как floor((SFIS-1)/512)+1. Новый код занимает
+; те же 16 байт, сохраняя фиксированные границы следующих модулей.
+        LD HL,(SFIS)
+        DEC HL
+        LD A,H
+        SRL A
+        INC A
+        LD B,A
         LD HL,LOBU
-        LD A,(SFIS+1):SRL A
-        OR A:JR NZ,$+3:INC A
-        LD B,A:CALL SAVE512
+        NOP
+        CALL SAVE512
         JR SEXT
 MINI
 DICI    LD HL,WCINI
