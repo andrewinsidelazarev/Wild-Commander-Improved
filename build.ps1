@@ -452,7 +452,7 @@ if ($LASTEXITCODE -ne 0) { throw 'HoBeta packing failed.' }
 # Все они входят в хэш-аудит.
 $ProjectOwnedRuntime = @(
     'boot.$C', 'WC_History.txt', 'WC_todo.txt',
-    'WC\TXTEDIT.WMF', 'WC\UNZIP.WMF'
+    'WC\TXTEDIT.WMF', 'WC\UNZIP.WMF', 'WC\CHKDSK.WMF'
 )
 Get-ChildItem -LiteralPath $ReferenceExe -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($ReferenceExe.Length + 1)
@@ -481,6 +481,15 @@ $TxtEditRuntime = Join-Path $ExeDir 'WC\TXTEDIT.WMF'
     --wc-dir (Join-Path $ExeDir 'WC')
 if ($LASTEXITCODE -ne 0) { throw 'UNZIP runtime installation failed.' }
 
+# ChkDsk поставляется готовым runtime-бинарником из отдельного проекта. Сборка
+# проверяет точную версию и число выделенных страниц, а затем восстанавливает
+# его строку после UNZIP в wc.ini, который перед этим берётся из эталона.
+$ChkdskRuntime = Join-Path $ExeDir 'WC\CHKDSK.WMF'
+& python (Join-Path $ProjectRoot 'tools\install_chkdsk_runtime.py') `
+    --plugin $ChkdskRuntime `
+    --wc-dir (Join-Path $ExeDir 'WC')
+if ($LASTEXITCODE -ne 0) { throw 'CHKDSK runtime installation failed.' }
+
 $HashReport = Join-Path $BuildDir 'hash-report.tsv'
 & python (Join-Path $ProjectRoot 'tools\verify_hashes.py') `
     --actual $ExeDir `
@@ -496,7 +505,8 @@ if ($HashExitCode -ne 0) {
     )
     $ExpectedMismatchPaths = @(
         'boot.$C', 'WC_History.txt', 'WC_todo.txt',
-        'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/UNZIP.WMF', 'WC/wc.ini'
+        'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/UNZIP.WMF',
+        'WC/CHKDSK.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -505,7 +515,7 @@ if ($HashExitCode -ne 0) {
         $Mismatches.Count -ne $ExpectedMismatchPaths.Count) {
         throw "Hash verification failed. See $HashReport"
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, UNZIP, runtime config and Improved history files intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, UNZIP, CHKDSK, runtime config and Improved history files intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.
