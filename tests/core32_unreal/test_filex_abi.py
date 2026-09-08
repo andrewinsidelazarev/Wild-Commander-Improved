@@ -59,6 +59,8 @@ def main() -> int:
     expect("резидентный шлюз FILEX", boot["WDOS_FILEX_GATE"], 0x6A47)
     expect("операнд страницы FILEX", boot["FILEX_PROVIDER_PAGE_PATCH"], 0x6A48)
     expect("перенесённый INIT", boot["INIT_RELOCATED"], 0xBFD4)
+    expect("поиск для существующего FILEX.WMF", boot["WDOS.SRHDRN"], 0x4A4C)
+    expect("удаление цепочки для существующего FILEX.WMF", boot["WDOS.DLSG"], 0x49B4)
     if boot["XFILEX"] >= 0x8000 or boot["WDOS_FILEX_GATE"] >= 0x8000:
         raise AssertionError("обёртка или шлюз FILEX недоступны при странице плагина в #8000")
     if 0x6020 <= boot["WDOS_FILEX_GATE"] < 0x6049:
@@ -82,7 +84,7 @@ def main() -> int:
     for name, expected_type in (
         ("FILEX.WMF", 0x06),
         ("FILEXT.WMF", 0x03),
-        ("FILEXNST.WMF", 0x03),
+        ("FILEXNST.WMF", 0x06),
     ):
         data = (BUILD / name).read_bytes()
         if len(data) <= PLUGIN_TYPE_OFFSET:
@@ -107,7 +109,7 @@ def main() -> int:
 
     print(
         "FILEX ABI PASS: API77=#6AFD, gate=#6A47, provider=#06, "
-        "tests=#03, block=32, operations=8, caps=#FF"
+        "FILEXT=#03, FILEXNST=#06, block=32, operations=8, caps=#FF"
     )
     return 0
 

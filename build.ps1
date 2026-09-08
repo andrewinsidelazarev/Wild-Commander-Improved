@@ -446,6 +446,12 @@ if (Test-Path -LiteralPath $FilexNoSpaceSource -PathType Leaf) {
 & python (Join-Path $ProjectRoot 'tools\pack_hobeta.py') $Payload $BootOutput
 if ($LASTEXITCODE -ne 0) { throw 'HoBeta packing failed.' }
 
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_lfn_namespace.py')
+if ($LASTEXITCODE -ne 0) { throw 'LFN/SFN namespace machine tests failed.' }
+
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_plugin_panel_refresh.py')
+if ($LASTEXITCODE -ne 0) { throw 'Plugin panel refresh machine tests failed.' }
+
 # Плагины, меню и конфигурация — готовые runtime-файлы.
 # boot.$C собирается выше, а WC_History.txt и WC_todo.txt ведутся самим
 # Improved; остальные неизменяемые файлы берутся из локального эталона.
@@ -481,9 +487,11 @@ $TxtEditRuntime = Join-Path $ExeDir 'WC\TXTEDIT.WMF'
     --wc-dir (Join-Path $ExeDir 'WC')
 if ($LASTEXITCODE -ne 0) { throw 'UNZIP runtime installation failed.' }
 
-# ChkDsk поставляется готовым runtime-бинарником из отдельного проекта. Сборка
-# проверяет точную версию и число выделенных страниц, а затем восстанавливает
-# его строку после UNZIP в wc.ini, который перед этим берётся из эталона.
+# ChkDsk поставляется готовым runtime-бинарником из отдельного проекта. Автор
+# патча AlexKorochinskiy: v0.07 центрирует окно плагина в текстовых режимах WC
+# 80x25, 80x30 и 90x36. Сборка проверяет точную версию и число выделенных
+# страниц, а затем восстанавливает его строку после UNZIP в wc.ini, который
+# перед этим берётся из эталона.
 $ChkdskRuntime = Join-Path $ExeDir 'WC\CHKDSK.WMF'
 & python (Join-Path $ProjectRoot 'tools\install_chkdsk_runtime.py') `
     --plugin $ChkdskRuntime `

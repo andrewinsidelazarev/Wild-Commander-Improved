@@ -267,15 +267,29 @@ SNM_    DEC DE:LD A,(DE)
         LD A,L:AND #F0:OR 8:LD L,A
         PUSH DE
         LD A,".",(DE),A:INC DE
+; Codex - 2026-09-08 - begin
+; Три одинаковых преобразования сведены в цикл. Освободившийся участок вместе
+; с прежними четырьмя NOP хранит обработчик ошибки поиска; SNMD не сдвигается.
+SFN_EXTENSION_START:
+        LD B,3
+SFN_EXTENSION_CHAR:
         LD A,(HL):CALL Acs:LD (DE),A:INC DE,L
-        LD A,(HL):CALL Acs:LD (DE),A:INC DE,L
-        LD A,(HL):CALL Acs:LD (DE),A:INC DE,L
+        DJNZ SFN_EXTENSION_CHAR
         POP BC
-        ; SFN расширение всегда занимает три байта с пробельным дополнением.
-        ; Исторический переход пропускал очистку именно для файлов, поэтому
-        ; NXTETY возвращал TWO.$C<space> и рекурсивные F5/F8 не находили запись.
-        ; Каталоги уже проходили этот цикл. Четыре NOP сохраняют все адреса.
-        DS 4,0
+        JR SFN_EXTENSION_TRIM
+; Обычный FENTRY сохраняет Z="не найдено" при I/O-ошибке. Во время ENTREZ
+; нулевая маска типов даёт NZ, чтобы ошибку нельзя было принять за свободное
+; имя. CF отличает ошибку от занятого SFN и останавливает подбор суффикса.
+FIND_IO_ERROR:
+        LD A,(FIND_TYPE_MASK+1)
+        CP #10
+        LD A,#FF
+        SCF
+        RET
+        DS SFN_EXTENSION_START+26-$,0
+        ASSERT $ == SFN_EXTENSION_START+26, изменился размер SFN formatter
+SFN_EXTENSION_TRIM:
+; Codex - 2026-09-08 - end
  DUP 3
          DEC DE:LD A,(DE):CP 32:JR NZ,SNm
  EDUP
@@ -630,7 +644,7 @@ XSPOZ   LD BC,(ADDTOP),(CLHL),BC
 SVHDFL
 
         LD A,(EFLG):AND #10
-        CALL ENTREZ:RET NZ
+        CALL ENTREZ_ANY_TYPE:RET NZ
         LD (CGDE),HL
 
         LD HL,(LSTCAT),DE,(LSTCAT+2)
@@ -797,11 +811,20 @@ BURA    LD HL,NXTBM-32+3
 
         LD DE,NXTBM+7
         LD BC,#03FF,A,#30
-ZZBZ    LDD:CP (HL):JR Z,$+4:DJNZ ZZBZ
+; Codex - 2026-09-08 - begin
+; После очередной цифры можно закончить только если ОБЕ оставшиеся слева
+; позиции нулевые. Одиночный ноль десятков в 100..109 не завершает число.
+ZZBZ    LDD:CP (HL):JR NZ,SUFFIX_MORE
+        DEC HL:CP (HL):INC HL
+        JR Z,SUFFIX_DONE
+SUFFIX_MORE:
+        DJNZ ZZBZ
+SUFFIX_DONE:
+; Codex - 2026-09-08 - end
         LD A,#7E,(DE),A
 
         LD HL,NXTBM,DE,ENTRY,BC,12:LDIR
-        CALL FNDSN:JR NZ,BURA
+        CALL FIND_ALIAS:RET C:JR NZ,BURA
 
         LD HL,NXTBM
         CALL LNCRC:LD (CRC+1),A
@@ -810,20 +833,14 @@ ZZBZ    LDD:CP (HL):JR Z,$+4:DJNZ ZZBZ
         LD DE,NXTBU+1
         LD BC,#0001
 DNB     LD (HL),C:INC C,HL
- DUP 5
-         CALL OEM2UC
- EDUP
+        CALL OEM5UC
         LD (HL),#0F:INC HL
         LD (HL),#00:INC HL
 CRC     LD (HL),0:INC HL
- DUP 6
-         CALL OEM2UC
- EDUP
+        CALL OEM6UC
         LD (HL),#00:INC HL
         LD (HL),#00:INC HL
- DUP 2
-         CALL OEM2UC
- EDUP
+        CALL OEM2UC_PAIR
         LD A,(DE):OR A:JR NZ,DNB
 
         LD (HL),0
@@ -845,6 +862,16 @@ FNLZ    LD (HL),B:INC HL
         LD (HL),B:INC HL
         LD B,#FF
         RET
+; Codex - 2026-09-08 - begin
+; Общие хвосты вместо 13 развёрнутых CALL. B по-прежнему хранит 0/#FF для
+; UTF-16 terminator/padding; счётчик DJNZ здесь использовать нельзя.
+OEM6UC  CALL OEM2UC
+OEM5UC  CALL OEM2UC
+        CALL OEM2UC
+        CALL OEM2UC
+OEM2UC_PAIR:
+        CALL OEM2UC
+; Codex - 2026-09-08 - end
 OEM2UC  LD A,(DE):OR A:JR Z,FNLZ:INC DE
         PUSH BC
         LD C,A,B,0:CP #80:CALL NC,ORU
@@ -866,8 +893,35 @@ OR2     CP #F0:RET NC
 ENVAL   CALL_WDOS_EXTENSION WDOS_EXT.ID_VALIDATE_NAME
         RET
 ENnvl   LD A,1:OR A:RET
-        DS 41-($-ENVAL),0
-        ASSERT $-ENVAL == 41, изменился размер стабильного блока ENVAL
+; Codex - 2026-09-08 - begin
+; Создание записи проверяет единое пространство SFN/LFN файлов и каталогов.
+; WildDOS уже не реентерабелен (ACS, NW0, буферы поиска). Маска меняется только
+; на время ENTREZ и восстанавливается при любом его возврате, включая ошибку.
+; Входной A=тип и весь возвращаемый AF сохраняются.
+ENTREZ_ANY_TYPE:
+        PUSH AF
+        XOR A:LD (FIND_TYPE_MASK+1),A
+        POP AF
+        CALL ENTREZ
+        PUSH AF
+        LD A,#10:LD (FIND_TYPE_MASK+1),A
+        POP AF
+        RET
+; Для сравнения кандидата также с существующими LFN нужен настоящий текст
+; SFN, а не атрибут и следующие за ним метаданные NXTBM. Snm уже умеет OEM,
+; точку и пробельное дополнение. Запрос занимает #0FF0..#0FFD; трёхзначный
+; счётчик лежит отдельно по #0FE1..#0FE3, исходный LFN остаётся в NXTBU.
+FIND_ALIAS:
+        LD HL,NXTBM,DE,NXTBM-16+1
+        CALL Snm
+        LD HL,NXTBM-16
+        LD (HL),0
+        LD (CGDE),HL
+        JP FNDSN
+        ASSERT $ <= #481F, исправления имён не помещаются перед SNCEN
+        DS #481F-$,0
+        ASSERT $ == #481F, изменился фиксированный адрес SNCEN
+; Codex - 2026-09-08 - end
 ; Codex - 2026-07-16 - end
 SNCEN   CP #2B:RET Z
         CP #2C:RET Z
@@ -1118,6 +1172,7 @@ DLSG_BAD_LINK:
 ; DE:HL — номер её первого кластера, BC — адрес записи в LOBU или LOBU2.
 ; Побочные эффекты: LOBU/LOBU2 заполняются секторами каталога; CGDE хранит
 ; шаблон имени, а состояние CG*, LLHL и поток LOAD512 продвигаются по цепочке.
+        ASSERT $ == #4A4C, изменился адрес поиска для существующего FILEX.WMF
 SRHDRN
 
         LD (CGDE),HL:CALL LNLNG:RET Z
@@ -1126,21 +1181,23 @@ SRHDRN
         CALL_WDOS_EXTENSION WDOS_EXT.ID_RESET_DIR_HISTORY
 ; Codex - 2026-07-16 - end
 
+        ASSERT $ == #4A5B, изменился фиксированный адрес FNDSN
 FNDSN   LD HL,LSTCAT,DE,CUHL,BC,4:LDIR
         CALL TOS
 
         LD HL,LOBU,B,1:CALL LOAD512
+        JP C,FIND_IO_ERROR
 
-        LD HL,LOBU
+        ; LOAD512 возвращает HL после целого сектора: младший байт остаётся 0.
+        LD H,high LOBU
 ANNA    CALL ENTCH:JR Z,FND
         LD BC,32:ADD HL,BC
         LD A,H:CP high LOBU2:JR C,ANNA
 
 ; Codex - 2026-07-16 - begin
-        ; Штатный конец цепочки имеет код #0F, ошибка потока — #FF. OR #F0
-        ; сводит оба к #FF, а INC возвращает Z («не найдено») и не даёт
-        ; полному каталогу уйти в бесконечное чтение после конца цепочки.
-HDR     LD A,(EOC):OR #F0:INC A:RET Z
+        ; Ошибки #FF уже перехвачены по CF после LOAD512. Здесь остаются
+        ; обычное чтение (0) и штатный конец цепочки (#0F).
+HDR     LD A,(EOC):CP #0F:RET Z
 HDR_CONTINUE:
 ; Codex - 2026-07-16 - end
 ; Codex - 2026-07-16 - begin
@@ -1149,6 +1206,7 @@ HDR_CONTINUE:
         PUSH HL
         LD HL,LOBU2,B,1:CALL LOAD512
         POP HL
+        JP C,FIND_IO_ERROR
 AnnA    CALL ENTCH:JR Z,FND
         LD BC,32:ADD HL,BC
         LD A,H:CP high LOBE2:JR C,AnnA
@@ -1164,7 +1222,7 @@ AnnA    CALL ENTCH:JR Z,FND
 FND     OR A:RET Z
         LD HL,(CLSHL)
         LD DE,(CLSDE)
-        XOR A:INC A
+        ; ENTFND вернул A=1; OR A уже установил NZ/CF=0, LD их не меняют.
         RET
 NOP32   LD A," ",(DE),A:INC DE:DJNZ $-2
         RET
@@ -1239,8 +1297,12 @@ ENTCH   LD A,(HL)
         BIT 3,(HL):JP NZ,ENTCHe
 
         LD DE,(CGDE)
-        LD A,(HL):AND #10:LD B,A
-        LD A,(DE):CP B:JP NZ,ENTCHe
+; Codex - 2026-09-08 - begin
+        LD A,(DE):XOR (HL)
+FIND_TYPE_MASK:
+        AND #10
+        JP NZ,ENTCHe
+; Codex - 2026-09-08 - end
 
         LD A,(ENTRY):OR A:JR Z,LNEB
         LD A,L:AND #F0:LD L,A

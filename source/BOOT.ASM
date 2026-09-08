@@ -102,6 +102,7 @@ WDOS_INSTALL_COPY:
         LDIR                            ; исходный CORE32 #C00C -> #4000
         RET
 ; Автозапуск типа #06 живёт в нулевой области: точные модули не двигаются.
+        INCLUDE "PLUGIN_REFRESH.ASM"
         INCLUDE "AUTOEXEC.ASM"
         DS #C000-$,0
         ELSE
@@ -149,8 +150,8 @@ WDOS_EXTENSION_PACKED:
 WDOS_EXTENSION_PACKED_END:
         ; AUTOEXEC имеет фиксированные внешние адреса и не должен зависеть от
         ; степени сжатия расширения. #BF69 — его доказанное штатное начало.
-        ASSERT WDOS_EXTENSION_PACKED_END <= #BF69, упакованное расширение WildDOS не помещается
-        DS #BF69-$,0
+        ASSERT WDOS_EXTENSION_PACKED_END <= #BF60, нет места для обновления панелей после плагина
+        INCLUDE "PLUGIN_REFRESH.ASM"
 ; Автозапуск типа #06 живёт в нулевой области: точные модули не двигаются.
         INCLUDE "AUTOEXEC.ASM"
         DS #C000-$,0

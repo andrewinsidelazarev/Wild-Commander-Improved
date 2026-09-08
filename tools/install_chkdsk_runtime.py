@@ -8,9 +8,9 @@ from pathlib import Path
 
 
 EXPECTED_SIGNATURE = b"WildCommanderMDL"
-EXPECTED_TITLE = b"ChkDsk FAT32 v0.06 (c)2026      "
+EXPECTED_TITLE = b"ChkDsk FAT32 v0.07 (c)2026      "
 EXPECTED_PAGES = 5
-EXPECTED_SHA256 = "E74D5F21760FAE0C09E84D2E9E7095613C67F79B2C8FD4A801E168822C631216"
+EXPECTED_SHA256 = "F44B80016DD8E8DEA87936EC21B206A066EFDBCB5B7D7C0EBB5CE3B9DFF562F3"
 
 
 def detect_newline(line: bytes) -> bytes:
@@ -90,7 +90,7 @@ def main() -> int:
     if destination.read_bytes() != payload:
         raise RuntimeError("installed CHKDSK.WMF differs from the source plugin")
 
-    print("Installed ChkDsk FAT32 v0.06 after UNZIP.WMF")
+    print("Installed ChkDsk FAT32 v0.07 after UNZIP.WMF")
     return 0
 
 
