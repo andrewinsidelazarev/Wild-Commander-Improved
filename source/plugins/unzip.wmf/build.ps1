@@ -1,8 +1,5 @@
 [CmdletBinding()]
 param(
-    [string]$Sdcc = 'C:\Program Files\SDCC\bin\sdcc.exe',
-    [string]$Sdasz80 = 'C:\Program Files\SDCC\bin\sdasz80.exe',
-    [string]$Objcopy = 'C:\Program Files\SDCC\bin\sdobjcopy.exe',
     [string]$SjasmPlus = 'U:\Desktop\sjasmplus\sjasmplus-1.21.0.win\sjasmplus.exe'
 )
 
@@ -11,17 +8,15 @@ Set-StrictMode -Version Latest
 
 $ProjectRoot = [IO.Path]::GetFullPath($PSScriptRoot)
 $BuildDir = Join-Path $ProjectRoot 'build'
-$ObjectDir = Join-Path $BuildDir 'obj'
 
+# sjasmplus не работает с путями вне ASCII: проект открывается через U:.
 if (-not (Test-Path -LiteralPath 'U:\Desktop' -PathType Container)) {
     & subst.exe U: $env:USERPROFILE
     if ($LASTEXITCODE -ne 0) { throw 'Failed to create U: ASCII path alias.' }
 }
 
-foreach ($tool in $Sdcc, $Sdasz80, $Objcopy, $SjasmPlus) {
-    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
-        throw "Build tool not found: $tool"
-    }
+if (-not (Test-Path -LiteralPath $SjasmPlus -PathType Leaf)) {
+    throw "Build tool not found: $SjasmPlus"
 }
 
 $ProjectAlias = 'U:\Desktop\WC\WildCommander Improved\source\plugins\unzip.wmf'
@@ -29,34 +24,24 @@ if (-not (Test-Path -LiteralPath $ProjectAlias -PathType Container)) {
     throw "U: does not expose the project: $ProjectAlias"
 }
 
-New-Item -ItemType Directory -Path $BuildDir, $ObjectDir -Force | Out-Null
+New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
+
+# sjasmplus пишет ход сборки в stderr; при ErrorActionPreference=Stop такие
+# строки нельзя пропускать через конвейер PowerShell, поэтому вызов идёт
+# через cmd с объединением потоков, а успех проверяется по коду возврата.
+function Invoke-Sjasm {
+    param([string[]]$Arguments)
+    $line = '"' + $SjasmPlus + '" ' + ($Arguments -join ' ') + ' 2>&1'
+    $output = & cmd.exe /c $line
+    $output | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) { throw "sjasmplus failed: $($Arguments -join ' ')" }
+}
 
 Push-Location $ProjectAlias
 try {
-    & $Sdasz80 -plosgff -o 'build\obj\crt0.rel' 'src\crt0.s'
-    if ($LASTEXITCODE -ne 0) { throw 'crt0 assembly failed.' }
-
-    $CompileOptions = @(
-        '-mz80', '--std-sdcc11', '--opt-code-size', '--max-allocs-per-node', '100000',
-        '-Isrc', '-c'
-    )
-    & $Sdcc @CompileOptions 'src\wc_api.c' -o 'build\obj\wc_api.rel'
-    if ($LASTEXITCODE -ne 0) { throw 'wc_api.c compilation failed.' }
-    & $Sdcc @CompileOptions 'src\inflate.c' -o 'build\obj\inflate.rel'
-    if ($LASTEXITCODE -ne 0) { throw 'inflate.c compilation failed.' }
-    & $Sdcc @CompileOptions 'src\unzip.c' -o 'build\obj\unzip.rel'
-    if ($LASTEXITCODE -ne 0) { throw 'unzip.c compilation failed.' }
-
-    & $Sdcc -mz80 --no-std-crt0 --code-loc 0x8020 --data-loc 0xB000 `
-        'build\obj\crt0.rel' 'build\obj\wc_api.rel' 'build\obj\inflate.rel' `
-        'build\obj\unzip.rel' -Wl-m -o 'build\obj\unzip.ihx'
-    if ($LASTEXITCODE -ne 0) { throw 'Z80 link failed.' }
-
-    & $Objcopy -I ihex -O binary 'build\obj\unzip.ihx' 'build\code.bin'
-    if ($LASTEXITCODE -ne 0) { throw 'Intel HEX conversion failed.' }
-
-    & $SjasmPlus '--lst=build/UNZIP.lst' '--sym=build/UNZIP.sym' 'src/wmf.asm'
-    if ($LASTEXITCODE -ne 0) { throw 'WMF packaging failed.' }
+    # Плагин целиком на ассемблере: образ страницы #8000..#BFFF в build\code.bin
+    Invoke-Sjasm @('--nologo', '--sym=build/code.sym', '--lst=build/code.lst', 'src/unzip.asm')
+    Invoke-Sjasm @('--nologo', '--lst=build/UNZIP.lst', '--sym=build/UNZIP.sym', 'src/wmf.asm')
 } finally {
     Pop-Location
 }

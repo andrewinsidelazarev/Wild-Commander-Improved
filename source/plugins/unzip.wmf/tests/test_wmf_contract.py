@@ -9,7 +9,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WMF = PROJECT_ROOT / "build" / "UNZIP.WMF"
 CODE = PROJECT_ROOT / "build" / "code.bin"
-MAP = PROJECT_ROOT / "build" / "obj" / "unzip.map"
+SYM = PROJECT_ROOT / "build" / "code.sym"
 
 
 class WmfContractTests(unittest.TestCase):
@@ -34,15 +34,18 @@ class WmfContractTests(unittest.TestCase):
 
     def test_code_and_data_fit_the_declared_page(self) -> None:
         self.assertLessEqual(CODE.stat().st_size, 0x4000)
-        text = MAP.read_text(encoding="ascii")
-        data_match = re.search(
-            r"_DATA\s+0000([0-9A-F]{4})\s+0000([0-9A-F]{4})", text
-        )
-        self.assertIsNotNone(data_match)
-        start = int(data_match.group(1), 16)
-        length = int(data_match.group(2), 16)
-        self.assertGreaterEqual(start, 0xB000)
-        self.assertLessEqual(start + length, 0xC000)
+        text = SYM.read_text(encoding="utf-8", errors="replace")
+        symbols = {
+            name: int(value, 16)
+            for name, value in re.findall(r"^([\w.]+):\s+EQU\s+0x([0-9A-Fa-f]+)", text, re.M)
+        }
+        # Код и данные плагина — одна страница #8000..#BFFF; история Deflate
+        # живёт в двух других страницах и сюда не входит.
+        self.assertEqual(symbols["plugin_entry"], 0x8000)
+        self.assertLessEqual(symbols["data_end"], 0xC000)
+        self.assertGreater(symbols["data_end"], symbols["input_buffer"])
+        for page in ("MISC", "REV", "LT_SYM", "LT_LEN", "DT_SYM", "DT_LEN", "CRC_T0"):
+            self.assertEqual(symbols[page] & 0xFF, 0, page)
 
     def test_sources_are_utf8_without_bom(self) -> None:
         suffixes = {".c", ".h", ".s", ".asm", ".ps1", ".md", ".py"}

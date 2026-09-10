@@ -54,7 +54,9 @@ class InflateZ80Tests(unittest.TestCase):
         self.fail(f"превышен лимит Z80, PC=#{machine.pc:04X}")
 
     def run_valid(self, compressed: bytes, expected: bytes) -> None:
-        self.assertLess(len(compressed), CONTROL_ADDRESS - INPUT_ADDRESS)
+        # Вход лежит с #4000, стек обвязки растёт вниз от #7D00: вход не
+        # должен доходить до стека, иначе CALL/PUSH испортят его хвост.
+        self.assertLess(len(compressed), STACK_ADDRESS - 0x100 - INPUT_ADDRESS)
         machine = z80.Z80Machine()
         memory = machine.memory
         memory[0:0x4000] = bytes((HISTORY_FILL,)) * 0x4000
@@ -124,6 +126,46 @@ class InflateZ80Tests(unittest.TestCase):
     def test_output_larger_than_64k(self) -> None:
         payload = b"0123456789ABCDEF" * 5000
         self.run_valid(raw_deflate(payload, level=9), payload)
+
+    def test_random_streams_match_zlib(self) -> None:
+        """Случайные данные всеми стратегиями zlib: табличный декодер,
+        длинные коды (медленный путь), блоки без сжатия, повторы через
+        границы кольца."""
+        limit = STACK_ADDRESS - 0x100 - INPUT_ADDRESS
+        strategies = (
+            zlib.Z_DEFAULT_STRATEGY, zlib.Z_FILTERED, zlib.Z_HUFFMAN_ONLY,
+            zlib.Z_RLE, zlib.Z_FIXED,
+        )
+        checked = 0
+        for seed in range(48):
+            generator = random.Random(0xC0DE + seed)
+            size = generator.randint(1, 60000)
+            kind = seed % 6
+            if kind == 0:
+                payload = generator.randbytes(size)
+            elif kind == 1:
+                payload = bytes(generator.choices(b"abcdefgh \n", k=size))
+            elif kind == 2:
+                payload = (generator.randbytes(generator.randint(1, 3000)) * 40)[:size]
+            elif kind == 3:
+                # Много редких символов: коды длиннее 8 бит
+                weights = [generator.randint(1, 60) for _ in range(256)]
+                payload = bytes(generator.choices(range(256), weights=weights, k=size))
+            elif kind == 4:
+                payload = bytes((generator.randint(0, 255),)) * size
+            else:
+                block = generator.randbytes(9000)
+                payload = (block + b"Q" * 10000 + block)[:size]
+            level = generator.choice((0, 1, 6, 9))
+            strategy = generator.choice(strategies)
+            compressed = raw_deflate(payload, level=level, strategy=strategy)
+            while len(compressed) >= limit:
+                payload = payload[: len(payload) * 3 // 4]
+                compressed = raw_deflate(payload, level=level, strategy=strategy)
+            with self.subTest(seed=seed, size=len(payload), level=level, strategy=strategy):
+                self.run_valid(compressed, payload)
+            checked += 1
+        self.assertEqual(checked, 48)
 
     def test_truncated_stream_is_rejected(self) -> None:
         compressed = raw_deflate(b"truncated stream " * 1000, level=9)

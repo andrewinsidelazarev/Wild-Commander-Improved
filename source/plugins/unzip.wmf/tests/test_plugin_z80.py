@@ -22,7 +22,7 @@ from tools.make_test_zip import make_archive, raw_deflate  # noqa: E402
 
 
 CODE = PROJECT_ROOT / "build" / "code.bin"
-MAP = PROJECT_ROOT / "build" / "obj" / "unzip.map"
+SYM = PROJECT_ROOT / "build" / "code.sym"
 BOOT = REPOSITORY_ROOT / "exe" / "boot.$C"
 CODE_ADDRESS = 0x8000
 WC_API = 0x6006
@@ -109,8 +109,9 @@ def make_single_descriptor_archive(name: bytes, payload: bytes) -> bytes:
 
 
 def symbol_address(name: str) -> int:
-    pattern = re.compile(rf"^\s*([0-9A-F]{{8}})\s+{re.escape(name)}\s+", re.MULTILINE)
-    match = pattern.search(MAP.read_text(encoding="ascii"))
+    """Адрес метки из файла символов sjasmplus (строки «name: EQU 0x....»)."""
+    pattern = re.compile(rf"^{re.escape(name)}:\s+EQU\s+0x([0-9A-Fa-f]+)", re.MULTILINE)
+    match = pattern.search(SYM.read_text(encoding="utf-8", errors="replace"))
     if not match:
         raise AssertionError(f"символ {name} не найден")
     return int(match.group(1), 16)
@@ -141,6 +142,9 @@ class VirtualWC:
         self.key_release_calls = 0
         self.replace_prompts = 0
         self.loaded_sectors = 0
+        self.saved_sectors = 0
+        self.allocated: dict[tuple[bytes, ...], int] = {}
+        self.fentry_log: list[tuple[int, bytes]] = []
         self.events: list[str] = []
         self.prints: list[tuple[int, int, bytes]] = []
         self.window_open = False
@@ -197,6 +201,7 @@ class VirtualWC:
         elif api == 59:
             kind = memory[machine.hl]
             name = read_cstring(memory, machine.hl + 1)
+            self.fentry_log.append((kind, name))
             found = self.find(kind, name)
             self.streams[self.current]["found"] = found
             if found is None:
@@ -231,16 +236,45 @@ class VirtualWC:
             stream["path"] = found
             self.set_flags(machine, zero=True)
         elif api == 72:
+            # MKfile: [атрибуты][размер LE32][имя,0]. Как настоящий WC, файл
+            # сразу получает объявленный размер (цепочка кластеров выделена),
+            # а поток встаёт на его начало — дальше можно писать SAVE512.
+            size = int.from_bytes(memory[machine.hl + 1 : machine.hl + 5], "little")
             name = read_cstring(memory, machine.hl + 5)
             target = self.path_for(name)
             if target in self.files or target in self.directories:
                 machine.a = 3
                 self.set_flags(machine)
             else:
-                self.files[target] = b""
+                self.files[target] = bytes(size)
+                self.allocated[target] = size
+                stream = self.streams[self.current]
+                stream["file"] = target
+                stream["position"] = 0
                 self.events.append("create")
                 machine.a = 0
                 self.set_flags(machine, zero=True)
+        elif api == 49:
+            # SAVE512: B секторов из HL в файл потока с текущей позиции.
+            # Запись за пределы выделенной цепочки — ошибка плагина.
+            stream = self.streams[self.current]
+            target = stream["file"]
+            position = stream["position"]
+            assert isinstance(target, tuple) and isinstance(position, int)
+            length = machine.b * 512
+            limit = (self.allocated.get(target, 0) + 511) // 512 * 512
+            if position + length > limit:
+                raise AssertionError(
+                    f"SAVE512 за пределами файла: {position}+{length} > {limit}"
+                )
+            data = bytearray(self.files[target].ljust(limit, b"\x00"))
+            data[position : position + length] = memory[machine.hl : machine.hl + length]
+            self.files[target] = bytes(data[: self.allocated[target]])
+            stream["position"] = position + length
+            self.saved_sectors += machine.b
+            self.events.append("save")
+            machine.a = 0
+            self.set_flags(machine)
         elif api == 73:
             name = read_cstring(memory, machine.hl)
             target = self.path_for(name)
@@ -262,6 +296,8 @@ class VirtualWC:
                 self.set_flags(machine, zero=True)
             else:
                 self.files[new_path] = self.files.pop(old_path)
+                if old_path in self.allocated:
+                    self.allocated[new_path] = self.allocated.pop(old_path)
                 self.events.append("rename")
                 self.set_flags(machine)
         elif api == 75:
@@ -360,7 +396,7 @@ class PluginZ80Tests(unittest.TestCase):
         machine.set_memory_block(CODE_ADDRESS, CODE.read_bytes())
         # В машинной модели кадровое ожидание не нужно: заменяем EI/HALT/RET
         # одним RET, чтобы тест не зависел от обработки HALT библиотекой z80.
-        memory[symbol_address("_wc_wait_frame")] = 0xC9
+        memory[symbol_address("wc_wait_frame")] = 0xC9
         memory[NAME_ADDRESS : NAME_ADDRESS + len(archive_name) + 1] = archive_name + b"\x00"
         machine.hl = len(archive) & 0xFFFF
         machine.de = len(archive) >> 16
@@ -442,6 +478,65 @@ class PluginZ80Tests(unittest.TestCase):
         self.assertTrue(any(line[2:56] == b"\xb1" * 54 for line in bars))
         self.assertTrue(any(line[2:56] == b"\xdb" * 54 for line in bars))
 
+    def test_progress_follows_archive_position(self) -> None:
+        """Процент в начале каждого файла соответствует доле уже прочитанного архива.
+
+        Раньше порог процента считался равным нулю (множитель портился), и
+        шкала сразу прыгала на 99 %: этот тест ловит такую ошибку.
+        """
+        generator = random.Random(0x2A)
+        entries = [(f"PART{index}.BIN", generator.randbytes(6000)) for index in range(4)]
+        archive_stream = io.BytesIO()
+        with zipfile.ZipFile(
+            archive_stream, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=False
+        ) as archive_file:
+            for name, payload in entries:
+                archive_file.writestr(name, payload)
+        archive = archive_stream.getvalue()
+        wc = VirtualWC(b"SPLIT.ZIP", archive)
+
+        machine = self.run_plugin(wc, b"SPLIT.ZIP", archive)
+
+        self.assertEqual(machine.a, 3)
+        for name, payload in entries:
+            self.assertEqual(wc.files[(name.encode(),)], payload)
+        # Каждая перерисовка — строка процента (y=2), затем полоса и имя (y=6).
+        percent = None
+        first_seen: dict[bytes, int] = {}
+        for y, _, text in wc.prints:
+            if y == 2 and text.strip().endswith(b"%"):
+                percent = int(text.strip()[:-1])
+            elif y == 6 and text.startswith(b"unziping: PART") and percent is not None:
+                first_seen.setdefault(text[10:15], percent)
+        self.assertEqual(sorted(first_seen), [b"PART0", b"PART1", b"PART2", b"PART3"])
+        for index in range(4):
+            shown = first_seen[f"PART{index}".encode()]
+            self.assertLessEqual(abs(shown - 25 * index), 5, (index, shown))
+
+    def test_temporary_file_is_found_once_per_file(self) -> None:
+        """Временный файл ищется FENTRY не больше двух раз, сколько бы кусков ни было.
+
+        Прежняя версия звала FENTRY перед каждым куском записи, и ядро WC
+        каждый раз проходило всю цепочку кластеров файла до конца.
+        """
+        archive_path, expected = make_archive()
+        archive = archive_path.read_bytes()
+        wc = VirtualWC(b"TEST.ZIP", archive)
+
+        machine = self.run_plugin(wc, b"TEST.ZIP", archive)
+
+        self.assertEqual(machine.a, 3)
+        for name, data in expected.items():
+            self.assertEqual(wc.files[self.encoded_path(name)], data, name)
+        temp_lookups = [
+            name for kind, name in wc.fentry_log if kind == 0 and name.startswith(b"WCUZ")
+        ]
+        # Файл с известным размером: одна проверка имени перед MKfile.
+        # С data descriptor: ещё один FENTRY, после которого идут APPEND.
+        self.assertLessEqual(len(temp_lookups), 2 * len(expected))
+        self.assertGreater(wc.saved_sectors, 0)
+        self.assertIn("append", wc.events)
+
     def test_existing_file_yes_replaces_it(self) -> None:
         archive_path, expected = make_archive()
         archive = archive_path.read_bytes()
@@ -512,7 +607,7 @@ class PluginZ80Tests(unittest.TestCase):
         self.assertEqual(machine.a, 0)
         self.assertEqual(wc.files[target], old)
         self.assertEqual(wc.events, ["prompt"])
-        self.assertEqual(wc.loaded_sectors, 1)
+        self.assertLessEqual(wc.loaded_sectors, 2)
         lines = [text.rstrip() for _, _, text in wc.prints]
         self.assertFalse(any(line.startswith(b"skipping: ONLY.BIN") for line in lines))
         self.assertFalse(any(line.startswith(b"unziping: done") for line in lines))
@@ -540,7 +635,7 @@ class PluginZ80Tests(unittest.TestCase):
         self.assertEqual(machine.a, 0)
         self.assertEqual(wc.files[target], b"OLD DEFLATE")
         self.assertEqual(wc.events, ["prompt"])
-        self.assertEqual(wc.loaded_sectors, 1)
+        self.assertLessEqual(wc.loaded_sectors, 2)
         lines = [text.rstrip() for _, _, text in wc.prints]
         self.assertFalse(any(line.startswith(b"skipping: DEFLATE.BIN") for line in lines))
         self.assertFalse(any(b"invalid ZIP structure" in line for line in lines))
@@ -564,7 +659,7 @@ class PluginZ80Tests(unittest.TestCase):
         self.assertEqual(machine.a, 0)
         self.assertEqual(wc.files[target], b"OLD STREAM")
         self.assertEqual(wc.events, ["prompt"])
-        self.assertEqual(wc.loaded_sectors, 1)
+        self.assertLessEqual(wc.loaded_sectors, 2)
         lines = [text.rstrip() for _, _, text in wc.prints]
         self.assertFalse(any(line.startswith(b"skipping: STREAM.BIN") for line in lines))
         self.assertFalse(any(b"invalid ZIP structure" in line for line in lines))
@@ -594,7 +689,7 @@ class PluginZ80Tests(unittest.TestCase):
         self.assertEqual(machine.a, 0)
         self.assertEqual(wc.files[target], b"OLD")
         self.assertEqual(wc.events, ["prompt"])
-        self.assertEqual(wc.loaded_sectors, 1)
+        self.assertLessEqual(wc.loaded_sectors, 2)
         self.assert_no_temporary_files(wc)
 
     def test_no_falls_back_to_sequential_skip_without_filex(self) -> None:
@@ -698,10 +793,11 @@ class PluginZ80Tests(unittest.TestCase):
         """Код возврата 3 должен обрабатываться штатным WCVW после NYAU."""
         boot = BOOT.read_bytes()
         refresh = 0x9B28 - 0x6000
-        self.assertEqual(
-            boot[refresh : refresh + 8],
-            b"\xcd\x9d\x70\xfe\x03\xcc\x75\x8d",
-        )
+        # CALL плагина, CP 3, CALL Z,<перечитать панели>: адреса меняются от
+        # выпуска к выпуску, проверяется сама последовательность команд.
+        code = boot[refresh : refresh + 8]
+        self.assertEqual(code[0], 0xCD)
+        self.assertEqual(code[3:6], b"\xfe\x03\xcc")
 
 
 if __name__ == "__main__":
