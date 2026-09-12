@@ -214,6 +214,7 @@ class SaveScenario:
 
         if api == 49:  # SAVE512
             self.calls.append((api, machine.b))
+            machine.hl = (machine.hl + machine.b * 512) & 0xFFFF
             if self.write_error:
                 machine.a = 0xFF
                 machine.f = 0x01
@@ -421,6 +422,7 @@ def test_save_as_partial_cleanup() -> None:
 
 def test_save_writes_only_logical_sectors() -> None:
     cases = (
+        (0, []),
         (1, [1]),
         (512, [1]),
         (513, [2]),
@@ -446,6 +448,7 @@ def test_save_writes_only_logical_sectors() -> None:
             if local.machine.a != 49:
                 raise AssertionError(f"неожиданный API SAVEDAT {local.machine.a}")
             counts.append(local.machine.b)
+            local.machine.hl = (local.machine.hl + local.machine.b * 512) & 0xFFFF
             local.machine.a = 0
             local.machine.f = 0x40
 
@@ -466,6 +469,7 @@ def test_save_writes_only_logical_sectors() -> None:
             local.machine.f = 0x40
             return
         counts.append(local.machine.b)
+        local.machine.hl = (local.machine.hl + local.machine.b * 512) & 0xFFFF
         local.machine.a = 0x0F
         local.machine.f = 0
 
@@ -515,6 +519,8 @@ def test_load_error_and_page_limit() -> None:
     def run_load(mode: str) -> tuple[bool, int]:
         harness = MachineHarness()
         reads = 0
+        size = 0x100000 if mode == "oversize" else (0xFFFFE if mode == "no_eoc" else 1)
+        harness.memory[harness.symbols["DAHL"]:harness.symbols["DAHL"] + 4] = size.to_bytes(4, "little")
 
         def handler(local: MachineHarness) -> None:
             nonlocal reads
@@ -525,6 +531,7 @@ def test_load_error_and_page_limit() -> None:
             if local.machine.a != 48:
                 raise AssertionError(f"неожиданный API загрузки {local.machine.a}")
             reads += 1
+            local.machine.hl = (local.machine.hl + local.machine.b * 512) & 0xFFFF
             if mode == "error":
                 local.machine.a = 0xFF
                 local.machine.f = 0x01
@@ -544,7 +551,8 @@ def test_load_error_and_page_limit() -> None:
     expect("ошибка LOAD512", run_load("error"), (False, 1))
     expect("неизвестный статус LOAD512", run_load("bad_status"), (False, 1))
     expect("штатный EOC", run_load("eoc"), (True, 1))
-    expect("цепочка длиннее буфера", run_load("no_eoc"), (False, 64))
+    expect("чтение ограничено логическим размером", run_load("no_eoc"), (True, 64))
+    expect("размер больше буфера", run_load("oversize"), (False, 0))
 
 
 def test_last_page_insert_guard() -> None:
@@ -577,9 +585,9 @@ def test_search_stops_at_eof() -> None:
     memory[symbols["STRBUFF"] : symbols["STRBUFF"] + 40] = b"X" + b" " * 39
     put16(memory, symbols["LHLCR"], 0)
     memory[symbols["LHLCR"] + 2] = 0
-    put16(memory, symbols["RHLCR"], 0x0100)
-    memory[symbols["RHLCR"] + 2] = 0
-    memory[0xC101] = 0
+    put16(memory, symbols["RHLCR"], 0x3FFE)
+    memory[symbols["RHLCR"] + 2] = 0x3F
+    memory[0xFFFF] = 0
     map_calls = 0
 
     def handler(local: MachineHarness) -> None:
@@ -593,7 +601,7 @@ def test_search_stops_at_eof() -> None:
     harness.invoke("GOSRH", handler, de=0)
     expect("поиск на EOF вернул not found", bool(harness.machine.f & 0x01), False)
     expect("поиск не пошёл по следующим страницам", map_calls, 2)
-    expect("правая граница остановлена на EOF", get16(memory, symbols["RHLCR"]), 0x0101)
+    expect("правая граница остановлена на EOF", get16(memory, symbols["RHLCR"]), 0x3FFF)
 
 
 def test_inspector_division_stack() -> None:
@@ -601,19 +609,19 @@ def test_inspector_division_stack() -> None:
         harness = MachineHarness()
         address = 0xB000
         harness.memory[address : address + len(expression)] = expression
-        harness.invoke("POLSK", hl=address)
+        harness.invoke("DECODER", de=address)
         return harness.machine.a, harness.machine.bc, bool(harness.machine.f & 0x01)
 
-    # RPN: 4, 2, DIV, END.
+    # The actual Inspector parser, including its normal call stack.
     expect(
         "штатное деление Inspector",
-        run(bytes((2, 4, 0, 2, 2, 0, 8, 0))),
+        run(b"4/2\0"),
         (0, 2, False),
     )
-    # RPN: 1, 0, DIV, END. Ветка ошибки обязана вернуть исходный стек и CF=1.
+    # Errors must unwind parser recursion to the original return address.
     expect(
         "деление Inspector на ноль",
-        run(bytes((2, 1, 0, 2, 0, 0, 8, 0))),
+        run(b"1/0\0"),
         (26, 0, True),
     )
 

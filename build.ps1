@@ -317,12 +317,18 @@ if (-not (Test-Path -LiteralPath $TxtEditOutput -PathType Leaf)) {
     throw 'TXTEDIT.WMF was not created.'
 }
 # Заголовок занимает 512 байт, код начинается с #8000 и не должен дойти до
-# ENTRYN=#A600, где менеджер передаёт редактору имя файла.
-if ((Get-Item -LiteralPath $TxtEditOutput).Length -gt (512 + 0x2600)) {
-    throw 'TXTEDIT.WMF overlaps ENTRYN at #A600.'
+# ENTRYN=#B700, куда редактор копирует имя из аргумента менеджера.
+if ((Get-Item -LiteralPath $TxtEditOutput).Length -gt (512 + 0x3700)) {
+    throw 'TXTEDIT.WMF overlaps ENTRYN at #B700.'
 }
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_txtedit_safety.py')
 if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT machine safety tests failed.' }
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_txtedit_editing.py')
+if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT machine editing tests failed.' }
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_txtedit_features.py')
+if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT audit regression tests failed.' }
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_txtedit_navigation.py')
+if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT cursor/exit regression tests failed.' }
 # Codex - 2026-07-17 - end
 
 # UNZIP хранится вместе с остальными исходниками плагинов и входит в runtime WC.

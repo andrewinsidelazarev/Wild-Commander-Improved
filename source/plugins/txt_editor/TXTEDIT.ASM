@@ -28,8 +28,7 @@ __ALASM_CORG_DISP DEFL 1
 WLD     EQU #6006; Plugin System Call Point
 TMN     EQU #6009; Timer
 HEI     EQU #600E; Height (25,30,36)
-
-        INCLUDE "../../CORE32_FILEX_API.ASM"
+WC_LANG EQU #781A; LANG из фиксированного блока PS2P: 0=ENG, 1=RUS.
 
 CYC     EQU #2BAF;      Cache
 CACHE   EQU %00000100; #8000 Only!
@@ -142,7 +141,10 @@ __ALASM_CORG_LOGICAL DEFL #8000
 __ALASM_CORG_DISP DEFL 1
         ENDIF
 
-ENTRYN  EQU #A600
+; Рабочее имя отнесено за код, но остаётся внутри собственной страницы плагина.
+; #B900 — заголовок, #BA00 — клетка подсветки, #BB00..#BFFF — Inspector.
+; ASSERT в конце запрещает сборку, если код дойдёт до атрибута/размера FLMAKE.
+ENTRYN  EQU #B700
 FLLOAD  EQU ENTRYN-1
 FLMAKE  EQU ENTRYN-5
 
@@ -158,6 +160,7 @@ PLUGIN  LD (DAHL),HL,(DADE),DE
         LD (F10MENU),A
         LD (SVERFLG),A
         LD A," ",(TAPTCHA),A
+        LD A,#FF,(HELP_HINT_LANG),A; При каждом открытии заново вывести подпись F1.
         EXA
 
         CP #03:CALL Z,NO_FILE_FLAG
@@ -168,10 +171,14 @@ PLUGIN  LD (DAHL),HL,(DADE),DE
 
         LD BC,CYC,A,CACHE:OUT (C),A; Cache ON (#8000-#BFFF only)
 
+; API GEDPL пишет таблицы палитры по #1000/#11E0..#1447 в текущем окне #0000.
+; Поэтому сначала подключаем ещё свободную текстовую страницу 0 и вызываем
+; GEDPL, и лишь ПОТОМ загружаем файл. Вызов после LOAD/DETECT_EOL повреждал
+; занятую страницу: в Unreal обнаружено 584 изменённых байта большого файла.
+        XOR A:CALL MNG0VPL,GEDPL
         CALL LOAD:JR Z,PLUGIN_LOAD_OK
 
 ; При ошибке чтения не открываем редактор с частично заполненным буфером.
-        CALL GEDPL
         LD IX,ERWND:CALL PRWOW
         LD HL,MSG_READ_ERROR,DE,#0100:CALL TXTPR
         CALL USPO,NUSP
@@ -179,7 +186,8 @@ PLUGIN  LD (DAHL),HL,(DADE),DE
         XOR A
         RET
 
-PLUGIN_LOAD_OK CALL GEDPL
+PLUGIN_LOAD_OK CALL DETECT_EOL
+        LD HL,CURCOL,DE,CURCOL+1,BC,8,(HL),0:LDIR
         LD IX,PLWND:CALL PRWOW
 
         CALL NAMETOH
@@ -199,7 +207,7 @@ PLUGIN_LOAD_OK CALL GEDPL
         LD HL,#0100,A,#FE:CALL ISTR
 MAIN    EI:HALT:CALL OFFSETS_PRINT
         LD A,#FC:CALL ISTR,STUPD
-        LD A,#03:CALL ISTR
+        CALL EDITOR_STATUS
 
         CALL SHIFT:JR Z,NOSHFT
 
@@ -280,23 +288,26 @@ NO_FILE_FLAG LD A,1,(F10MENU),A,(CHANGES),A
              LD BC,TXTNAME
              RET
 ;---------------------------------------
-;Move Page to File Start
+; Ctrl+Home: перенести зазор к BOF и сбросить полную целевую колонку.
+; Иначе следующий Down возвращал старую колонку вместо начала строки.
 GOSTART      CALL CRM13U
-GGSTART      CALL CR13U:JP C,GGSTART
+GGSTART      CALL CRM13U:JP C,GGSTART
              LD A,PGZ,(PGHLP+2),A
              LD HL,0,(PGHLP),HL:CALL REFRESH
+             CALL SYNC_COLUMN
              LD A,1:OR A:RET
 ;-------
-;Move Page to File End
+; Ctrl+End: перенести зазор к EOF; показать последние строки окна.
+; Каждый CRM13D сам подключает обе страницы: обработка CRLF меняет окно #0000.
 GOEND        CALL CRM13D
-GGEND        CALL CR13D:JP C,GGEND
+GGEND        CALL CRM13D:JP C,GGEND
              LD HL,LHLCR,DE,PGHLP,BC,3:LDIR
              LD A,(IX+5):SUB LNZ+1+LNZ2
              LD B,A
 GEND         PUSH BC:CALL PGMUZ
              POP BC:JR NC,Gend
              DJNZ GEND
-Gend         CALL FILE_END_FND
+Gend         CALL REFRESH,SYNC_COLUMN
              LD A,1:OR A:RET
 ;-------
 ;Move Page Up
@@ -306,7 +317,7 @@ GOPU         CALL CRM13U
 PGU_CUR_MOVE PUSH BC:CALL CRM13U,PGMUZ
              POP BC:JR NC,FILE_UP_FND
              DJNZ PGU_CUR_MOVE
-             CALL INCCUR
+             CALL STEP_RIGHT
 FILE_UP_FND  LD A,(CRX):CALL CRMFWD
              JP REFRESH
 ;-------
@@ -320,97 +331,99 @@ FILE_END_FND LD A,(CRX):CALL CRMFWD
              JP REFRESH
 ;-------
 ;Move Cursor Upward
-GOUP    CALL CRM13U
-        CALL CRM13U,C,INCCUR
+GOUP    CALL NAV_BEGIN,CRM13U
+        CALL CRM13U,C,STEP_RIGHT
         LD A,(CRX):CALL CRMFWD
         LD A,(CRP+1)
         CP LNZ:CALL Z,PGMUZ
-        JP REFRESH
+        JP NAV_REFRESH
 ;-------
 ;Move Cursor Downward
-GODW    CALL CRM13D:JR NC,GOD
+GODW    CALL NAV_BEGIN,CRM13D:JR NC,GOD
         LD A,(CRX):CALL CRMFWD
         LD A,(CRP+1):INC A,A
         CP (IX+5):CALL NC,PGMD
-GOD     JP REFRESH
+GOD     JP NAV_REFRESH
 ;-------
 ;Move Cursor Left
-GOLF    LD HL,(CRP)
-        LD A,H:CP LNZ:JR NZ,GOlf
-        LD A,L:OR A:CALL Z,PGMUZ
-
-GOlf    CALL DECCUR
-        CALL REFRESH
-        LD A,(CRP),(CRX),A
+GOLF    CALL NAV_BEGIN,STEP_LEFT
+        CALL NAV_REFRESH,SYNC_COLUMN
         RET
+; Край окна больше не ограничивает движение: REFRESH прокрутит длинную строку.
+GORG    CALL NAV_BEGIN,STEP_RIGHT:RET NC
+        CP 13:JR Z,GORG_EOL
+        CP 10:JR NZ,GORG_DRAW
+GORG_EOL LD A,(CRP+1):INC A,A:CP (IX+5):CALL NC,PGMD
+GORG_DRAW CALL NAV_REFRESH,SYNC_COLUMN:RET
 ;-------
-;Move Cursor Right
-GORG    LD A,(CRP):INC A:CP (IX+4):RET NC
-        LD A,(CRP+1):INC A,A
-        CP (IX+5):CALL NC,GOrg
-
-        CALL INCCUR
-        CALL REFRESH
-        LD A,(CRP),(CRX),A
-        RET
-
-GOrg    CALL INCCUR:RET NC
-        PUSH AF:CALL DECCUR
-        POP AF:CP #0D+1:RET NC
-        JP PGMD
+GO0D    LD BC,1
+        LD A,(EOL_SECOND):OR A:JR Z,ENTER_ROOM
+        INC BC
+ENTER_ROOM CALL EDIT_ROOM:JP NC,BUFFER_FULL
+        CALL MARK_KILL
+        LD A,(EOL_FIRST):CALL INCLCR
+        LD A,(EOL_SECOND):OR A:CALL NZ,INCLCR
+        LD A,(CRP+1):INC A,A:CP (IX+5):CALL NC,PGMD
+G0dno   CALL REFRESH,SYNC_COLUMN:JP CHA
 ;-------
-GO0D    CALL MARK_KILL:JR NC,G0DNO
-        LD A,#D:CALL INCLCR:JR G0dno
-G0DNO   LD A,#D:CALL INCLCR:RET NC
-
-        LD A,(CRP+1):INC A,A
-        CP (IX+5):CALL NC,PGMD
-G0dno   CALL REFRESH
-        LD A,(CRP),(CRX),A
-        JP CHA
-;-------
-SMBADD  PUSH AF:CALL MARK_KILL
+; Проверяем замену до удаления выделения. При OVR в заполненном файле
+; свободное место не нужно, пока заменяется существующий обычный байт.
+SMBADD  PUSH AF
+        LD A,(MARKED):OR A:JR Z,SMB_ROOM_OK
+        LD BC,1:CALL EDIT_ROOM:JR C,SMB_ROOM_OK
+        POP AF:JP BUFFER_FULL
+SMB_ROOM_OK CALL MARK_KILL
         POP BC:LD A,B:JR NZ,INSM
 
         LD BC,(INOV):BIT 0,C:JR Z,INSM
         PUSH AF:CALL INCCUR
-        POP BC:RET NC
-        CP #0D+1:LD A,B:JR C,OVRM
+        POP BC:JR NC,OVR_EOF
+        CP 13:JR Z,OVR_NEWLINE
+        CP 10:JR Z,OVR_NEWLINE
+        LD A,B
         CALL DECLCRN
         CALL REFRESH
-        LD A,(CRP),(CRX),A
+        CALL SYNC_COLUMN
         JP CHA
+OVR_EOF LD A,B:JR INSM; На EOF режим замены дописывает новый символ.
+OVR_NEWLINE LD A,B
 OVRM    PUSH AF:CALL DECCUR
         POP AF
 INSM    CALL INCLCR:RET NC
         CALL REFRESH
-        LD A,(CRP),(CRX),A
+        CALL SYNC_COLUMN
         JP CHA
 ;-------
-ADDTAB  LD B,TABSIZE
-TABZ    PUSH BC:LD A," ":CALL INCLCR
-        POP BC:JR NC,G0dno:DJNZ TABZ
-        JR G0dno
+; Tab — настоящий байт #09. Экран разворачивает его до позиции, кратной 8.
+; Замена выделения атомарна; при нехватке памяти выделение остаётся нетронутым.
+ADDTAB  LD BC,1:CALL EDIT_ROOM:JP NC,BUFFER_FULL
+        CALL MARK_KILL
+        LD A,9:CALL INCLCR:JP G0dno
 ;-------
-SSQ     CALL CRM13U,C,INCCUR
-        CALL REFRESH
-        LD A,(CRP),(CRX),A
+SSQ     CALL NAV_BEGIN,CRM13U,C,STEP_RIGHT
+        CALL NAV_REFRESH
+        CALL SYNC_COLUMN
         RET
-SSE     CALL CRM13D,C,DECCUR
-        CALL REFRESH
-        LD A,(CRP),(CRX),A
+SSE     CALL NAV_BEGIN,CRM13D,C,STEP_LEFT
+        CALL NAV_REFRESH
+        CALL SYNC_COLUMN
         RET
 ;-------
+; Delete/Backspace удаляют перенос CRLF целиком, даже между страницами.
+; Проверка соседа выполняется до удаления; одиночные CR и LF тоже допустимы.
 DELETE  CALL MARK_KILL:JR NZ,Bspc
-        CALL INCRCR,REFRESH:JP CHA
+        CALL PEEK_RIGHT:RET NC
+        PUSH AF:CALL INCRCR:POP AF
+        CP 13:JR NZ,Bspc
+        CALL PEEK_RIGHT:JR NC,Bspc
+        CP 10:CALL Z,INCRCR:JR Bspc
 BSPACE  CALL MARK_KILL:JR NZ,Bspc
-        CALL DECLCR:RET NC
-        LD HL,(CRP)
-        LD A,H:CP LNZ:JR NZ,Bspc
-        LD A,L:OR A:CALL Z,PGMUZ
-Bspc    CALL REFRESH
-        LD A,(CRP),(CRX),A
-        JP CHA
+        CALL PEEK_LEFT:RET NC
+        PUSH AF:CALL DECLCR:POP AF
+        CP 10:JR NZ,Bspc
+        CALL PEEK_LEFT:JR NC,Bspc
+        CP 13:CALL Z,DECLCR
+Bspc    CALL REFRESH,SYNC_COLUMN:JP CHA
 ;-------
 STUPD   AND %10000000:RLCA:LD (INOV),A:RET
 ;-------
@@ -447,159 +460,9 @@ MRK_BAD XOR A:JR REFA
 MRK_OK  LD A,1:JR REFA
 REFRESH LD A,(REFFLG):OR A:JR NZ,MRK_REF
 REFA    LD (MARKED),A
+        JP PAGE
 ;---------------------------------------
-PAGE    ;i: PGHLP - Offset(2) + Page(1)
-
-        XOR A:LD (CRFLG),A
-
-        LD A,(PGHLP+2),(LNHLP+2),A
-        LD HL,(PGHLP),(LNHLP),HL
-
-        LD HL,#0000+LNZ*256,(XY),HL
-MARA    CALL LINE:LD HL,XY+1:INC (HL):LD A,(HL):INC A:CP (IX+5):JP C,MARA
-        RET
-;---------------------------------------
-LNE22   JP LNE2
-;-------
-LINE    ;Print Line
-;       i: LNHLP - Offset(2) + Page(1)
-;       o: LNHLP - Next Line
-
-        XOR A:LD (HLCFLG),A,(HLQFLG),A,(HLhexFLG),A
-
-        LD HL,0,(CRPOZ),HL
-        LD HL,(LNHLP),(LNTMP),HL
-        LD A,(LNHLP+2),(LNTMP+2),A:CALL MNG0VPL
-
-        LD DE,(XY):CALL GADRW:EX DE,HL;get address of window in TXT screen and set it on
-        LD A,(HIGHLGT):OR A:JP NZ,LINE_COLOR
-BROOT   LD HL,(LNHLP),BC,(LHLCR),B,#D+1
-
-BROO    LD A,C:CP L:JR Z,RYZ
-RAZ     LD A,(HL):CP B:JR C,LNE22
-ROZ     BIT 7,E:JR NZ,IGLN
-        LD (DE),A:INC E
-IGLN    INC HL:BIT 6,H:JR NZ,CRASHX
-
-        LD A,C:CP L:JR Z,RYZ
-        LD A,(HL):CP B:JR C,LNE2
-        BIT 7,E:JR NZ,IGLN2
-        LD (DE),A:INC E
-IGLN2   INC HL:BIT 6,H:JP Z,BROO
-        JP CRASHX
-
-RYZ     LD A,(LHLCR+1):CP H:JP NZ,RAZ
-        LD A,(LNHLP+2),C,A
-        LD A,(LHLCR+2):CP C:JR NZ,RAZ
-
-        PUSH DE
-        LD HL,RHLCR,DE,LNHLP
- .3      LDI
-        CALL INCLN; Line Offset(3) + 1
-        PUSH AF
-        LD A,(LNHLP+2):CALL MNG0VPL
-        POP AF
-        POP DE
-        LD (CRPOZ),DE
-        LD (CRP),DE
-        LD A,(XY+1),(CRP+1),A
-        LD HL,(LNHLP),BC,(LHLCR),B,#D+1
-        LD A," ":JP NC,ROZ
-        JP RAZ
-
-CRASHX  LD A,H:AND %00111111:LD H,A
-        LD A,(LNHLP+2):INC A
-        CP PGM+1:JR NC,LNE1
-        LD (LNHLP+2),A
-        LD (LNHLP),HL
-        CALL MNG0VPL
-        JP BROOT
-
-LNE1    DEC HL
-        LD A,H:AND %00111111:LD H,A
-LNE2    LD (LNHLP),HL
-        PUSH DE:CALL INCLN
-        POP HL
-
-        CALL ESTRCLR;EndStringClear
-;-------
-        CALL COLORS;Fill Color
-        CALL CURTAT;Print Cursor
-        RET
-
-;---------------------------------------
-MCOLOR  ;Show Marked
-        INC E:SET 7,E
-
-        EXX:LD HL,(BHLBLK),DE,(EHLBLK),BC,(BHLBLK+2),A,(EHLBLK+2),B,A
-        EXX
-
-SLOWCOL EXX
-        LD A,(LNTMP+2):CP C:JR C,DFCLSET,NZ,LOWSKIP
-        LD A,(LNTMP+1):CP H:JR C,DFCLSET,NZ,LOWSKIP
-        LD A,(LNTMP+0):CP L:JR C,DFCLSET
-LOWSKIP LD A,(LNTMP+2):CP B:JR C,MDCLSET,NZ,DFCLSET
-        LD A,(LNTMP+1):CP D:JR C,MDCLSET,NZ,DFCLSET
-        LD A,(LNTMP+0):CP E:JR C,MDCLSET
-DFCLSET LD A,DFCOL:JR CLSET
-MDCLSET LD A,MDCOL
-CLSET   EXX
-        PUSH HL,AF
-        CALL INCTMP
-        POP AF,HL
-
-        LD (HL),A:INC L:LD A,L:CP E:JR C,SLOWCOL
-
-        RES 7,E
-        LD A,(IX+4):SUB E:RET C:RET Z
-        LD B,A,A,DFCOL,(HL),A:INC L:DJNZ $-2
-        RET
-
-COLORS  LD L,E,E,%10000000
-        EX DE,HL
-        LD A,(MARKED):OR A:JR NZ,MCOLOR
-
-;Default Color to Line
-        PUSH HL
-        LD A,DFCOL
-; В исходном ALASM префикс .90 повторял всю цепочку команд в строке.
-; Для sjasmplus это нужно записать явно, иначе INC L выполняется только один раз.
-        DUP 90
-        LD (HL),A:INC L
-        EDUP
-        POP BC
-        RET
-
-COLORS2 LD L,E,E,%10000000
-        EX DE,HL
-        LD A,(MARKED):OR A:RET Z
-MCOLOR2 ;Show Marked
-        INC E:SET 7,E
-
-        EXX:LD HL,(BHLBLK),DE,(EHLBLK),BC,(BHLBLK+2),A,(EHLBLK+2),B,A
-        EXX
-
-SLOWCO2 EXX
-        LD A,(LNTMP+2):CP C:JR C,DFCLST2,NZ,LOWSKI2
-        LD A,(LNTMP+1):CP H:JR C,DFCLST2,NZ,LOWSKI2
-        LD A,(LNTMP+0):CP L:JR C,DFCLST2
-LOWSKI2 LD A,(LNTMP+2):CP B:JR C,MDCLST2,NZ,DFCLST2
-        LD A,(LNTMP+1):CP D:JR C,MDCLST2,NZ,DFCLST2
-        LD A,(LNTMP+0):CP E:JR C,MDCLST2
-DFCLST2 EXX
-        PUSH HL:CALL INCTMP
-        POP HL:INC L:LD A,L:CP E:JR C,SLOWCO2
-        RET
-MDCLST2 LD A,MDCOL
-        EXX
-        LD C,A,A,(HL):OR A:JR NZ,$+4:LD C,MDCOL2
-        PUSH HL,BC
-        CALL INCTMP
-        POP BC,HL
-        
-        LD (HL),C:INC L:LD A,L:CP E:JR C,SLOWCO2
-        RET
-
+        INCLUDE "TEXT_VIEW.INC"
 ;---------------------------------------
 COLcommeON LD A,1,(HLCFLG),A
 COLcomment LD A,HLBCOL:JP COLFIN
@@ -698,74 +561,16 @@ COLfinOPER LD BC,OPERATORS
            LD C,(HL)
            JP COLfin
 ;---------------------------------------
-CLNE22     JP CLNE2
-;----------
-LINE_COLOR LD HL,(LNHLP),BC,(LHLCR),B,#D+1
-
-NAMEIT     LD A,C:CP L:JR Z,CRYZ
-CRAZ       LD A,(HL):CP B:JR C,CLNE22
-CROZ       BIT 7,E:JR NZ,CIGLN
-           CALL FILLnCOL
-CIGLN      INC HL:BIT 6,H:JR NZ,CRASHXC
-
-           LD A,C:CP L:JR Z,CRYZ
-           LD A,(HL):CP B:JR C,CLNE2
-           BIT 7,E:JR NZ,CIGLN2
-           CALL FILLnCOL
-CIGLN2     INC HL:BIT 6,H:JP Z,NAMEIT
-           JP CRASHXC
-
-CRYZ       LD A,(LHLCR+1):CP H:JP NZ,CRAZ
-           LD A,(LNHLP+2),C,A
-           LD A,(LHLCR+2):CP C:JR NZ,CRAZ
-
-           PUSH DE
-           LD HL,RHLCR,DE,LNHLP
- .3         LDI
-           CALL INCLN; Line Offset(3) + 1
-           PUSH AF
-           LD A,(LNHLP+2):CALL MNG0VPL
-           POP AF
-           POP DE
-           LD (CRPOZ),DE
-           LD (CRP),DE
-           LD A,(XY+1),(CRP+1),A
-           LD HL,(LNHLP),BC,(LHLCR),B,#D+1
-           LD A," ":JP NC,CROZ
-           JP CRAZ
-
-CRASHXC    LD A,H:AND %00111111:LD H,A
-           LD A,(LNHLP+2):INC A
-           CP PGM+1:JR NC,CLNE1
-           LD (LNHLP+2),A
-           LD (LNHLP),HL
-           CALL MNG0VPL
-           JP LINE_COLOR
-
-CLNE1      DEC HL
-           LD A,H:AND %00111111:LD H,A
-CLNE2      LD (LNHLP),HL
-           PUSH DE:CALL INCLN
-           POP HL
-
-           CALL ESTRFILL
-;-------
-           CALL COLORS2;Fill Marked
-           CALL CURTAT;Print Cursor
-           RET
-
-ESTRFILL   LD A,(IX+4):SUB L:RET Z:RET C
-
-           LD B,A
-           XOR A:SET 7,L
-           LD (HL),A:INC L:DJNZ $-4
-           RET
-;---------------------------------------
 CURTAT  ;Set Cursor
         LD HL,(CRPOZ):LD A,H:OR L:RET Z
         LD (CRFLG),A
         BIT 7,L:RET NZ
         SET 7,L
+; Быстрое перемещение возвращает исходный атрибут предыдущей клетки.
+; Его нельзя вычислять обратной инверсией: бит 7 принудительно включается,
+; а цвет может принадлежать синтаксической подсветке или выделению.
+        LD (CURSOR_ADDR),HL
+        LD A,(HL),(CURSOR_ATTR),A
         LD A,(HL):OR A:JR Z,CURCLE
         RRD
         SET 7,(HL)
@@ -780,34 +585,6 @@ ESTRCLR ;Clearing End Of String
         LD B,A,(HL),C:INC L:DJNZ $-2
         RET
 ;---------------------------------------
-PGMD    LD A,(PGHLP+2):CALL MNG0VPL
-PGmd    CALL INCPG:RET NC
-        LD A,E:CP #0D+1:JR NC,PGmd
-        RET
-
-PGMUZ   CALL PGMU
-        CALL PGMU,C,INCPG
-        RET
-
-PGMU    LD A,(PGHLP+2):CALL MNG0VPL
-        LD HL,(PGHLP)
-PGmu    DEC HL
-        LD A,H:CP #40:JR NC,ILYA2
-GILIAN  LD A,(HL):CP #0D+1:JP NC,PGmu
-        LD (PGHLP),HL
-        RET
-
-ILYA2   INC HL:LD (PGHLP),HL
-        DEC HL
-        AND %00111111:LD H,A
-        LD A,(PGHLP+2)
-        CP PGZ:RET Z:DEC A
-        LD (PGHLP+2),A
-        LD (PGHLP),HL
-        PUSH HL,DE:CALL MNG0VPL
-        POP DE,HL
-        JP GILIAN
-;---------------------------------------
 DZT     LD DE,#3FFF:JP ZZT
 FAST    LD A,(RHLCR+2):INC A
         CP PGM+1:JR NC,DZT
@@ -818,6 +595,10 @@ FAST    LD A,(RHLCR+2):INC A
         SET 6,D
         JP FASTB
 
+; Быстрый перенос зазора до следующего EOL. Вход: LHLCR/RHLCR; выход:
+; C — перенос найден и поглощён целиком, NC — достигнут EOF. AF/BC/DE/HL
+; меняются, IX сохраняется. Tab/NUL не завершают строку. Пара CRLF может
+; пересекать страницу: второй байт читается через проверенный PEEK_RIGHT.
 CRM13D  LD A,(LHLCR+2)
         EXA:LD A,80:CALL WLD;=CALL MNG0VPL
         LD A,(RHLCR+2)
@@ -831,7 +612,12 @@ CR13DD  INC DE:BIT 7,D:JR Z,FAST
 FASTB   LD A,(DE),(HL),A
 
         INC HL:BIT 6,H:JR NZ,FAST2
-FAST2B  CP C:JP NC,CR13DD
+FAST2B  CP 13:JR Z,CR_DOWN_CR
+        CP 10:JP NZ,CR13DD
+        CALL ZZT:SCF:RET
+CR_DOWN_CR CALL ZZT,PEEK_RIGHT:JR NC,CR_DOWN_DONE
+           CP 10:CALL Z,INCCUR
+CR_DOWN_DONE SCF:RET
 ZZT     LD (LHLCR),HL
         RES 7,D
         RES 6,D
@@ -855,6 +641,8 @@ FAZT    LD A,H:AND %00111111:LD H,A
         POP BC
         JP FAZTB
 
+; Аналогичный проход назад: остановка ПЕРЕД целым переносом, C=найден EOL,
+; NC=BOF. Левый LF поглощает предшествующий CR, но одиночный LF допустим.
 CRM13U  LD A,(LHLCR+2)
         EXA:LD A,80:CALL WLD;=CALL MNG0VPL
         LD A,(RHLCR+2)
@@ -869,7 +657,12 @@ CR13UU  DEC HL:BIT 7,H:JR NZ,FAZT
 FAZTB   LD A,(HL),(DE),A
         
         DEC DE:BIT 6,D:JR Z,FAZT2
-FAZT2B  CP C:JP NC,CR13UU
+FAZT2B  CP 10:JR Z,CR_UP_LF
+        CP 13:JP NZ,CR13UU
+        CALL AZZ:SCF:RET
+CR_UP_LF CALL AZZ,PEEK_LEFT:JR NC,CR_UP_DONE
+         CP 13:CALL Z,DECCUR
+CR_UP_DONE SCF:RET
 AZZ     LD (LHLCR),HL
         RES 7,D
         RES 6,D
@@ -884,56 +677,6 @@ FAZT2   SET 6,D
         POP BC
         POP AF      
         JP FAZT2B
-;---------------------------------------
-SAZT    LD HL,0:JP SAZZ
-SFAZT   LD A,H:AND %00111111:LD H,A
-        LD A,(LHLCR+2):CP PGZ:JR Z,SAZT:DEC A
-        LD (LHLCR+2),A
-        PUSH BC:CALL MNG0VPL
-        POP BC
-        JP SFAZTB
-
-SCRM13U LD A,(LHLCR+2):CALL MNG0VPL
-        LD A,(RHLCR+2):CALL MNGCVPL
-        LD BC,#0D+1
-        LD HL,(LHLCR)
-        LD DE,(RHLCR)
-        SET 7,D
-        SET 6,D
-
-SCR13UU DJNZ S:LD B,1
-S       DEC HL:BIT 7,H:JR NZ,SFAZT
-SFAZTB  LD A,(HL),(DE),A
-        
-        DEC DE:BIT 6,D:JR Z,SFAZT2
-SFAZT2B CP C:JP NC,SCR13UU
-SAZZ    LD (LHLCR),HL
-        RES 7,D
-        RES 6,D
-        LD (RHLCR),DE
-        EXA
-        XOR A:SUB B
-        DEC A:LD B,A
-        EXA
-        RET
-
-SFAZT2  SET 6,D
-        PUSH AF
-        LD A,(RHLCR+2):DEC A
-        LD (RHLCR+2),A
-        PUSH BC:CALL MNGCVPL
-        POP BC
-        POP AF      
-        JP SFAZT2B
-;---------------------------------------
-CRMFWD  OR A:RET Z
-        LD B,A
-CRFWD   PUSH BC:CALL INCCUR
-        POP BC:RET NC
-        CP #0D+1:JP C,DECCUR
-        DJNZ CRFWD
-        SCF
-        RET
 ;---------------------------------------
 INCTMP  LD HL,(LNTMP):INC HL
         LD A,H:CP #40:JR NC,AKIRA
@@ -1122,19 +865,20 @@ CRASh2  AND %00111111:LD H,A
         LD (LHLCR+2),A
         JP CRASh2B
 ;---------------------------------------
-GENERATE_FILE LD HL,1
-              LD DE,0
+GENERATE_FILE LD HL,0
               LD (DAHL),HL
-              LD (DADE),DE
-
-              XOR A:CALL MNGCVPL
-              LD A," ",(#C000),A
-              JR LOOAD
+              LD (DADE),HL
+              LD (LHLCR),HL
+              XOR A:LD (LHLCR+2),A
+              LD HL,#3FFF,(RHLCR),HL
+              LD A,PGM,(RHLCR+2),A
+              LD A,13,(EOL_FIRST),A
+              XOR A:LD (EOL_SECOND),A:RET
 ;-------
 LOAD    LD A,(F10MENU):OR A:JR NZ,GENERATE_FILE
 
-; Пустой файл не имеет кластерной цепочки. Для работы редактора создаём только
-; внутренний пробел; без пользовательского изменения файл на диске не меняется.
+; Пустой файл не имеет кластерной цепочки. Весь буфер является зазором:
+; служебный пробел не нужен и не должен попадать в текст после первого ввода.
         LD HL,(DAHL)
         LD DE,(DADE)
         LD A,L:OR H,E,D:JR Z,GENERATE_FILE
@@ -1161,21 +905,55 @@ LOOAD   LD HL,(DAHL)
         XOR A
         RET
 ;-------
-LOADFL  XOR A:LD (APG),A
-
+; Полностью прочитать заявленный размер DADE:DAHL, максимум #000FFFFE.
+; API читает сектора по 512 байт, поэтому последняя порция округляется вверх.
+; IO_REMAIN — оставшиеся секторы; одна страница вмещает максимум 32 сектора.
+; Проверяются и статус, и фактическое продвижение HL: ранний EOC не должен
+; подставлять старую память вместо недостающих данных. Z=полный успех,
+; NZ=ошибка; AF/BC/DE/HL меняются. До успеха LOAD не формирует рабочий текст.
+LOADFL  LD HL,(DAHL),DE,(DADE)
+        LD A,D:OR A:JP NZ,LOADFL_ERROR
+        LD A,E:CP 16:JP NC,LOADFL_ERROR
+        CP 15:JR NZ,LOAD_SIZE_VALID
+        LD A,H:AND L:CP #FF:JP Z,LOADFL_ERROR
+LOAD_SIZE_VALID LD A,D:OR E,H,L:JP Z,LOADFL_OK
+        LD BC,511:ADD HL,BC:JR NC,$+3:INC DE
+        DUP 9
+         SRL D:RR E:RR H:RR L
+        EDUP
+        LD (IO_REMAIN),HL
+        XOR A:LD (APG),A
 LFL     LD A,(APG):CALL MNGCVPL
-        LD HL,#C000,B,32:CALL LOAD512
+        LD HL,(IO_REMAIN),B,32
+        LD A,H:OR A:JR NZ,LOAD_COUNT_READY
+        LD A,L:CP 32:JR NC,LOAD_COUNT_READY
+        LD B,A
+LOAD_COUNT_READY LD A,B,(IO_COUNT),A
+        LD HL,#C000:CALL LOAD512
         JR C,LOADFL_ERROR
-        CP #FF:JR Z,LOADFL_ERROR
-        CP #0F:JR Z,LOADFL_OK
-        OR A:JR NZ,LOADFL_ERROR
-
+        PUSH AF:CALL CHECK_TRANSFER:POP BC
+        JR NZ,LOADFL_ERROR
+        LD A,B:OR A:JR Z,LOAD_STATUS_OK
+        CP #0F:JR NZ,LOADFL_ERROR
+LOAD_STATUS_OK LD (IO_STATUS),A
+        LD A,(IO_COUNT),C,A,B,0
+        LD HL,(IO_REMAIN):OR A:SBC HL,BC:LD (IO_REMAIN),HL
+        LD A,H:OR L:JR Z,LOADFL_OK
+        LD A,(IO_STATUS):OR A:JR NZ,LOADFL_ERROR
         LD HL,APG:INC (HL)
         LD A,(HL):CP PGM+1:JR NC,LOADFL_ERROR
         JR LFL
 
 LOADFL_ERROR LD A,#FF:OR A:RET
 LOADFL_OK    XOR A:RET
+
+; LOAD/SAVE512 возвращают HL за фактически обработанными секторами.
+; Вход: HL=ответ API, IO_COUNT=запрос 1..32. Выход: Z=объём совпал,
+; NZ=короткая/неожиданная передача; AF/BC/DE/HL меняются. Вычитание по модулю
+; 65536 учитывает переход #FFFF -> #0000 при полной порции в 16 КиБ.
+CHECK_TRANSFER LD A,(IO_COUNT):ADD A,A:LD D,A,E,0
+               LD BC,#C000:OR A:SBC HL,BC
+               OR A:SBC HL,DE:RET
 
 ;---------------------------------------
 LDDRR   ;i: [DE,HL] - Lenght
@@ -1292,12 +1070,23 @@ SAVECH  LD A,(CHANGES):OR A:RET Z
 SDM     EI:HALT
         XOR A:CALL YN
         CALL ESC:JR NZ,BACK2EDIT
-        CALL ENKE:JR Z,SDM
-
-        CALL RRESB
-        LD A,#FF:CALL YN:JR NZ,NOCH
-
+; Enter проверяем до общего чтения символа: KBSCN(1) забирает событие
+; клавиши даже тогда, когда её scan-код не переводится в печатный символ.
+        CALL ENKE:JR NZ,SAVECH_ENTER
+; WC API 8 обслуживает только стрелки. Раньше N игнорировалась, выбранным
+; оставалось YES, и следующий Enter сохранял файл вопреки отказу пользователя.
+; Для Y/N берём латинскую таблицу без зависимости от текущей раскладки/Caps.
+        LD A,1:CALL KBSCN
+        OR #20:CP "n":JR Z,SAVECH_NO
+        CP "y":JR Z,SAVECH_YES
+        JR SDM
+; Считываем решение, пока диалог ещё открыт, и выбираем ветвь до любых
+; других вызовов WC. Ветвь NO вообще не вызывает файловые операции.
+SAVECH_ENTER LD A,#FF:CALL YN:JR NZ,SAVECH_NO
+SAVECH_YES CALL USPO,RRESB
         CALL QSAVE:LD A,(SVERFLG):OR A:JR NZ,BACK2edit
+        JR NOCH
+SAVECH_NO CALL USPO,RRESB
 NOCH    POP IX
         XOR A
         RET
@@ -1422,6 +1211,7 @@ BAX     PUSH HL
         LD DE,#0006
         LD BC,80-16:CALL PRSRW
 
+        XOR A:LD (HIGHLGT),A
         LD A,1:CALL PRM_PL
         POP HL:RET Z
 
@@ -1431,13 +1221,17 @@ BAX     PUSH HL
         LD BC,5,A,".":CPDR:RET NZ:INC HL,HL        
         LD DE,ASMEXT:PUSH HL:CALL EXTckHL:POP HL
         LD DE,INIEXT
-EXTckHL LD B,3,A,(DE):CP (HL):RET NZ:INC HL,DE:DJNZ $-5
+EXTckHL LD B,3
+EXT_NEXT LD A,(HL):OR #20
+         LD C,A,A,(DE):CP C:RET NZ
+         INC HL,DE:DJNZ EXT_NEXT
 HiLiON  LD A,1,(HIGHLGT),A
         RET
 
-OFFSETS_PRINT LD A,(CHANGES):OR A:JR Z,OFFSETS_PRI
-              LD HL,TAPTCHA,A,(HL):CP "*":JR Z,OFFSETS_PRI
-              LD A,"*",(HL),A,DE,#0005,BC,1:CALL PRSRW
+OFFSETS_PRINT LD A,(CHANGES):OR A:LD A," ":JR Z,OFFSET_SYMBOL
+              LD A,"*"
+OFFSET_SYMBOL LD HL,TAPTCHA:CP (HL):JR Z,OFFSETS_PRI
+              LD (HL),A,DE,#0005,BC,1:CALL PRSRW
 
 OFFSETS_PRI   LD HL,LHLOFF,A,(LHLCR+2):CALL NORK
                         LD A,(LHLCR+1):CALL NORK
@@ -1462,7 +1256,7 @@ INSPMAIN  EI:HALT
 
           XOR A:CALL ISTR
           LD A,2:CALL ISTR
-          PUSH IX:LD IX,PLWND,A,#03:CALL ISTR
+          PUSH IX:LD IX,PLWND:CALL EDITOR_STATUS
           POP IX
           JR INSPMAIN          
 
@@ -1471,9 +1265,15 @@ INSP_EXIT CALL RRESB
           LD A,1:OR A
           RET
 
+; Inspector обязан проверять CF до форматирования BC. При ошибке выводим
+; причину и прочерки во всех числовых полях; успешный расчёт очищает причину.
 INSPCALC  LD HL,CALCBUF,DE,BUF3:CALL CALC_BUF_CONV
           LD BC,0
           LD DE,BUF3,A,(DE):OR A:CALL NZ,DECODER
+          JR C,INSP_ERROR
+          PUSH BC
+          LD HL,CALSTATUS,B,24,A," ":CALL FILL_FIELD
+          POP BC
 
           LD HL,CALHEX
           LD A,B:PUSH BC:CALL NORK:POP BC
@@ -1489,11 +1289,29 @@ INSPCALC  LD HL,CALCBUF,DE,BUF3:CALL CALC_BUF_CONV
 
           CALL INSP_REFRESH
           JP INSPMAIN
+INSP_ERROR CP 26:LD HL,CALC_BAD_TEXT:JR NZ,INSP_ERROR_TEXT
+           LD HL,CALC_ZERO_TEXT
+INSP_ERROR_TEXT LD DE,CALSTATUS,BC,24:LDIR
+           LD HL,CALDEC,B,5,A,"-":CALL FILL_FIELD
+           LD HL,CALHEX,B,4:CALL FILL_FIELD
+           LD HL,CALBIN,B,17:CALL FILL_FIELD
+           LD A," ",(CALBIN+8),A
+           CALL INSP_REFRESH:JP INSPMAIN
+; A=заполнитель, HL=поле, B=длина 1..255. HL продвигается за поле, A сохранён.
+FILL_FIELD LD (HL),A:INC HL:DJNZ FILL_FIELD:RET
 ;---------
-CALC_BUF_CONV LD B,CALCBUFL
-BUF_CONV      LD A,(HL):CP " ":JR Z,END_CONV
-              LD (DE),A:INC HL,DE
-              DJNZ BUF_CONV
+; HL=поле ввода из 40 байт, DE=буфер минимум 41 байт. Удаляются только
+; пробелы ВНЕ кавычек. Старое завершение на первом пробеле превращало 1 / 2
+; в 1. C хранит состояние кавычек; выход всегда ограничен и завершён нулём.
+CALC_BUF_CONV LD B,CALCBUFL,C,0
+BUF_CONV      LD A,(HL):INC HL
+              CP #22:JR NZ,BUF_QUOTE_READY
+              LD A,C:XOR 1:LD C,A,A,#22
+BUF_QUOTE_READY CP " ":JR NZ,BUF_KEEP
+              LD A,C:OR A:JR Z,BUF_NEXT
+              LD A," "
+BUF_KEEP      LD (DE),A:INC DE
+BUF_NEXT      DJNZ BUF_CONV
 END_CONV      XOR A:LD (DE),A
               RET
 ;---------
@@ -1557,528 +1375,7 @@ DLIT    INC A
         ADD HL,BC,A,#30
         RET
 ;---------------------------------------
-DEDEC   PUSH BC
-        LD C,E
-Idec    LD A,(DE):INC E
-        CP #30:JR C,Ilen
-        CP #3A:JP C,Idec
-Ilen    LD A,E:SUB C
-        POP BC:CP 6:JP NC,EDEC
-        DEC E
-
-        PUSH BC
-        LD BC,DE:DEC C
-        PUSH HL,DE
-        LD H,0
-        DEC A:JR NZ,DEC2
-        LD A,(BC):SUB #30:LD L,A
-        JP DECXX
-
-DEC2    DEC A:JR NZ,DEC3
-        LD A,(BC):SUB #30:LD L,A:DEC C
-        LD A,(BC):SUB #30:JP Z,DECXX
-        LD B,A:XOR A:ADD A,10:DJNZ $-2
-        ADD A,L:LD L,A
-        JP DECXX
-
-DEC3    DEC A:JR NZ,DEC4
-        LD A,(BC):DEC C:SUB #30:LD L,A
-        LD A,(BC):DEC C:SUB #30:JR Z,D31
-        LD D,B
-        LD B,A:XOR A:ADD A,10:DJNZ $-2
-        LD B,D:ADD A,L:LD L,A
-D31     LD A,(BC):SUB #30:JP Z,DECXX
-        LD B,A,DE,100:ADD HL,DE:DJNZ $-1
-        JP DECXX
-
-DEC4    DEC A:JR NZ,DEC5
-        LD A,(BC):DEC C:SUB #30:LD L,A
-        LD A,(BC):DEC C:SUB #30:JR Z,D41
-        LD D,B
-        LD B,A:XOR A:ADD A,10:DJNZ $-2
-        LD B,D:ADD A,L:LD L,A
-D41     LD A,(BC):DEC C:SUB #30:JR Z,D42
-        PUSH BC
-        LD B,A,DE,100:ADD HL,DE:DJNZ $-1
-        POP BC
-D42     LD A,(BC):SUB #30:JR Z,DECXX
-        LD DE,1000
-        LD B,A:ADD HL,DE:DJNZ $-1
-        JP DECXX
-
-DEC5    LD A,(BC):DEC C:SUB #30:LD L,A
-        LD A,(BC):DEC C:SUB #30:JR Z,D51
-        LD D,B
-        LD B,A:XOR A:ADD A,10:DJNZ $-2
-        LD B,D:ADD A,L:LD L,A
-D51     LD A,(BC):DEC C:SUB #30:JR Z,D52
-        PUSH BC
-        LD B,A,DE,100:ADD HL,DE:DJNZ $-1
-        POP BC
-D52     LD A,(BC):DEC C:SUB #30:JR Z,D53
-        LD DE,1000
-        PUSH BC
-        LD B,A:ADD HL,DE:DJNZ $-1
-        POP BC
-D53     LD A,(BC):SUB #30:JR Z,DECXX
-        LD DE,10000
-        LD B,A:ADD HL,DE:JR C,TEDEC
-        DJNZ $-3
-
-DECXX   LD BC,HL:OR A
-TEDEC   POP DE,HL
-        LD (HL),C2B:INC L
-        LD (HL),C:INC L
-        LD (HL),B:INC L
-        POP BC:JP C,EDEC
-        JP DEE
-;-------
-DEHEX   PUSH BC
-        LD C,E:INC C
-Ihex    LD A,(DE):INC E
-        CP #30:JR C,InoH
-        CP #3A:JP C,Ihex
-        CP #41:JR C,InoH
-        CP #47:JP C,Ihex
-InoH    LD A,E:SUB C
-        POP BC:JP Z,EDEC
-        CP 5:JP NC,EDEC
-        DEC E
-
-        PUSH BC
-        PUSH HL,DE
-        LD H,0,BC,#3007
-
-        DEC E
-        DEC A:JR NZ,HEX2
-        LD A,(DE)
-        SUB B:CP #0A:JR C,$+3:SUB C
-        LD L,A
-        JP HEXX
-
-HEX2    DEC A:JR NZ,HEX3
-        LD A,(DE):DEC E
-        SUB B:CP #0A:JR C,$+3:SUB C
-        LD L,A
-        LD A,(DE)
-        SUB B:CP #0A:JR C,$+3:SUB C
-        OR A
- .4      RLA
-        OR L:LD L,A
-        JP HEXX
-
-HEX3    DEC A:JR NZ,HEX4
-        LD A,(DE):DEC E
-        SUB B:CP #0A:JR C,$+3:SUB C
-        LD L,A
-        LD A,(DE):DEC E
-        SUB B:CP #0A:JR C,$+3:SUB C
-        OR A
- .4      RLA
-        OR L:LD L,A
-        LD A,(DE)
-        SUB B:CP #0A:JR C,$+3:SUB C
-        LD H,A
-        JP HEXX
-
-HEX4    LD A,(DE):DEC E
-        SUB B:CP #0A:JR C,$+3:SUB C
-        LD L,A
-        LD A,(DE):DEC E
-        SUB B:CP #0A:JR C,$+3:SUB C
-        OR A
- .4      RLA
-        OR L:LD L,A
-        LD A,(DE):DEC E
-        SUB B:CP #0A:JR C,$+3:SUB C
-        LD H,A
-        LD A,(DE)
-        SUB B:CP #0A:JR C,$+3:SUB C
-        OR A
- .4      RLA
-        OR H:LD H,A
-
-HEXX    LD BC,HL
-        POP DE,HL
-
-        LD (HL),C2B:INC L
-        LD (HL),C:INC L
-        LD (HL),B:INC L
-        POP BC
-        JP DEE
-;-------
-DEBUX   LD (HL),C2B:INC L
-        PUSH BC
-        PUSH HL
-        EXX:LD A,C:DEC A
-        EXX:LD C,A,B,0
-        LD HL,(BUX):ADD HL,BC
-        LD C,L
-        LD B,H
-        POP HL
-        LD (HL),C:INC L
-        LD (HL),B:INC L
-        POP BC
-        JP DEE
-;-------
-DEBIN   LD (DBC),BC
-
-        XOR A
-        LD B,A,C,A
-Ibin    EXA
-        LD A,(DE)
-        CP "0":JR Z,Ibin0
-        CP "1":JR Z,Ibin1
-        EXA:OR A:JP Z,EDEC
-
-        LD (HL),C2B:INC HL
-        LD (HL),C:INC HL
-        LD (HL),B:INC HL
-        LD BC,(DBC)
-        JP DEE
-
-Ibin1   SCF
-Ibin0   RL C,B:INC E
-        EXA:INC A:CP 16+1:JP NC,EDEC
-        JP Ibin
-;-------
-DECHR   LD (DBC),BC
-        LD A,(DE):INC E:OR A:JR Z,ECHR
-        LD B,A
-        LD A,(DE):INC E:CP #22:JR Z,CH1B
-        OR A:JR Z,ECHR
-        LD C,A
-        LD A,(DE):INC E:CP #22:JR Z,CH2B
-EDEC    LD A,24:OR A:SCF:RET
-ECHR    LD A,27:OR A:SCF:RET
-
-CH1B    LD C,B,B,0
-CH2B    LD (HL),C2B:INC HL
-        LD (HL),C:INC HL
-        LD (HL),B:INC HL
-        LD BC,(DBC)
-        JP DEE
-;-------
-DECODER ;i:  DE,Exp
-;           BC',$ delta+1
-;         (BUX),$
-;
-;        o:  BC,Result
-;             C - Err
-;             Z - Ok
-;            NZ - Exp2Queue
-
-        XOR A
-        LD HL,BUF2
-        LD (BUF2A),HL
-        LD (BUF2I),A
-        LD (HL),A
-
-        LD HL,CBUF
-        LD BC,CBUF1+1
-DEE     LD A,(DE):INC E
-        CP #22:JR Z,DECHR;"
-        CP "%":JP Z,DEBIN
-;CP "$":JP Z,DEBUX
-        CP "#":JP Z,DEHEX
-        CP #30:JP C,DEA
-        CP #3A:JP C,DEDEC
-DEA     CP "(":JP Z,BRO
-        CP "+":JP Z,PLUS
-        CP "-":JP Z,MINUS
-        CP "*":JP Z,MUL
-        CP "/":JP Z,DIV
-        CP "\\":JP Z,MOD
-        CP "[":JP Z,HI
-        CP "]":JP Z,LO
-        CP ")":JR Z,BRC
-        OR A:JP Z,GOCALC
-
-;Constant Decoding
-;    not ok:$#%"(
-;        ok:+-*/\[])
-
-        PUSH BC
-        LD BC,(BUF2A)
-CONST   LD (BC),A:INC C
-        LD A,(DE):INC E
-        CP "$":JR Z,SERP
-        CP "#":JR Z,SERP
-        CP "%":JR Z,SERP
-        CP #22:JR Z,SERP
-        CP "(":JR Z,SERP
-
-        CP "+":JR Z,COT
-        CP "-":JR Z,COT
-        CP "*":JR Z,COT
-        CP "/":JR Z,COT
-        CP "\\":JR Z,COT
-        CP "[":JR Z,COT
-        CP "]":JR Z,COT
-        CP ")":JR Z,COT
-        OR A:JP NZ,CONST
-COT     XOR A:LD (BC),A:INC C
-        LD (BUF2A),BC:DEC E
-        LD A,(BUF2I):INC A
-        LD (BUF2I),A
-
-        LD (HL),CLA:INC L
-        LD (HL),A:INC L
-        LD (HL),0:INC L
-        POP BC
-        JP DEE
-
-SERP    POP BC:LD A,22:OR A:SCF:RET
-SER     LD A,22:OR A:SCF:RET
-
-BRO     LD (BC),A:INC C:JP DEE
-BRC     DEC C:LD A,(BC):JR Z,BRE
-        CP "(":JR Z,BRG
-        LD (HL),A:INC L
-        JP BRC
-BRG     JP DEE
-BRE     LD A,23:OR A:SCF:RET
-;-------
-Padd    INC C:JP PADD
-PLUS    DEC C:JR Z,Padd
-        LD A,(BC)
-        CP CP1:JR Z,PSWP
-        CP CP2:JR Z,PSWP
-
-        CP CP3:JR Z,PFSW
-        CP CP4:JR Z,PFSW
-        CP CP5:JR Z,PFSW
-
-        CP CP6:JR Z,PFSW
-        CP CP7:JR Z,PFSW
-
-        CP "(":JR Z,Padd
-        JP SER
-
-PSWP    LD (HL),A:INC L
-PADD    LD A,CP1,(BC),A:INC C:JP DEE
-
-PFSW    LD (HL),A:INC L
-        DEC C:JR Z,Padd
-        LD A,(BC):CP "(":JR Z,Padd
-        JP PFSW
-;-------
-Madd    INC C:JP MADD
-MINUS   DEC C:JR Z,Madd
-        LD A,(BC)
-        CP CP1:JR Z,MSWP
-        CP CP2:JR Z,MSWP
-
-        CP CP3:JR Z,MFSW
-        CP CP4:JR Z,MFSW
-        CP CP5:JR Z,MFSW
-
-        CP CP6:JR Z,MFSW
-        CP CP7:JR Z,MFSW
-
-        CP "(":JR Z,Madd
-        JP SER
-
-MSWP    LD (HL),A:INC L
-MADD    LD A,CP2,(BC),A:INC C:JP DEE
-MFSW    LD (HL),A:INC L
-        DEC C:JR Z,Madd
-        LD A,(BC):CP "(":JR Z,Madd
-        JP MFSW
-;-------
-MULadd  INC C:JP MULADD
-MUL     DEC C:JR Z,MULadd
-        LD A,(BC)
-        CP CP3:JR Z,MULSWP
-        CP CP4:JR Z,MULSWP
-        CP CP5:JR Z,MULSWP
-
-        CP CP1:JR Z,MULadd
-        CP CP2:JR Z,MULadd
-
-        CP CP6:JR Z,MULFSW
-        CP CP7:JR Z,MULFSW
-
-        CP "(":JR Z,MULadd
-        JP SER
-
-MULSWP  LD (HL),A:INC L
-MULADD  LD A,CP3,(BC),A:INC C:JP DEE
-MULFSW  LD (HL),A:INC L
-        DEC C:JR Z,MULadd
-        LD A,(BC);"("
-        CP CP3:JR Z,MULFSW
-        CP CP4:JR Z,MULFSW
-        CP CP5:JR Z,MULFSW
-        CP CP6:JR Z,MULFSW
-        CP CP7:JR Z,MULFSW
-        JP MULadd
-;-------
-DIVadd  INC C:JP DIVADD
-DIV     DEC C:JR Z,DIVadd
-        LD A,(BC)
-        CP CP3:JR Z,DIVSWP
-        CP CP4:JR Z,DIVSWP
-        CP CP5:JR Z,DIVSWP
-
-        CP CP1:JR Z,DIVadd
-        CP CP2:JR Z,DIVadd
-
-        CP CP6:JR Z,DIVFSW
-        CP CP7:JR Z,DIVFSW
-
-        CP "(":JR Z,DIVadd
-        JP SER
-
-DIVSWP  LD (HL),A:INC L
-DIVADD  LD A,CP4,(BC),A:INC C:JP DEE
-DIVFSW  LD (HL),A:INC L
-        DEC C:JR Z,DIVadd
-        LD A,(BC);"("
-        CP CP3:JR Z,DIVFSW
-        CP CP4:JR Z,DIVFSW
-        CP CP5:JR Z,DIVFSW
-        CP CP6:JR Z,DIVFSW
-        CP CP7:JR Z,DIVFSW
-        JP DIVadd
-;-------
-MOD     JP DEE
-;-------
-HIadd   INC C:JP HIADD
-HI      DEC C:JR Z,HIadd
-        LD A,(BC)
-        CP CP3:JR Z,HIadd
-        CP CP4:JR Z,HIadd
-        CP CP5:JR Z,HIadd
-
-        CP CP1:JR Z,HIadd
-        CP CP2:JR Z,HIadd
-
-        CP "(":JR Z,HIadd
-        JP SER
-HIADD   LD A,CP6,(BC),A:INC C:JP DEE
-;-------
-LOadd   INC C:JP LOADD
-LO      DEC C:JR Z,LOadd
-        LD A,(BC)
-        CP CP3:JR Z,LOadd
-        CP CP4:JR Z,LOadd
-        CP CP5:JR Z,LOadd
-
-        CP CP1:JR Z,LOadd
-        CP CP2:JR Z,LOadd
-
-        CP "(":JR Z,LOadd
-        JP SER
-LOADD   LD A,CP7,(BC),A:INC C:JP DEE
-;---------------------------------------
-NOPOLSK LD A,#FF:OR A:RET
-;-------
-GOCALC  DEC C:LD A,(BC):JR Z,STP
-        LD (HL),A:INC L
-        JP GOCALC
-
-STP     LD (HL),0,A,(BUF2):OR A:JR NZ,NOPOLSK
-
-        EXX:PUSH DE,BC
-        EXX:LD L,0:CALL POLSK
-        EXX:POP BC,DE
-        EXX
-        RET
-;-------
-CPEND   POP BC
-        DI:LD SP,(DSP)
-        XOR A
-        RET
-
-CPHI    EXX
-        POP HL:LD L,H,H,0
-        PUSH HL
-        EXX
-        JP POL
-
-CPLO    EXX
-        POP HL:LD H,0
-        PUSH HL
-        EXX
-        JP POL
-
-POLSK   DI:LD (DSP),SP,SP,SPSAFE
-
-POL     LD A,(HL):INC HL
-        CP C2B:JR NZ,LSK
-        LD C,(HL):INC HL
-        LD B,(HL):INC HL
-        PUSH BC
-        JP POL
-
-LSK     CP CP1:JR Z,CPPLS
-        CP CP2:JR Z,CPMNS
-        CP CP3:JR Z,CPMUL
-        CP CP4:JR Z,CPDIV
-;CP CP5 JR Z CPMOD
-        CP CP6:JR Z,CPHI
-        CP CP7:JR Z,CPLO
-        OR A:JR Z,CPEND
-
-        DI:LD SP,(DSP)
-        LD A,25:OR A:SCF
-        RET
-;-------
-CPPLS   EXX
-        POP BC
-        POP HL
-        ADD HL,BC
-        PUSH HL:EXX:JP POL
-
-CPMNS   EXX
-        POP BC
-        POP HL
-        OR A:SBC HL,BC
-        PUSH HL:EXX:JP POL
-
-CPMUL   EXX
-        POP DE
-        POP BC
-        LD HL,0
-        LD A,16
-Mul16   ADD HL,HL:RL E,D:JP NC,NoMul16
-        ADD HL,BC:JP NC,NoMul16
-        INC DE
-NoMul16 DEC A:JP NZ,Mul16
-        PUSH HL:EXX:JP POL
-
-CPDIV   EXX
-        POP BC
-        POP HL
-        LD A,B
-        OR A:JR NZ,DIVBIG
-        OR C:JR Z,EDIV
-
-        XOR A
-        LD B,16
-Div8    ADD HL,HL:RLA
-        CP C:JP C,Div8Nxt
-        SUB C:INC L
-Div8Nxt DJNZ Div8
-        PUSH HL:EXX:JP POL
-
-DIVBIG  LD DE,0-1
-        OR A
-PDIV    SBC HL,BC:INC DE:JR C,Pdiv
-        JP PDIV
-Pdiv    PUSH DE:EXX:JP POL
-
-; POLSK работает на временном стеке SPSAFE. При делении на ноль старый код
-; выполнял RET с этого стека и уходил по случайному адресу.
-EDIV    EXX
-        DI:LD SP,(DSP)
-        LD A,26:OR A:SCF
-        RET
-
-CPMOD   EXX
-        EXX
-        JP POL
+        INCLUDE "CALCULATOR.INC"
 ;---------------------------------------
 SEARCHNEXT JR GOsrh7
 
@@ -2091,7 +1388,7 @@ SEARCH  PUSH IX
 SRHZERO EXX:LD HL,STRBUFFL:EXX
         LD HL,STRBUFF,DE,#0101,B,#28,A,#FD:CALL ISTR
 SRHMAIN EI:HALT
-        PUSH IX:LD IX,PLWND,A,#03:CALL ISTR
+        PUSH IX:LD IX,PLWND:CALL EDITOR_STATUS
         POP IX
         CALL ENKE:JR NZ,GOSRH7
         CALL ESC:JR NZ,SRHEXIT
@@ -2110,16 +1407,14 @@ GOsrh7  CALL STRBULL:RET Z
         CALL PRTOBACK
         CALL GOSRH:JR NC,COMEBACK
 
-        CALL SCRM13U
-        PUSH BC:CALL C,INCCUR
-        LD HL,LHLCR,DE,PGHLP,BC,3:LDIR
+        CALL MEASURE_CURSOR
+        LD HL,LINESTART,DE,PGHLP,BC,3:LDIR
         LD A,(IX+5):SUB LNZ+1+LNZ2:SRL A
         LD B,A
 SRHGE   PUSH BC:CALL PGMUZ
         POP BC:JR NC,SRHge
         DJNZ SRHGE
-SRHge   POP AF
-        LD (CRX),A:CALL CRMFWD
+SRHge   CALL REFRESH,SYNC_COLUMN
 SRHET   CALL REFRESH
         XOR A
         RET
@@ -2127,7 +1422,14 @@ SRHET   CALL REFRESH
 COMEBACK PUSH IX
          LD IX,NFNDWND:CALL PRWOW
 
-         LD HL,DHLA,DE,LHLCR,BC,3:LDIR
+; GOSRH уже перенёс весь хвост влево. Обратное копирование начинает с его
+; ФАКТИЧЕСКОГО конца; старые координаты курсора задают лишь итоговый зазор.
+; Прежний код подставлял старый конец и запрашивал страницу #FF. WC отказывал
+; в подключении, но копирование продолжалось в прежнюю страницу и портило файл.
+         LD HL,LHLCR,DE,DHLA,BC,3:LDIR
+         LD HL,0,(SHLA),HL
+         LD A,PGM+1,(SHLA+2),A
+         LD HL,SEARCH_OLD_L,DE,LHLCR,BC,3:LDIR
          LD HL,RHLCR2,DE,RHLCR,C,3:LDIR
          CALL TOWORK
 
@@ -2137,8 +1439,12 @@ COMEBACK PUSH IX
          POP IX
          JR SRHET
 PRTOBACK PUSH DE
+         LD HL,LHLCR,DE,SEARCH_OLD_L,BC,3:LDIR
          CALL RCRTD
          CALL INCRCR
+         JR C,SEARCH_SIZE_OK
+         LD HL,#4000,(RHLCR),HL
+SEARCH_SIZE_OK
          LD HL,LHLCR,DE,DHLA,BC,3:LDIR
          LD HL,RHLCR,DE,SHLA,C,3:LDIR
 
@@ -2164,7 +1470,9 @@ SRHFAST   LD A,(RHLCR+2):INC A
           SET 6,D
           JP SRHFASTB
 ;-------
-GOSRH     INC DE:LD HL,STRBUFF:ADD HL,DE:LD (HL),0,(STRBUFA),HL
+GOSRH     INC DE:LD A,E,(PATLEN),A
+          LD HL,STRBUFF:ADD HL,DE:LD (HL),0,(STRBUFA),HL
+          CALL SEARCH_PREFIXES
 
           LD A,(LHLCR+2):CALL MNG0VPL
           LD A,(RHLCR+2):CALL MNGCVPL
@@ -2175,12 +1483,18 @@ GOSRH     INC DE:LD HL,STRBUFF:ADD HL,DE:LD (HL),0,(STRBUFA),HL
 SRHFRST   LD HL,STRBUFF
 SRH13DD   LD A,(HL):OR A:JR Z,SRHFOUND
           INC DE:BIT 7,D:JR Z,SRHFAST
-SRHFASTB  LD A,(DE),(BC),A:CP (HL):JR Z,SRHNXT
-          LD HL,STRBUFF
+SRHFASTB  LD A,(DE),(BC),A
+SRH_COMPARE CP (HL):JR Z,SRHNXT
+          PUSH AF,BC,DE
+          LD A,L:SUB low STRBUFF:JR Z,SRH_NO_PREFIX
+          LD L,A,H,0,DE,KMPFAIL:ADD HL,DE
+          LD L,(HL),H,0,DE,STRBUFF:ADD HL,DE
+          POP DE,BC,AF
+          JP SRH_COMPARE
+SRH_NO_PREFIX LD HL,STRBUFF
+          POP DE,BC,AF
 SRHNXTB   INC BC:BIT 6,B:JR NZ,SRHFAST2
-SRHFAST2B OR A:JP Z,SRHZZT
-          CP #0D+1:JP NC,SRH13DD
-          JP SRHFRST
+SRHFAST2B JP SRH13DD; EOF — физический конец буфера; NUL внутри файла является данными.
 SRHNXT    INC HL:JP SRHNXTB
 SRHFOUND  SCF
 SRHZZT    LD HL,(STRBUFA),(HL)," "
@@ -2201,12 +1515,59 @@ SRHFAST2  PUSH AF
 ;-------
 STRBULL LD DE,STRBUFFL-1
         LD HL,STRBUFF+STRBUFFL-1
+        LD B,STRBUFFL
 STRSTRS LD A,(HL):CP " ":RET NZ
-        DEC HL,DE:LD A,D:OR E:JP NZ,STRSTRS
+        DEC HL,DE:DJNZ STRSTRS
 STRSTR  XOR A
         RET
+
+; Для каждого префикса образца сохраняем длину его наибольшей собственной
+; границы: начала, совпадающего с концом. При несовпадении GOSRH использует
+; эту таблицу и повторно проверяет тот же байт; поэтому ab находится в aab.
+; PATLEN=1..40, STRBUFF=образец; выход KMPFAIL[0..PATLEN], AF/BC/DE/HL меняются.
+; Текстовые страницы не затрагиваются. Маленький предел позволяет простой
+; полный перебор границ без сложного дополнительного состояния.
+SEARCH_PREFIXES LD HL,KMPFAIL,(HL),0
+                LD A,1,(PF_LEN),A
+PREFIX_LENGTH   LD A,(PF_LEN):DEC A:LD (PF_CAND),A
+PREFIX_TRY      LD A,(PF_CAND):OR A:JR Z,PREFIX_STORE
+                LD B,A,A,(PF_LEN):SUB B
+                LD L,A,H,0,DE,STRBUFF:ADD HL,DE
+PREFIX_COMPARE  LD A,(DE):CP (HL):JR NZ,PREFIX_SHORTER
+                INC HL,DE:DJNZ PREFIX_COMPARE
+                JR PREFIX_STORE
+PREFIX_SHORTER  LD HL,PF_CAND:DEC (HL):JR PREFIX_TRY
+PREFIX_STORE    LD A,(PF_LEN),C,A,B,0,HL,KMPFAIL:ADD HL,BC
+                LD A,(PF_CAND),(HL),A
+                LD HL,PF_LEN:INC (HL):LD B,(HL)
+                LD A,(PATLEN):CP B:JR NC,PREFIX_LENGTH
+                RET
+;---------------------------------------
+; Строка состояния основного окна, включая вызовы из Search/Inspector/Save As.
+; Вход: IX=PLWND; AF/BC/DE/HL меняются, IX сохраняется. LANG читается из
+; фиксированного блока WC, описанного в PS2P.ASM. Повторно вызывать ISTR(#FC)
+; здесь нельзя: строковый редактор уже обработал Insert и Ctrl+Shift, и второй
+; вызов мог бы ещё раз переключить режим по тому же нажатию.
+EDITOR_STATUS LD A,(WC_LANG):AND 1:LD B,A
+              LD A,(HELP_HINT_LANG):CP B:JR Z,EDITOR_STATUS_MODE
+              LD A,B,(HELP_HINT_LANG),A
+              LD HL,HELP_HINT_EN:OR A:JR Z,EDITOR_STATUS_HINT
+              LD HL,HELP_HINT_RU
+; Обе подписи занимают ровно 24 клетки с пробелами в конце. Поэтому переход
+; RUS -> ENG стирает длинный русский хвост и не задевает индикатор ENG/INS.
+; Рисуем только при смене раскладки, чтобы не добавлять перерисовку на стрелки.
+EDITOR_STATUS_HINT LD A,(IX+5):DEC A:LD D,A,E,0:CALL TXTPR
+EDITOR_STATUS_MODE LD A,#03:JP ISTR
 ;---------------------------------------
 F1MENU  PUSH IX
+; Заголовок, нижняя подсказка и весь текст справки выбираются по одной
+; текущей раскладке при каждом F1. Всегда копируем все три указателя,
+; в том числе при возврате RUS -> ENG: язык прошлой страницы не запоминается.
+; IX вызывающего окна сохраняется; AF/BC/DE/HL используются как рабочие.
+        LD HL,F1_TEXT_EN
+        LD A,(WC_LANG):AND 1:JR Z,F1_SELECT_TEXT
+        LD HL,F1_TEXT_RU
+F1_SELECT_TEXT LD DE,F1WND_TEXT,BC,6:LDIR
         LD IX,F1WND:CALL PRWOW
         CALL USPO
         CALL NUSP
@@ -2222,7 +1583,8 @@ NOCOPY  CALL REFRESH
         XOR A
         RET
 
-COPYX   LD A,1:CALL MNGC_PL
+COPYX   CALL COPY_SIZE:RET NC
+        LD A,1:CALL MNGC_PL
         LD HL,BHLBLK,DE,LNTMP,BC,3:LDIR
 
         LD A,(LNTMP+2):CALL MNG0VPL
@@ -2235,13 +1597,14 @@ COPYPG  LD A,(EHLBLK+2)
 COPYBTE LD A,(EHLBLK+1)
         CP H:JR Z,COPYCHE,C,COPYERR
 COPYbte LDI
-        LD A,D:CP #C0:JR C,COPYERR
+        LD A,D:CP #C0:JR C,COPY_FULL_END
         LD A,H:CP #40:JR NC,COPYINCPG
         JP COPYPG
 
 COPYCHE LD A,(EHLBLK)
         CP L:JR Z,COPYEND,NC,COPYbte
-COPYERR LD DE,0
+COPYERR LD DE,0:RET; При отказе сохраняем старые байты и длину clipboard.
+COPY_FULL_END LD DE,#4000
 COPYend LD (CLIPSZ),DE
         RET
 COPYEND LD A,D:AND %00111111:LD D,A
@@ -2252,16 +1615,49 @@ COPYINCPG LD A,H:AND %00111111:LD H,A
           LD (LNTMP+2),A
           PUSH HL,DE:CALL MNG0VPL
           POP DE,HL
-          JP COPYPG
+           JP COPYPG
+
+; Проверить размер выделения ДО записи в clipboard. Вход: BHLBLK/EHLBLK.
+; C=допустимо, DE=1..#4000; NC=отказ, DE=0. AF/BC/DE/HL меняются.
+; Ровно 16 КиБ разрешены; больше 16 КиБ не повреждают предыдущее копирование.
+COPY_SIZE LD A,(BHLBLK+2),C,A
+          LD A,(EHLBLK+2):SUB C:JR C,COPY_SIZE_BAD
+          CP 2:JR NC,COPY_SIZE_BAD
+          LD HL,(EHLBLK),DE,(BHLBLK)
+          OR A:JR Z,COPY_SIZE_SUB
+          LD BC,#4000:ADD HL,BC
+COPY_SIZE_SUB OR A:SBC HL,DE:JR C,COPY_SIZE_BAD
+          LD A,H:OR L:JR Z,COPY_SIZE_BAD
+          LD A,H:CP #40:JR C,COPY_SIZE_OK,NZ,COPY_SIZE_BAD
+          LD A,L:OR A:JR NZ,COPY_SIZE_BAD
+COPY_SIZE_OK LD DE,HL:SCF:RET
+COPY_SIZE_BAD LD DE,0:XOR A:RET
+
+; BC=полная длина вставки (1..#4000). C=вся замена помещается, NC=отказ;
+; AF/DE/HL меняются, BC сохраняется. Выделение учитывается как свободное место,
+; но не удаляется до успешной проверки. Новый левый указатель строго меньше
+; RHLCR: два служебных байта зазора остаются зарезервированы даже на EOF.
+EDIT_ROOM LD HL,(LHLCR),A,(LHLCR+2),D,A
+          LD A,(MARKED):OR A:JR Z,ROOM_ADD
+          LD HL,(BHLBLK),A,(BHLBLK+2),D,A
+ROOM_ADD  ADD HL,BC
+          BIT 6,H:JR Z,ROOM_PAGE
+          RES 6,H:INC D
+ROOM_PAGE LD A,(RHLCR+2):CP D:JR C,ROOM_FULL,Z,ROOM_OFFSET
+          SCF:RET
+ROOM_OFFSET LD DE,(RHLCR):OR A:SBC HL,DE:RET
+ROOM_FULL OR A:RET
 ;---------------------------------------
 CUT     LD A,(MARKED):OR A:RET Z
         CALL COPYX:LD A,D:OR E:JR Z,CLIPBOARD_ERROR
         CALL MARK_KILL
         JP Bspc
 
-CLIPBOARD_ERROR PUSH IX
+CLIPBOARD_ERROR LD HL,MSG_CLIPBOARD:JR EDIT_ERROR
+BUFFER_FULL    LD HL,MSG_BUFFER_FULL
+EDIT_ERROR      PUSH IX,HL
                 LD IX,ERWND:CALL PRWOW
-                LD HL,MSG_CLIPBOARD,DE,#0100:CALL TXTPR
+                POP HL:LD DE,#0100:CALL TXTPR
                 CALL USPO,NUSP
                 CALL RRESB
                 POP IX
@@ -2269,22 +1665,21 @@ CLIPBOARD_ERROR PUSH IX
                 RET
 ;---------------------------------------
 PASTE   LD HL,(CLIPSZ),A,H:OR L:RET Z
-
+        LD BC,HL:CALL EDIT_ROOM:JP NC,BUFFER_FULL
         CALL MARK_KILL
 
         LD A,1:CALL MNGC_PL
-        LD HL,#C000
+        LD HL,#C000,BC,(CLIPSZ)
 
 PASTEBT LD A,(HL):INC HL
-        PUSH HL:CALL INCLCR
-        POP HL:JR NC,PASTERR
-        LD A,(CLIPSZ+1):OR #C0:CP H:JR Z,$+4,NC,PASTEBT
-        LD A,(CLIPSZ):CP L:JR Z,PASTEND,NC,PASTEBT
+        PUSH HL,BC:CALL INCLCR
+        POP BC,HL:JR NC,PASTERR
+        DEC BC:LD A,B:OR C:JR NZ,PASTEBT
 
 PASTERR
 PASTEND CALL REFRESH
         LD A,(CRFLG):OR A:CALL Z,PASTEGG
-        LD A,(CRP),(CRX),A
+        CALL SYNC_COLUMN
         CALL CHA
         XOR A
         RET
@@ -2406,7 +1801,7 @@ ASMAIN  EI:HALT
 
         XOR A:CALL ISTR
         LD A,2:CALL ISTR
-        PUSH IX:LD IX,PLWND,A,#03:CALL ISTR
+        PUSH IX:LD IX,PLWND:CALL EDITOR_STATUS
         POP IX
         JR ASMAIN
 ;-------
@@ -2439,6 +1834,7 @@ ETSFILL         LD A," "
 ; Прежний B=32 поэтому записывал до 16 КиБ кластерного хвоста даже для wc.ini.
 ; DAHL/DADE после FILE_SIZE_COPY больше не нужны как размер и служат счётчиком.
 SAVEDAT LD HL,(FLMAKE+1),DE,(FLMAKE+3)
+        LD A,D:OR E,H,L:RET Z; MKFILE уже создал пустой файл, писать нечего.
         LD BC,511:ADD HL,BC:JR NC,$+3:INC DE
         DUP 9
          SRL D:RR E:RR H:RR L
@@ -2457,9 +1853,12 @@ SVD     LD A,0
         LD A,L:CP 32:JR NC,SAVEDAT_COUNT_READY
         LD B,A
 SAVEDAT_COUNT_READY
-        LD A,B:LD (DADE),A
+        LD A,B:LD (DADE),A,(IO_COUNT),A
         LD HL,#C000:CALL SAVE512
         JR C,SAVEDAT_ERROR
+        PUSH AF:CALL CHECK_TRANSFER:POP BC
+        JR NZ,SAVEDAT_ERROR
+        LD A,B
         OR A:JR Z,SAVEDAT_STATUS_OK
         CP #0F:JR NZ,SAVEDAT_ERROR
 SAVEDAT_STATUS_OK
@@ -2474,12 +1873,6 @@ SAVEDAT_OK    XOR A:RET
 ;---------------------------------------
 FILE_SIZE_COPY LD HL,(DAHL)
                LD DE,(DADE)
-               LD A,L:OR H,E,D:JR NZ,SIZE_NOT_ZERO
-               PUSH HL,DE:LD A,PGZ:CALL MNGCVPL
-               POP DE,HL
-               LD A," ",(#C000),A
-               XOR A:LD (#C001),A
-               LD L,1
 SIZE_NOT_ZERO  LD (FLMAKE+1+0),HL
                LD (FLMAKE+1+2),DE
                RET
@@ -2535,66 +1928,6 @@ SAFE_STORE_DONE
         LD HL,BAKQUERY:CALL DELFL
         XOR A:RET
 ;---------------------------------------
-; FILEX заранее записывает новый файл, затем одной операцией перенаправляет
-; существующую directory entry и только после commit освобождает старую цепь.
-FILEX_SAFE_STORE
-        CALL FILEX_CREATE_TEMP:RET NZ
-        LD A,3,(ESTA),A
-        CALL SAVEDAT:JR Z,FILEX_SAFE_STORE_WRITTEN
-        LD HL,TMPQUERY:CALL DELFL
-        LD A,1:OR A:RET
-
-FILEX_SAFE_STORE_WRITTEN
-        JP FILEX_REPLACE_CURRENT
-;---------------------------------------
-; В нормальном случае MKFILE сам проверяет имя: отдельные FENTRY для temp и
-; ненужного быстрому пути backup лишь повторно читали каталог. При коллизии
-; пробуем следующую цифру; существующие recovery-копии не удаляются.
-FILEX_CREATE_TEMP
-        LD A,"0"
-FILEX_CREATE_TEMP_LOOP
-        LD (SAFE_SLOT),A
-        LD (TMPMAKE_DIGIT),A
-        LD (TMPQUERY_DIGIT),A
-        LD HL,TMPMAKE:CALL MKFILE:RET Z
-        LD A,(SAFE_SLOT):INC A:CP ":":JR C,FILEX_CREATE_TEMP_LOOP
-FILEX_CREATE_TEMP_ERROR
-        OR A:RET
-;---------------------------------------
-; QUERY_CAPS не меняет диск. Z означает, что провайдер понимает новый флаг;
-; любая старая версия либо отсутствие FILEX выбирает legacy fallback.
-FILEX_FAST_AVAILABLE
-        CALL FILEX_RESET_BLOCK
-        LD A,FILEX_OP_QUERY_CAPS:LD (FILEX_BLOCK+FILEX_P_OPERATION),A
-        CALL FILEX
-        OR A:RET NZ
-        LD A,(FILEX_BLOCK+FILEX_P_RESULT_FLAGS):CP FILEX_API_VERSION:RET NZ
-        LD A,(FILEX_BLOCK+FILEX_P_RESULT_COUNT)
-        AND FILEX_CAP_MOVE_CURRENT_DIR
-        CP FILEX_CAP_MOVE_CURRENT_DIR
-        RET
-;---------------------------------------
-FILEX_REPLACE_CURRENT
-        CALL FILEX_RESET_BLOCK
-        LD A,FILEX_OP_MOVE_RENAME:LD (FILEX_BLOCK+FILEX_P_OPERATION),A
-        LD A,FILEX_FLAG_REPLACE|FILEX_FLAG_CURRENT_DIR
-        LD (FILEX_BLOCK+FILEX_P_FLAGS),A
-        LD HL,TMPQUERY:LD (FILEX_BLOCK+FILEX_P_BUFFER),HL
-        LD HL,TMPQUERY_END-TMPQUERY:LD (FILEX_BLOCK+FILEX_P_LENGTH),HL
-        LD HL,FLLOAD:LD (FILEX_BLOCK+FILEX_P_AUX),HL
-        LD HL,257:LD (FILEX_BLOCK+FILEX_P_AUX_LENGTH),HL
-        CALL FILEX
-        OR A:RET Z
-        CP FILEX_STATUS_COMMITTED_CLEANUP:RET NZ
-        XOR A:RET
-;---------------------------------------
-FILEX_RESET_BLOCK
-        LD HL,FILEX_BLOCK,DE,FILEX_BLOCK+1,BC,FILEX_BLOCK_SIZE-1
-        XOR A:LD (HL),A:LDIR
-        LD A,FILEX_BLOCK_SIZE:LD (FILEX_BLOCK+FILEX_P_SIZE),A
-        LD A,FILEX_API_VERSION:LD (FILEX_BLOCK+FILEX_P_VERSION),A
-        RET
-;---------------------------------------
 ; Выбираем пару свободных имён WCETMP0.$$$/WCEBAK0.$$$ ... 9.
 ; Существующие служебные файлы никогда не удаляются: это могут быть данные
 ; после прежнего аварийного сохранения.
@@ -2618,7 +1951,6 @@ PRM_PL  EXA:LD A,83:JP WLD
 MNGC_PL EXA:LD A,0:JP WLD
 MNG0_PL EXA:LD A,78:JP WLD
 MNG8_PL EXA:LD A,79:JP WLD
-FILEX   PUSH IX:LD HL,FILEX_BLOCK:LD A,77:CALL WLD:POP IX:RET
 PRWOW   LD A,1:JP WLD
 RRESB   LD A,2:JP WLD
 PRSRW   LD A,3:JP WLD
@@ -2713,10 +2045,16 @@ TAPT    DB #8,#1
 TAPTCHA DB " ",0
 
 TAPB    DB #8,#1
-        DB " F1 - HELP page                         "
+        DB " F1 - Help page                         "
         DB "                                        "
         DB "          "
         DB 0
+
+HELP_HINT_LANG DB #FF
+HELP_HINT_EN DB #8,#1," F1 - Help page         ",0
+; «Страница помощи» в однобайтовой экранной кодировке CP866, а не в UTF-8.
+HELP_HINT_RU DB #8,#1," F1 - ",#91,#E2,#E0,#A0,#AD,#A8,#E6,#A0
+             DB " ",#AF,#AE,#AC,#AE,#E9,#A8,"   ",0
 
 OFFSETS DB "#"
 LHLOFF  DB "000000 #"
@@ -2778,10 +2116,11 @@ ERT     DB #9,#E,"ERROR:",0
 ERB     DB #9,#E,"press any key",0
 
 MSG_CLIPBOARD  DB #E,"Clipboard overflow!!!",0
+MSG_BUFFER_FULL DB #E,"Text buffer is full. Nothing inserted.",0
 MSG_SAVE_ERROR DB #E,"Save ERROR! Original file preserved.",0
 MSG_READ_ERROR DB #E,"Read ERROR! File was not opened.",0
 ;-------
-ME01    DB #0E,"Save changes?",0
+ME01    DB #0E,"Save changes? (Y/N)",0
 ;-------
 SRHWND  DB 4+16+128,0
         DB 255,255;  X,Y
@@ -2831,7 +2170,10 @@ CALHEX  DB "0000",13
         DB " BIN:%"
 CALBIN  DB "00000000 00000000",13
         DB 13
-        DB " DATA: FFFFFFFFFFFFFFFF",0
+CALSTATUS DS 24," "
+          DB 0
+CALC_BAD_TEXT DB "Error: invalid syntax   "
+CALC_ZERO_TEXT DB "Error: division by zero "
 ;-------
 F1WND   DB 4+16+128,0
         DB 255,255;X,Y
@@ -2841,31 +2183,37 @@ F1WND   DB 4+16+128,0
         DW #0
         DB 0,0
 
-        DW F1T
+F1WND_TEXT DW F1T
         DW F1B
         DW F1A
-F1T     DB #9,#E,"TEXT Editor HELP Page",0
-F1B     DB #9,#E,"PRESS any key to CLOSE this Window",0
+F1_TEXT_EN DW F1T,F1B,F1A
+F1_TEXT_RU DW F1T_RU,F1B_RU,F1A_RU
+F1T     DB #9,#E,"Text editor help",0
+F1B     DB #9,#E,"Press any key to close",0
+; Английская справка выбирается только для английской раскладки.
+; 19 строк текста помещаются внутри окна высотой 21, включая рамку и заголовок.
 F1A     DB "Controls:",#D
-        DB 1,"ESC - Exit (",#A2,#EB,#E5,#AE,#A4,")",#D
+        DB 1,"Esc - Exit; Y saves, N discards, Esc cancels",#D
         DB #D
-        DB 1,"ctrl+S - Save changes (",#E1,#AE,#E5,#E0,#A0,#AD,#A8,#E2,#EC," ",#A8,#A7,#AC,#A5,#AD,#A5,#AD,#A8,#EF,")",#D
-        DB 1,"ctrl+alt+S - Save As (",#E1,#AE,#E5,#E0,#A0,#AD,#A8,#E2,#EC," ",#AA,#A0,#AA,")",#D
-        DB 1,"ctrl+F - Find Text (",#AF,#AE,#A8,#E1,#AA," ",#E2,#A5,#AA,#E1,#E2,#A0,")",#D
-        DB 1,"ctrl+G - Find Next (",#A8,#E1,#AA,#A0,#E2,#EC," ",#A4,#A0,#AB,#EC,#E8,#A5,")",#D
-        DB 1,"ctrl+HOME - GO to File Start (",#AF,#A5,#E0,#A5,#A9,#E2,#A8," ",#A2," ",#AD,#A0,#E7,#A0,#AB,#AE," ",#E4,#A0,#A9,#AB,#A0,")",#D
-        DB 1,"ctrl+END - GO to File End (",#AF,#A5,#E0,#A5,#A9,#E2,#A8," ",#A2," ",#AA,#AE,#AD,#A5,#E6," ",#E4,#A0,#A9,#AB,#A0,")",#D
-        DB 1,"ctrl+C,X,V - Copy/Cut/Paste (",#AA,#AE,#AF,#A8,#E0,#AE,#A2,#A0,#E2,#EC,"/",#A2,#EB,#E0,#A5,#A7,#A0,#E2,#EC,"/",#A2,#E1,#E2,#A0,#A2,#A8,#E2,#EC,")",#D
-        DB 1,"shift+RIGHT/DOWN/PGDOWN/END - Add mark (",#A4,#AE,#A1,#A0,#A2,#AB,#A5,#AD,#A8,#A5," ",#AC,#A0,#E0,#AA,#A8,#E0,#AE,#A2,#AA,#A8,")",#D
-        DB 1,"shift+LEFT/UP - Edit mark (",#E0,#A5,#A4,#A0,#AA,#E2,#A8,#E0,#AE,#A2,#A0,#AD,#A8,#A5," ",#AC,#A0,#E0,#AA,#A8,#E0,#AE,#A2,#AA,#A8,")",#D
+        DB 1,"Ctrl+S - Save changes",#D
+        DB 1,"Ctrl+Alt+S - Save as",#D
+        DB 1,"Ctrl+F - Find text",#D
+        DB 1,"Ctrl+G - Find next",#D
+        DB 1,"Ctrl+Home / Ctrl+End - Start / end of file",#D
+        DB 1,"Ctrl+C / Ctrl+X / Ctrl+V - Copy / Cut / Paste",#D
+        DB 1,"Shift+Right/Down/PgDn/End - Extend selection",#D
+        DB 1,"Shift+Left/Up - Adjust selection",#D
+        DB 1,"Enter - New line; Tab - Insert tab",#D
         DB #D
-        DB 1,"ctrl+SHIFT - ENG/RUS (",#A2,#EB,#A1,#AE,#E0," ",#EF,#A7,#EB,#AA,#A0," ",#A2,#A2,#AE,#A4,#A0,")",#D
+        DB 1,"Ctrl+Shift - Switch English / Russian keyboard",#D
         DB #D
-        DB "Other Controls:",#D
-        DB 1,"pgUP,pgDN,HOME,END,DELETE,BSPACE,INSERT,CAPSLOCK",#D
-        DB 1,"F2 - Syntax Highlighting On/Off",#D
-        DB 1,"F3 - Inspector",#D
+        DB "Other controls:",#D
+        DB 1,"PgUp, PgDn, Home, End, Delete, Backspace, Insert, CapsLock",#D
+        DB 1,"F2 - Toggle syntax highlighting",#D
+        DB 1,"F3 - Inspector / calculator",#D
         NOP
+F1A_EN_END
+        INCLUDE "HELP_RU.INC"
 ;---------------------------------------
 F10MENU NOP; !=0 if started from F10 menu
 
@@ -2898,8 +2246,7 @@ BAKQUERY_DIGIT DB "0"
 SAFE_SLOT DB "0"
 
 ; Имя активного файла восстанавливается, если Save As завершился ошибкой.
-SAVEAS_OLD_NAME
-FILEX_BLOCK     DS 256
+SAVEAS_OLD_NAME DS 256
 
 ;File-size
 DAHL    DS 2; Low
@@ -2907,6 +2254,9 @@ DADE    DS 2; High
 
 ;Loading
 APG     NOP ; Active Page
+IO_REMAIN DW 0
+IO_COUNT DB 0
+IO_STATUS DB 0
 
 LHLA    DS 4; Lenght
 LHLB    DS 4
@@ -2944,9 +2294,15 @@ CLIPSZ  DW 0; Clipboard size
 CRPOZ   DS 2; Address on Screen (Line Print)
 CRP     DS 2; Cursor Address on Screen (REFRESH)
 CRFLG   NOP ; =0 if Cursor Out of Screen (REFRESH)
+LINE_EOF NOP ; Остаток окна после физического конца текста только очищается.
 
 ;Search
 STRBUFA  DW 0;         Address of stop token
+SEARCH_OLD_L DS 3
+PATLEN   DB 0
+PF_LEN   DB 0
+PF_CAND  DB 0
+KMPFAIL  DS 41
 STRBUFF  DS 40," ";    Searching string
 STRBUFFL EQU $-STRBUFF;String Size
          NOP
@@ -2968,5 +2324,6 @@ BUF2A    DS 2;Const buf
 BUF2I    NOP ;Index
 ;---------------------------------------
 ENDPL
+        ASSERT ENDPL <= FLMAKE; Код и данные не перекрывают буфер имени/размера.
 ;---------------------------------------
 ;---------------------------------------
