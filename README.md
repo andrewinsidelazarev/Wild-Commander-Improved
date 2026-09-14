@@ -11,16 +11,39 @@ SPG и WMF. Плагины добавляют работу с архивами, 
 В репозитории находятся исходники, готовый комплект для запуска,
 скрипт сборки, тесты и документация.
 
-**Текущий выпуск:** [v1.10i от 12 сентября 2026 года](https://github.com/andrewinsidelazarev/Wild-Commander-Improved/releases/tag/v1.10i-2026-09-12).
+**Текущий выпуск:** [v1.10i от 14 сентября 2026 года](https://github.com/andrewinsidelazarev/Wild-Commander-Improved/releases/tag/v1.10i-2026-09-14).
 
 **Быстрые ссылки:** [готовый `boot.$C`](exe/boot.$C) ·
 [TXTEDIT.WMF](exe/WC/TXTEDIT.WMF) ·
+[Text/HEX Viewer](source/plugins/txthex_viewer/README.md) ·
+[TXT/HEX VDAC2](source/plugins/txthex_viewer_VDAC2/README.md) ·
 [UNZIP.WMF](exe/WC/UNZIP.WMF) ·
 [ChkDsk FAT32](exe/WC/CHKDSK.WMF) ·
 [справочник CORE32 API](source/CORE32_API.md) ·
 [аудит и ограничения](source/CORE32_audit.md).
 
 ## Зачем обновляться
+
+В выпуске от **2026-09-14** текстовый просмотрщик переписан и переименован из
+`RE.WMF` в `TXTVIEW.WMF`, версия повышена до **0.26**:
+автодетект CP866/CP1251/UTF-8 и ручной выбор по F8, потоковое чтение больших
+файлов, перенос длинных строк, безопасный конец файла в тексте и HEX.
+[Управление и ограничения](source/plugins/txthex_viewer/README.md).
+Для обновления поместите `TXTVIEW.WMF` в `WC`, замените строку `RE.WMF` на
+`TXTVIEW.WMF` в секции `[PLUGINS]` своего `wc.ini` и удалите прежний `WC/RE.WMF`.
+Остальные настройки сохраняйте; готовый `exe/WC/wc.ini` уже использует новое имя.
+
+Для VDAC2 **с нуля написан новый** [TXTVIEW2.WMF](exe/WC/TXTVIEW2.WMF) v0.26:
+1024×768, сглаженный Noto Sans Mono, 78×22 клетки, расширенная латиница,
+кириллица и греческий, CP866/CP1251/UTF-8, потоковый TXT/HEX и поиск.
+Up/Down собирают только новую строку; на `nedoos.txt` стоимость кода Z80
+снижена в 9,5–11,2 раза. Процент позиции находится справа вверху.
+Интерфейс и помощь — английские. Вывод готовых полос и явное отсечение
+строк устраняют прежнюю перегрузку дисплей-листа; пользователь подтвердил
+исчезновение разрывов текста после настройки SCISSOR.
+Общая и отдельная сборки помещают его вместе с лицензией шрифта в `exe/WC`.
+[Установка, управление и проверки](source/plugins/txthex_viewer_VDAC2/README.md).
+[Полный список изменений выпуска](docs/releases/v1.10i-2026-09-14.md).
 
 В редакции от 2026-09-12 исправлен текстовый редактор `TXTEDIT.WMF`:
 
@@ -237,8 +260,14 @@ F7. После выхода тестового плагина с кодом `3` 
 Файлы совпали побайтно, копии FAT совпали, потерянных кластеров и временных
 файлов нет. Это проверка в эмуляторе, не аппаратное подтверждение EVO.
 
-Контрольные артефакты редакции 2026-09-12 (`TXTEDIT.WMF` обновлён 12 сентября,
-`UNZIP.WMF` — 11 сентября; `boot.$C` и остальные модули не менялись с 2026-09-08):
+Контрольные артефакты редакции 2026-09-14 (`TXTVIEW` и новый `TXTVIEW2` —
+14 сентября, `TXTEDIT.WMF` — 12 сентября, `UNZIP.WMF` — 11 сентября;
+`boot.$C` не менялся с 2026-09-08):
+
+- [`exe/WC/TXTVIEW.WMF`](exe/WC/TXTVIEW.WMF): 7 168 байт, SHA-256
+  `eb5c87d1b8164b6ba72276eb3a07e6a7a2627b3590f6a0bfa009871fa431df02`;
+- [`exe/WC/TXTVIEW2.WMF`](exe/WC/TXTVIEW2.WMF): 157 696 байт, SHA-256
+  `a3d04135fa8289ec786de7f024be52de5fb4273fc642133dd0f4cee13eb541a1`;
 
 - [`exe/WC/UNZIP.WMF`](exe/WC/UNZIP.WMF): 16 896 байт, SHA-256
   `bbff3d65922460a575e335d34dc927356018914aa5917436536793807b0f0d24`;
@@ -275,10 +304,12 @@ F7. После выхода тестового плагина с кодом `3` 
 Все модули лежат рядом в `source`. Исторический baseline собирался SJASMPlus
 1.21 побайтно точно; активный улучшенный `boot.$C` намеренно отличается:
 
-- неизменённые прежние runtime-файлы: 25 `MATCH`;
+- неизменённые прежние runtime-файлы: 24 `MATCH`;
 - намеренно изменены `boot.$C`, `WC/wc.ini`, `WC_History.txt`, `WC_todo.txt`;
-  новые `WC/FILEX.WMF`, `WC/UNZIP.WMF` и `WC/CHKDSK.WMF` отмечены как
-  `EXTRA_ACTUAL`, а `WC/TXTEDIT.WMF` — как намеренно изменённый.
+  `WC/TXTEDIT.WMF` также отмечен как намеренно изменённый;
+- новые `WC/FILEX.WMF`, `WC/TXTVIEW.WMF`, `WC/TXTVIEW2.WMF`,
+  `WC/TXTVIEW2.LIC`, `WC/UNZIP.WMF` и `WC/CHKDSK.WMF` отмечены как
+  `EXTRA_ACTUAL`; прежний `WC/RE.WMF` — как `MISSING_ACTUAL` после переименования.
 
 Рабочие исследованные файлы имеют синтаксис SJASMPlus, кодировку UTF-8 без BOM
 и русские комментарии о назначении подсистем и основных процедур. Исходники
@@ -296,6 +327,7 @@ SJASMPlus. Для `MD20`, `PS2P` и `WCIF` локальные историчес
 Сборка:
 
 ```powershell
+python -m pip install -r .\source\plugins\txthex_viewer_VDAC2\requirements-dev.txt
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
@@ -304,10 +336,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 runtime-файлы плагинов, меню и конфигурации и проверяет всё дерево `exe`
 относительно локального эталона. Отчёт: `Build/hash-report.tsv`.
 
-Для активной улучшенной сборки успешный результат — 25 совпадений и восемь
-ожидаемых отличий: изменённые `boot.$C`, `WC/wc.ini`, `WC_History.txt`,
-`WC_todo.txt`, `WC/FILEX.WMF`, `WC/TXTEDIT.WMF`, `WC/UNZIP.WMF` и
-`WC/CHKDSK.WMF`. Ключ
+Для активной улучшенной сборки успешный результат — 24 совпадения и 12
+ожидаемых отличий: пять изменённых файлов, шесть добавленных и одно удалённое
+имя `WC/RE.WMF`, перечисленные выше. В готовый каталог `exe/WC` входят оба
+просмотрщика: `TXTVIEW.WMF` и `TXTVIEW2.WMF`. Ключ
 `-RequireExact` сохраняет строгий режим, где любое отличие от исторического
 эталона является ошибкой.
 

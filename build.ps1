@@ -329,7 +329,41 @@ if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT machine editing tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT audit regression tests failed.' }
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_txtedit_navigation.py')
 if ($LASTEXITCODE -ne 0) { throw 'TXTEDIT cursor/exit regression tests failed.' }
+
+# TXTVIEW.WMF собирается из исходников вместо старого эталонного RE.WMF.
+# Потоковое чтение, UTF-8 и выбор CP866/CP1251 проверяются по тому же
+# исходнику, что используется для поставляемого runtime.
+& python (Join-Path $ProjectRoot 'tools\make_txthex_tables.py') --check
+if ($LASTEXITCODE -ne 0) { throw 'TXT/HEX encoding tables are out of date.' }
+$TxtHexOutput = Join-Path $BuildDir 'TXTVIEW.WMF'
+Push-Location -LiteralPath $ProjectRootAlias
+try {
+    & $SjasmPlus '--nologo' '--msg=err' `
+        "--raw=$ProjectRootAscii/Build/TXTVIEW.WMF" `
+        "--sym=$ProjectRootAscii/Build/TXTVIEW.sym" `
+        "--lst=$ProjectRootAscii/Build/TXTVIEW.lst" `
+        "$ProjectRootAscii/source/plugins/txthex_viewer/TXTVIEW.ASM"
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { throw 'TXTVIEW.ASM assembly failed.' }
+if ((Get-Item -LiteralPath $TxtHexOutput).Length -gt (512 + 0x2800)) {
+    throw 'TXTVIEW.WMF overlaps its row history at #A800.'
+}
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_txthex_viewer.py')
+if ($LASTEXITCODE -ne 0) { throw 'TXT/HEX viewer machine regression tests failed.' }
 # Codex - 2026-07-17 - end
+
+# Графический просмотрщик VDAC2 собирается своим скриптом из source/plugins.
+# Его готовый WMF находится в корне каталога плагина; build хранит только
+# вспомогательные материалы. Ниже он включается в общий комплект exe/WC.
+$TxtHexVdac2Project = Join-Path $ProjectRoot 'source\plugins\txthex_viewer_VDAC2'
+$TxtHexVdac2Output = Join-Path $TxtHexVdac2Project 'TXTVIEW2.WMF'
+& (Join-Path $TxtHexVdac2Project 'build.ps1') -AssemblerPath $SjasmPlus
+if ($LASTEXITCODE -ne 0) { throw 'TXTVIEW2.WMF build failed.' }
+if (-not (Test-Path -LiteralPath $TxtHexVdac2Output -PathType Leaf)) {
+    throw 'TXTVIEW2.WMF was not created.'
+}
 
 # UNZIP хранится вместе с остальными исходниками плагинов и входит в runtime WC.
 # Сборка здесь не позволяет следующему обновлению exe вернуть старый wc.ini
@@ -464,11 +498,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Plugin panel refresh machine tests failed.' }
 # Все они входят в хэш-аудит.
 $ProjectOwnedRuntime = @(
     'boot.$C', 'WC_History.txt', 'WC_todo.txt',
-    'WC\TXTEDIT.WMF', 'WC\UNZIP.WMF', 'WC\CHKDSK.WMF'
+    'WC\TXTEDIT.WMF', 'WC\TXTVIEW.WMF', 'WC\TXTVIEW2.WMF', 'WC\TXTVIEW2.LIC',
+    'WC\UNZIP.WMF', 'WC\CHKDSK.WMF'
 )
+# Старое имя встречается только в эталоне. Не возвращаем второй просмотрщик
+# в runtime при каждой сборке после переименования в TXTVIEW.WMF.
+$RetiredRuntime = @('WC\RE.WMF')
 Get-ChildItem -LiteralPath $ReferenceExe -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($ReferenceExe.Length + 1)
-    if ($ProjectOwnedRuntime -inotcontains $relative) {
+    if ($ProjectOwnedRuntime -inotcontains $relative -and $RetiredRuntime -inotcontains $relative) {
         $destination = Join-Path $ExeDir $relative
         $parent = Split-Path -Parent $destination
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -485,6 +523,28 @@ if ($LASTEXITCODE -ne 0) { throw 'FILEX runtime installation failed.' }
 
 $TxtEditRuntime = Join-Path $ExeDir 'WC\TXTEDIT.WMF'
 [IO.File]::Copy($TxtEditOutput, $TxtEditRuntime, $true)
+[IO.File]::Copy($TxtHexOutput, (Join-Path $ExeDir 'WC\TXTVIEW.WMF'), $true)
+[IO.File]::Copy($TxtHexVdac2Output, (Join-Path $ExeDir 'WC\TXTVIEW2.WMF'), $true)
+[IO.File]::Copy((Join-Path $TxtHexVdac2Project 'fonts\OFL.txt'),
+    (Join-Path $ExeDir 'WC\TXTVIEW2.LIC'), $true)
+# Удаляем единственное устаревшее имя из каталога результата: это позволяет
+# обновлять уже собранный exe без повторной регистрации старого просмотрщика.
+$LegacyViewerRuntime = Join-Path $ExeDir 'WC\RE.WMF'
+if (Test-Path -LiteralPath $LegacyViewerRuntime -PathType Leaf) {
+    Remove-Item -LiteralPath $LegacyViewerRuntime -Force
+}
+
+# wc.ini использует OEM-текст и исторические одиночные CR. Однобайтовое
+# соответствие Latin-1 сохраняет каждый байт: заменяем только отдельный токен
+# имени плагина, не перекодируем русские комментарии и не нормализуем строки.
+# После копирования эталона имя ещё RE.WMF; повторная обработка TXTVIEW.WMF
+# ничего не меняет. Параметры и комментарий на той же строке сохраняются.
+$ViewerIniPath = Join-Path $ExeDir 'WC\wc.ini'
+$ViewerByteEncoding = [Text.Encoding]::GetEncoding(28591)
+$ViewerIniText = $ViewerByteEncoding.GetString([IO.File]::ReadAllBytes($ViewerIniPath))
+$ViewerIniText = [regex]::Replace($ViewerIniText,
+    '(?im)(^|[\r\n])([ \t]*)RE\.WMF(?=[ \t;\r\n]|$)', '$1$2TXTVIEW.WMF')
+[IO.File]::WriteAllBytes($ViewerIniPath, $ViewerByteEncoding.GetBytes($ViewerIniText))
 
 # UNZIP запускается по Enter на расширении ZIP и располагается сразу после
 # обязательного FILEX, который обязан сохранять первую позицию в списке.
@@ -519,7 +579,8 @@ if ($HashExitCode -ne 0) {
     )
     $ExpectedMismatchPaths = @(
         'boot.$C', 'WC_History.txt', 'WC_todo.txt',
-        'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/UNZIP.WMF',
+        'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/RE.WMF', 'WC/TXTVIEW.WMF',
+        'WC/TXTVIEW2.WMF', 'WC/TXTVIEW2.LIC', 'WC/UNZIP.WMF',
         'WC/CHKDSK.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
@@ -529,7 +590,22 @@ if ($HashExitCode -ne 0) {
         $Mismatches.Count -ne $ExpectedMismatchPaths.Count) {
         throw "Hash verification failed. See $HashReport"
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, UNZIP, CHKDSK, runtime config and Improved history files intentionally differ from the reference; all other runtime files match.'
+    # Переименование даёт две записи аудита: старое имя отсутствует, новое
+    # добавлено. VDAC2 и лицензия его шрифта также являются новыми файлами.
+    # Проверяем эти статусы явно; для остальных плагинов сохраняется прежний аудит.
+    foreach ($Mismatch in $Mismatches) {
+        $ExpectedStatus = switch ($Mismatch.path) {
+            'WC/RE.WMF' { 'MISSING_ACTUAL' }
+            'WC/TXTVIEW.WMF' { 'EXTRA_ACTUAL' }
+            'WC/TXTVIEW2.WMF' { 'EXTRA_ACTUAL' }
+            'WC/TXTVIEW2.LIC' { 'EXTRA_ACTUAL' }
+            default { $null }
+        }
+        if ($ExpectedStatus -and $Mismatch.status -ne $ExpectedStatus) {
+            throw "Unexpected audit status for $($Mismatch.path): $($Mismatch.status)"
+        }
+    }
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.

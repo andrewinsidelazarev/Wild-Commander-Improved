@@ -1,0 +1,180 @@
+{
+  "plugin": "TXTVIEW2.WMF",
+  "version": "0.26",
+  "bytes": 157696,
+  "sha256": "a3d04135fa8289ec786de7f024be52de5fb4273fc642133dd0f4cee13eb541a1",
+  "machine_tests_passed": 20,
+  "display": [
+    1024,
+    768
+  ],
+  "glyphs": 2862,
+  "unicode_codepoints": 2278,
+  "text_grid": [
+    78,
+    22
+  ],
+  "ram_g_bytes_verified": 583848,
+  "text_cache_bytes": 365976,
+  "text_cache_slots": 23,
+  "visible_rows": 22,
+  "scanline_budget": {
+    "sha256": "a3d04135fa8289ec786de7f024be52de5fb4273fc642133dd0f4cee13eb541a1",
+    "cases": {
+      "languages": {
+        "dl_words": 368,
+        "budget": 1344,
+        "max_estimated_clocks": 742,
+        "worst_scanline": 728,
+        "max_pixel_clocks": 246,
+        "reserve_clocks": 128,
+        "margin_clocks": 602,
+        "hardware_measured": false,
+        "assumed_pixels_per_clock": 16,
+        "timing_status": "unverified: transposed RAM_G access, not hardware acceptance"
+      },
+      "dense": {
+        "dl_words": 368,
+        "budget": 1344,
+        "max_estimated_clocks": 742,
+        "worst_scanline": 728,
+        "max_pixel_clocks": 246,
+        "reserve_clocks": 128,
+        "margin_clocks": 602,
+        "hardware_measured": false,
+        "assumed_pixels_per_clock": 16,
+        "timing_status": "unverified: transposed RAM_G access, not hardware acceptance"
+      },
+      "help": {
+        "dl_words": 814,
+        "budget": 1344,
+        "max_estimated_clocks": 1188,
+        "worst_scanline": 728,
+        "max_pixel_clocks": 246,
+        "reserve_clocks": 128,
+        "margin_clocks": 156,
+        "hardware_measured": false,
+        "assumed_pixels_per_clock": 16,
+        "timing_status": "unverified: transposed RAM_G access, not hardware acceptance"
+      },
+      "search": {
+        "dl_words": 367,
+        "budget": 1344,
+        "max_estimated_clocks": 741,
+        "worst_scanline": 728,
+        "max_pixel_clocks": 246,
+        "reserve_clocks": 128,
+        "margin_clocks": 603,
+        "hardware_measured": false,
+        "assumed_pixels_per_clock": 16,
+        "timing_status": "unverified: transposed RAM_G access, not hardware acceptance"
+      },
+      "search_full": {
+        "dl_words": 407,
+        "budget": 1344,
+        "max_estimated_clocks": 781,
+        "worst_scanline": 728,
+        "max_pixel_clocks": 246,
+        "reserve_clocks": 128,
+        "margin_clocks": 563,
+        "hardware_measured": false,
+        "assumed_pixels_per_clock": 16,
+        "timing_status": "unverified: transposed RAM_G access, not hardware acceptance"
+      }
+    },
+    "method": "DL fetch + L4 NEAREST pixel work + 128 reserve; not hardware timing"
+  },
+  "dense_dl_words": 368,
+  "dl_limit_words": 2048,
+  "wc_f3": true,
+  "wc_reopen": true,
+  "wc_english_help_in_both_layouts": true,
+  "wc_search_en_ru": true,
+  "wc_hex_over_16mib": true,
+  "wc_big_utf8": true,
+  "wc_cancel_megabyte_line": true,
+  "wc_empty_file": true,
+  "pixel_comparisons": [
+    "wc-language",
+    "wc-reopened",
+    "wc-help",
+    "wc-help-russian-keyboard",
+    "wc-dense"
+  ],
+  "image_unchanged": true,
+  "image_files_verified": 45,
+  "fat_mirrors_equal": true,
+  "orphan_clusters": 0,
+  "physical_hardware": "not tested",
+  "nedoos": {
+    "file_sha256": "ce581ec2413f8ace84184f679600c2ae65f00557a25b51330ff788fb1e7f0d07",
+    "file_size": 31626,
+    "checked_rows": 839,
+    "wc_photo_page_pixel_match": true,
+    "hardware_status": "User confirmed SCISSOR fix removed tearing; new scroll not yet tested on board"
+  },
+  "scroll_wc": {
+    "plugin_sha256": "a3d04135fa8289ec786de7f024be52de5fb4273fc642133dd0f4cee13eb541a1",
+    "held_down_top": 2392,
+    "held_up_top": 0,
+    "percent_start": 0,
+    "percent_end": 100,
+    "photo_page_pixel_match": true,
+    "held_up_pixel_match": true
+  },
+  "scroll_performance": {
+    "sha256": "a3d04135fa8289ec786de7f024be52de5fb4273fc642133dd0f4cee13eb541a1",
+    "unit": "Z80 T-states; WC/disk API mocked; FT812 DLL",
+    "cases": {
+      "nedoos": {
+        "GoDown": {
+          "median_ticks": 419982,
+          "min_ticks": 293126,
+          "max_ticks": 445023,
+          "max_glyph_copies": 77,
+          "speedup": 9.49
+        },
+        "GoUp": {
+          "median_ticks": 367340,
+          "min_ticks": 312574,
+          "max_ticks": 447632,
+          "max_glyph_copies": 77,
+          "speedup": 11.17
+        }
+      },
+      "utf8": {
+        "GoDown": {
+          "median_ticks": 374248,
+          "min_ticks": 372317,
+          "max_ticks": 396830,
+          "max_glyph_copies": 30,
+          "speedup": 8.44
+        },
+        "GoUp": {
+          "median_ticks": 389148,
+          "min_ticks": 378880,
+          "max_ticks": 394483,
+          "max_glyph_copies": 2,
+          "speedup": 9.21
+        }
+      },
+      "hex": {
+        "GoDown": {
+          "median_ticks": 338806,
+          "min_ticks": 334581,
+          "max_ticks": 377452,
+          "max_glyph_copies": 56,
+          "speedup": 7.43
+        },
+        "GoUp": {
+          "median_ticks": 337500,
+          "min_ticks": 333857,
+          "max_ticks": 340244,
+          "max_glyph_copies": 34,
+          "speedup": 7.34
+        }
+      }
+    },
+    "baseline_sha256": "49c75a55b9b8ae39134035ba3d56c7357083d701ccfcd105f0752e3f191fa279"
+  }
+}
