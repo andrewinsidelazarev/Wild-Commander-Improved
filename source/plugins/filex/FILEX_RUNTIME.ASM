@@ -630,7 +630,7 @@ FILEX_PREFLIGHT_GROWTH:
         LD (FILEX_SCAN_CURSOR),HL
         LD (FILEX_SCAN_CURSOR+2),DE
         CALL @WDOS.SRHFCL
-        JR C,.scan_failed
+        JP C,.scan_failed
         LD (FILEX_SCAN_CLUSTER),HL
         LD (FILEX_SCAN_CLUSTER+2),DE
         LD HL,(FILEX_SCAN_CLUSTER+2),DE,(FILEX_SCAN_LIMIT+2)
@@ -644,7 +644,8 @@ FILEX_PREFLIGHT_GROWTH:
         LD HL,(FILEX_REQUIRED_CLUSTERS)
         DEC HL
         LD (FILEX_REQUIRED_CLUSTERS),HL
-        LD A,H:CP #FF:JR NZ,.count_ready
+        ; Уменьшать старшее слово только при полном переходе 0000 -> FFFF.
+        LD A,H:AND L:CP #FF:JR NZ,.count_ready
         LD HL,(FILEX_REQUIRED_CLUSTERS+2)
         DEC HL
         LD (FILEX_REQUIRED_CLUSTERS+2),HL
@@ -652,13 +653,24 @@ FILEX_PREFLIGHT_GROWTH:
         LD HL,(FILEX_REQUIRED_CLUSTERS),DE,(FILEX_REQUIRED_CLUSTERS+2)
         LD A,D:OR E:OR H:OR L:JR Z,.ready
         FILEX_CALL_EXTENSION ID_SAVE_NEXT_FREE_HINT
+        ; SAVE_NEXT_FREE_HINT сам оборачивает подсказку последнего кластера к 2.
+        ; Следующий SRHFCL уже начнёт с 2, поэтому сравнение найденного кластера
+        ; с его новым курсором не обнаружит wrap. Зафиксировать его здесь, иначе
+        ; preflight повторно зачтёт свободные кластеры и разрешит лишний рост.
+        LD HL,(@WDOS.FSTFRC+2),DE,(FILEX_SCAN_CLUSTER+2)
+        OR A:SBC HL,DE:JR C,.hint_wrapped
+        JR NZ,.scan
+        LD HL,(@WDOS.FSTFRC),DE,(FILEX_SCAN_CLUSTER)
+        OR A:SBC HL,DE:JR NC,.scan
+.hint_wrapped:
+        LD A,1:LD (FILEX_SCAN_WRAPPED),A
         JR .scan
 .wrap_data:
         LD A,(FILEX_SCAN_WRAPPED):OR A:JR NZ,.no_space
         INC A:LD (FILEX_SCAN_WRAPPED),A
         LD HL,2:LD (@WDOS.FSTFRC),HL
         LD HL,0:LD (@WDOS.FSTFRC+2),HL
-        JR .scan
+        JP .scan
 .ready:
         CALL FILEX_RESTORE_SCAN_HINT
 .no_growth:
@@ -853,7 +865,8 @@ FILEX_SHRINK_TO_TARGET:
         LD HL,(FILEX_TARGET_SIZE)
         LD DE,(FILEX_TARGET_SIZE+2)
         DEC HL
-        LD A,H:CP #FF:JR NZ,.last_offset_ready
+        ; Проверка одного H теряла 64 КиБ при размерах low16=FF01..FFFF.
+        LD A,H:AND L:CP #FF:JR NZ,.last_offset_ready
         DEC DE
 .last_offset_ready:
         LD (FILEX_ABSOLUTE_OFFSET),HL

@@ -151,10 +151,16 @@ STPM    EI:HALT
         CALL DWWW,NZ,SCD
         CALL ENKE,NZ,SEN:JR Z,STPM
 
-STPE    LD IX,F9WN2:CALL RRESB
-        LD IX,F9WND:CALL RRESB
+; На обоих выходах STPM IX указывает на F9WND, а RRESB сохраняет IX.
+; Окна лежат в одной 256-байтовой области: смена только IXL освобождает
+; два байта для хвостового перехода, не сдвигая ни следующую процедуру,
+; ни фиксированные адреса WCINI. После закрытия F9 перечитываем каталоги:
+; wc.ini пересоздаётся, поэтому старые размер и запись в панелях недействительны.
+        ASSERT high F9WND == high F9WN2, окна F9 требуют полного изменения IX
+STPE    LD IXL,low F9WN2:CALL RRESB
+        LD IXL,low F9WND:CALL RRESB
         POP IX
-        RET
+        JP @PLUGIN_REFRESH_BOTH
 ;-------
 SCU     CALL CURSER
         LD A,(IX+12)
@@ -272,7 +278,10 @@ GINI    PUSH AF
 
         LD DE,INIB
         PUSH DE
-        LD HL,IDNT3,BC,19:LDIR
+        ; IDNT3 остаётся совместимым префиксом для чтения старых INI.
+        ; При записи берём полную текущую версию из заголовка WC, без его
+        ; управляющих кодов и завершающего нуля. Размер команды не меняется.
+        LD HL,@TXTC,BC,@TXT2-@TXTC-1:LDIR
         LD A,13
         LD (DE),A:INC DE
         LD (DE),A:INC DE
@@ -281,7 +290,11 @@ GINI    PUSH AF
         LD HL,SPTR2,BC,SPP2-SPTR2:LDIR
         POP HL
         EX DE,HL
-        OR A:SBC HL,DE
+        ; Конечный ноль нужен буферу загрузчика, но не является текстом INI.
+        ; Вычитаем его из объявленного размера файла, оставляя сам ноль в RAM
+        ; и в заполнении последнего записанного сектора. SCF заменяет OR A
+        ; без роста кода: SBC вычисляет (конец - начало - 1).
+        SCF:SBC HL,DE
         LD (SFIS),HL
         POP AF
         RET
@@ -700,9 +713,12 @@ LINI    LD A,INIPG:CALL MNG0
 INILOAD CALL INXSe
 
         LD DE,IDNT3,B,19
-        CALL RAZ:RET NZ:INC HL
+        CALL RAZ:RET NZ:NOP
 
-        LD DE,INIA,BC,0
+        ; IDNT3 проверяет совместимый префикс версии. Оставшийся суффикс
+        ; пропускается до CR тем же флагом C, что и комментарий. Сохраняем
+        ; сам CR, поэтому работают старый заголовок и новые версии с хвостом.
+        LD DE,INIA,BC,1
 INIF    LD A,D:CP high INIB:JR NC,INILE
         LD A,H:AND 1:OR L
         CALL Z,INXSE:JR Z,INILE
@@ -1370,6 +1386,7 @@ SETUP   DB "CPU_FREQ",0:DW SUL1
 
 IDNT    DB "SpectrumProg"
 IDNT2   DB "WildCommanderMDL"
+; Префикс проверки формата, общий для v1.1 и v1.10i. Не строка для сохранения.
 IDNT3   DB "Wild Commander v1.1"
 
 IVD     DB "IDE VideoDAC: "

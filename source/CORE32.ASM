@@ -506,8 +506,9 @@ LOAD512_IO_OK:
 
         LD HL,(CUHL),DE,(CUDE)
 ; Codex - 2026-07-17 - begin
-        ; Короткая ветка компенсирует эпилог восстановления NW0 без сдвига ABI.
-        CALL CURIT,GIPAG:JR Z,NXTC
+        ; Расширение проверяет CF от CURIT до разыменования записи в GIPAG.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_NEXT_CLUSTER
+        JR Z,NXTC
 ; Codex - 2026-07-17 - end
         RET
 
@@ -517,8 +518,10 @@ SRHFCL  LD HL,FSTFRC,DE,CAHL,BC,4:LDIR
 ; Codex - 2026-07-16 - end
 SRHFC
 
-        LD HL,(CAHL),DE,(CADE)
-        CALL CURIT:RET C
+        ; Общий переход проверяет границу data-области и выполняет wrap,
+        ; в том числе после заполнения GENBU или свободного последнего слота.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_NEXT_FREE_FAT_SECTOR
+        RET C
 
 ; Codex - 2026-07-16 - begin
 FC      CALL_WDOS_EXTENSION WDOS_EXT.ID_CHECK_FREE_SCAN_LIMIT
@@ -559,6 +562,12 @@ GETZE   EXX
 ; четырёхбайтовую запись внутри SECBU; при выходе за BFTSZ возвращается CF=1.
 ; Побочные эффекты: вычисляет относительный сектор FAT в LSTSE, переводит его
 ; в абсолютный LBA через SFAT/ADDTOP и читает один сектор в SECBU.
+; Вход CURIT зафиксирован: на #44A5 ссылаются внешние плагины и заголовок
+; этого файла. Изменения выше (потоковый переход по FAT, голова SRHFC)
+; поглощаются добивкой, как это сделано перед SNCEN.
+        ASSERT $ <= #44A5, исправления перед CURIT не помещаются
+        DS #44A5-$,0
+        ASSERT $ == #44A5, сдвинулся фиксированный вход CURIT
 CURIT
 
         CALL DEL128
@@ -592,6 +601,7 @@ FATEND  POP BC
 ; заменяется корневым кластером BROOTC. Выход: Z — позиция вычислена; NZ —
 ; встретился маркер конца цепочки. Побочные эффекты: сбрасывает NSDC/EOC,
 ; сохраняет кластер в CUHL/CUDE, LBA в CLHL/CLDE и вызывает XPOZI.
+        ASSERT $ == #44D7, сдвинулся фиксированный вход GIPAG
 GIPAG
         CALL TOS
 
@@ -980,7 +990,10 @@ ROSTIK  CALL PREPFC:JR C,ERG2
         ; BUtoFAT: CF=1 означает как завершённую цепочку, так и ошибку записи;
         ; Z/NZ при возврате сохраняет различие для вызывающего APPEND.
         CALL BUtoFAT:RET C
-        CALL SGENB2:JR C,ERG2
+        ; LSTsr уже перенёс последний кластер в начало GENBU. Продолжить
+        ; через PREPFC: отдельный поиск здесь пропускал декремент счётчика.
+        ; Пересинхронизация SECBU не нужна: последний CURIT в BUtoFAT
+        ; перечитывает тот же сектор FAT, в котором стоит продолжение скана.
         JR ROSTIK
 SGENBU  LD HL,GENBU,(GARY),HL
 
@@ -1001,18 +1014,22 @@ GENB    LD (FSTFRC),HL,(FSTFRC+2),DE
         LD (GARY),HL
         XOR A
         RET
-SGENB2  CALL SRHFC:RET C
-        JR GENB
-PREPFC  LD HL,(CLCNT):DEC HL
-        LD (CLCNT),HL
-        LD A,H:OR L:JR Z,EOFG
+; Остаток включает последний добавленный кластер. Заём в high16 возникает
+; только при исходном low16=0, а завершение определяется всем DE:HL.
+PREPFC  LD HL,(CLCNT),DE,(CLCNT+2)
+        LD A,H:OR L:JR NZ,.low_ready
+        DEC DE
+.low_ready:
+        DEC HL
+        LD (CLCNT),HL,(CLCNT+2),DE
+        LD A,H:OR L,D,E:JR Z,EOFG
 
 AMM     EXX
         LD A,H:CP high SECBE
         JR C,ARM
         CALL SRHFC:RET C
         JR AR2
-ARM     CALL FC
+ARM     CALL FC:RET C
 AR2     LD (FSTFRC),HL,(FSTFRC+2),DE
         LD A,H,C,L
         LD HL,(GARY)
@@ -1023,10 +1040,7 @@ AR2     LD (FSTFRC),HL,(FSTFRC+2),DE
         LD A,H:CP high GENBE:RET NC
         LD (GARY),HL
         JP PREPFC
-EOFG    LD HL,(CLCNT+2)
-        LD A,H:OR L:JR NZ,AmM
-
-        LD DE,#0FFF
+EOFG    LD DE,#0FFF
         LD HL,(GARY)
         LD (HL),E:INC HL
         LD (HL),E:INC HL
@@ -1034,7 +1048,6 @@ EOFG    LD HL,(CLCNT+2)
         LD (HL),D:INC HL
         LD (GARY),HL
         RET
-AmM     DEC HL:LD (CLCNT+2),HL:JR AMM
 BUtoFAT LD HL,GENBU
 GENFC   LD C,(HL):INC HL
         LD B,(HL):INC HL
@@ -1103,6 +1116,12 @@ LSTsr   CALL LSTSR
 ; FAT является точной подсказкой; пустая цепочка прежнюю подсказку не меняет.
 ; Устойчивого прикладного значения флагов на выходе код не задаёт, результат
 ; записи определяется драйвером SDDSE.
+; Вход DLSG зафиксирован так же, как CURIT и GIPAG: на #49B4 ссылаются уже
+; собранные плагины и заголовок файла. Компенсация обязана стоять ДО метки —
+; добивка внутри процедуры восстанавливает только LWT и всё, что ниже.
+        ASSERT $ <= #49B4, исправления перед DLSG не помещаются
+        DS #49B4-$,0
+        ASSERT $ == #49B4, сдвинулся фиксированный вход DLSG
 DLSG
 
         LD DE,LOBU,BC,4:LDIR
@@ -1531,6 +1550,9 @@ MKDIR
         LD HL,(LSTCAT+2),(CLSDE),HL
         LD HL,ENTRY,BC,32:LDIR
 
+        ; Намеренно обнуляются 513 байт от LOBU+64: исходный ноль и 512 LDIR.
+        ; 65 байт заходят в LOBU2, чтобы ZERO_CLUSTER_TAIL получил непрерывный
+        ; нулевой сектор от LOBU+64 после записей "." и "..".
         LD HL,DE:INC DE
         LD BC,512
         LD (HL),0
@@ -1929,9 +1951,10 @@ EXT_DIR_OLDER_DIRTY        DS 1
 EXT_DIR_EXPECTED_SEQUENCE  DS 1
 EXT_DIR_LFN_CHECKSUM       DS 1
 
-; Шлюз сохраняет оба набора AF/BC/DE/HL и IX в стековом кадре, поэтому
-; вложенный вызов из MKSG/LOAD512 безопасен. IY не используется и остаётся
-; неизменным. Байт номера функции читается из потока сразу после CALL.
+; Шлюз передаёт функции оба входных набора AF/BC/DE/HL и IX, а затем
+; возвращает оба выходных набора и IX без собственных разрушений. IY не
+; используется. Состояние страницы/IFF и регистры каждого вложенного вызова
+; находятся в его стековом кадре. Байт ID читается до переключения страницы.
 EXTENSION_GATE:
         PUSH AF
         PUSH BC
@@ -1944,24 +1967,28 @@ EXTENSION_GATE:
         PUSH BC
         PUSH DE
         PUSH HL
-        EXX
-        EX AF,AF'
 
         LD IX,0
         ADD IX,SP
         LD L,(IX+18)
         LD H,(IX+19)
         LD A,(HL)
-        INC HL
-        LD (IX+18),L
-        LD (IX+19),H
         LD L,A
 
+        ; WC IM2 увеличивает #6009 до вызова обработчиков плагинов. Если IRQ
+        ; совпал с LD A,I на NMOS Z80, P/V может оказаться ложным нулём.
+        ; Изменение счётчика между двумя чтениями обнаруживает такой IRQ.
+        ; Первый снимок хранится в B текущего кадра, не в общей RAM-ячейке.
+        LD A,(#6009)
+        LD B,A
+        LD D,1
+EXTENSION_GATE_READ_IFF:
         LD A,I
         DI
-        LD D,0
-        JP PO,EXTENSION_GATE_IFF_SAVED
-        INC D
+        JP PE,EXTENSION_GATE_IFF_SAVED
+        LD A,(#6009)
+        SUB B
+        LD D,A
 EXTENSION_GATE_IFF_SAVED:
         LD BC,#13AF
         IN A,(C)
@@ -2034,35 +2061,38 @@ DEHR    INCLUDE "DEHR2.ASM"
 ; CORE32_EXT, поэтому оно находится в безопасном промежутке перед IM2 и стеком.
 EXTENSION_GATE_AFTER:
 ; Codex - 2026-07-16 - begin
-; Основной набор регистров остаётся в альтернативном наборе до конца эпилога.
-; Возвращаемый AF' временно хранится в HL; иначе вложенный SD-вызов затирал
-; находящийся в A' счётчик секторов номером восстанавливаемой страницы.
-        EX AF,AF'
-        EXX
-        PUSH AF
-        POP HL
+; GATE_FINISH уже заменил входной кадр выходными регистрами функции.
+; Сначала возвращаем страницу, затем снимаем все девять пар. Флаг Z выбора
+; EI/DI живёт до последнего POP AF; промежуточный EX AF сохраняет его.
         POP DE
         LD A,E
         LD BC,#13AF
         OUT (C),A
         LD A,D
         OR A
-        DUP 9
+        EXX
+        POP HL
+        POP DE
         POP BC
-        EDUP
-        JR Z,EXTENSION_GATE_KEEP_DI
-        PUSH HL
-        POP AF
         EXX
         EX AF,AF'
+        POP AF
+        EX AF,AF'
+        POP IX
+        POP HL
+        POP DE
+        POP BC
+        JR Z,EXTENSION_GATE_KEEP_DI
+        POP AF
         EI
+EXTENSION_GATE_RET_EI:
         RET
 EXTENSION_GATE_KEEP_DI:
-        PUSH HL
         POP AF
-        EXX
-        EX AF,AF'
+EXTENSION_GATE_RET_DI:
         RET
+        ASSERT $ <= #5BEA, эпилог шлюза пересёк восстановление потока
+        DS #5BEA-$,0
 ; Codex - 2026-07-16 - end
 ; Codex - 2026-07-17 - begin
 ; Общий поток всегда возвращается с обработчиком чтения. Сохранение HL не
@@ -2074,11 +2104,14 @@ STREAM_RESTORE_READ_HANDLER:
         POP HL
         RET
 ; Codex - 2026-07-17 - end
-        ASSERT $ <= #5BF4, шлюз пересёк физический хвост CORE32
+        ASSERT $ <= @PLUGIN_REFRESH_BOTH, ядро пересекло резидентный обработчик
 ; Codex - 2026-07-16 - end
 END
 ; Codex - 2026-07-16 - begin
-        ASSERT END <= #5BF4, нарушена рабочая длина WildDOS
+        ; Установщик использует DE сразу после LDIR ядра как адрес следующего
+        ; копирования. Проверяем точное соседство, а не только отсутствие
+        ; пересечения: иначе изменение длины молча сдвинет обработчик в RAM.
+        ASSERT END == @PLUGIN_REFRESH_BOTH, изменилось начало резидентного обработчика
 ; Codex - 2026-07-16 - end
         ENT
 ; Физический адрес условного перехода используется WC как точка подстановки

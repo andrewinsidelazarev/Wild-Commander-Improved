@@ -17,8 +17,8 @@
 ;   #9B7C F9STP          — настройка и обработка wc.ini;
 ;   #C000 WDOS.INSTALL_WILDDOS — физический загрузчик WildDOS;
 ;   #5AAA DEHRUST        — рабочий адрес распаковщика драйверов после копирования.
-; Сборка: SJASMPlus 1.21. Ожидаемый SHA-256 полезной нагрузки:
-; 5c2e4c033c4188145a8a432d09409b16eea8f4a4d279a21439e60feac78c8d87
+; Сборка: SJASMPlus 1.21. SHA-256 полезной нагрузки вычисляется по
+; Build/boot.payload.bin; SHA-256 готового exe/boot.$C выводит build.ps1.
 
         INCLUDE "PHYSICAL_MEMORY_MAP.ASM"
 
@@ -100,6 +100,9 @@ GATE_CONTINUE EQU RUNTIME_START+ID_COUNT*3
 LB59F:
 WDOS_INSTALL_COPY:
         LDIR                            ; исходный CORE32 #C00C -> #4000
+        LD HL,PLUGIN_REFRESH_TEMPLATE
+        LD C,PLUGIN_REFRESH_LENGTH      ; после LDIR BC=0, DE=WDOS.END=#5BF2
+        LDIR                            ; постоянный обработчик, вне буфера F9
         RET
 ; Автозапуск типа #06 живёт в нулевой области: точные модули не двигаются.
         INCLUDE "PLUGIN_REFRESH.ASM"
@@ -110,6 +113,12 @@ WDOS_INSTALL_COPY:
 LB59F:
 WDOS_INSTALL_COPY:
         LDIR                            ; исходный CORE32 #C00C -> #4000
+        ; DE уже указывает сразу за ядро, а BC обнулён завершившимся LDIR.
+        ; Устанавливаем обработчик до FINI и любого запуска плагинов. Шаблон
+        ; по #BF60 далее не нужен: F9 может свободно использовать весь LOBU.
+        LD HL,PLUGIN_REFRESH_TEMPLATE
+        LD C,PLUGIN_REFRESH_LENGTH
+        LDIR
         LD BC,#13AF
         IN A,(C)
         PUSH BC
@@ -119,24 +128,17 @@ WDOS_INSTALL_COPY:
 ; Codex - 2026-07-17 - begin
         ; DEHR уже скопирован по #5AAA. Он распаковывает проверенный HR-поток
         ; прямо в подключённую страницу #E8, начиная с runtime-адреса #C000.
-        ; DEHR разрушает IX и альтернативные BC/DE/HL. Стек WC находится по
-        ; #5FFE, вне переключаемого окна #C000, и DEHR полностью балансирует
-        ; собственные PUSH/POP, поэтому сохраняем контекст прямо на стеке.
+        ; DEHR разрушает IX и оба набора BC/DE/HL. IX сохраняем. Здесь нет
+        ; живых альтернативных BC/DE/HL: установщик вызывается однократно из
+        ; WC_ENTRY после INIT, до FINI, а не через API работающего менеджера.
+        ; Удаление их лишнего сохранения даёт место копированию обработчика,
+        ; сохраняя начало AUTOEXEC и весь фиксированный хвост boot.$C.
+        ; Стек #5FFE остаётся вне окна #C000; DEHR балансирует свои PUSH/POP.
         ; Точный DEHR2 не выполняет EX AF,AF' и не изменяет AF'.
         PUSH IX
-        EXX
-        PUSH BC
-        PUSH DE
-        PUSH HL
-        EXX
         LD HL,WDOS_EXTENSION_PACKED
         LD DE,WDOS_EXT.RUNTIME_START
         CALL #5AAA
-        EXX
-        POP HL
-        POP DE
-        POP BC
-        EXX
         POP IX
 ; Codex - 2026-07-17 - end
         POP AF
@@ -150,7 +152,7 @@ WDOS_EXTENSION_PACKED:
 WDOS_EXTENSION_PACKED_END:
         ; AUTOEXEC имеет фиксированные внешние адреса и не должен зависеть от
         ; степени сжатия расширения. #BF69 — его доказанное штатное начало.
-        ASSERT WDOS_EXTENSION_PACKED_END <= #BF60, нет места для обновления панелей после плагина
+        ASSERT WDOS_EXTENSION_PACKED_END <= #BF60, расширение пересекло шаблон обработчика
         INCLUDE "PLUGIN_REFRESH.ASM"
 ; Автозапуск типа #06 живёт в нулевой области: точные модули не двигаются.
         INCLUDE "AUTOEXEC.ASM"

@@ -115,6 +115,11 @@ cd 'C:\Users\Администратор\Desktop\WC\WildCommander Improved\source
   Wild Commander (`LOAD512`, `SAVE512`, `MKfile`, `APPEND`, `FENTRY`, FILEX,
   окна): извлечение, вопросы замены, пропуск, индикатор, число поисков
   временного файла.
+- `tests/test_inflate_streaming.py` — заголовки несжатых блоков Deflate на
+  границах входного окна 1 КиБ, с FILEX и без него, с data descriptor и
+  известным размером, пустой и максимальный блок, неверный NLEN и обрыв
+  заголовка. Исправлена потеря младшего байта NLEN при пополнении входа:
+  она вызывала ложную ошибку `invalid Deflate stream` в `is-dos.zip`.
 - `tests/test_wmf_contract.py` — заголовок WMF и карта памяти.
 - `tools/run_unzip_unreal.ps1` — прогон в настоящем Wild Commander под
   патченным Unreal (клавиши через `vkey.req`): готовит образ из `wc.img`,

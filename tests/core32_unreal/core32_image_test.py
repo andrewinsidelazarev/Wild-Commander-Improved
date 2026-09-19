@@ -43,6 +43,7 @@ FILEX_PLUGIN_NAME = "FILEX.WMF"
 FILEX_TEST_PLUGIN_NAME = "FILEXT.WMF"
 FILEX_NO_SPACE_PLUGIN_NAME = "FILEXNST.WMF"
 FILEX_TEST_DIRECTORY = "FXT716"
+FILEX_BOUNDARIES = (0xFF00, 0xFF01, 0xFFFF, 0x10000, 0x10001, 0x1FF01, 0x1FFFF, 0x20000)
 FILEX_RESULT = "FXRESULT.BIN"
 FILEX_MANIFEST = "FXPREP.BIN"
 FILEX_FULL_DIRECTORY = "FXFULL"
@@ -139,7 +140,10 @@ def configure_ini(
             plugin_lines = [FILEX_PLUGIN_NAME, filex_test_plugin_name]
             if include_core32_test:
                 plugin_lines.append(PLUGIN_NAME)
-            result.extend((MARK_BEGIN, line, *plugin_lines, MARK_END))
+            # Комментарий отдельной строкой внутри [PLUGINS] превращается
+            # парсером WC в пустую строку и обрывает загрузку следующих плагинов.
+            # Вставляем только исполняемые строки, без служебных маркеров.
+            result.extend((line, *plugin_lines))
             inserted = True
         else:
             result.append(line)
@@ -200,6 +204,10 @@ def prepare_filex_fixture(image: Fat32Image, root: int) -> None:
     test_cluster = UPDATE.ensure_dir(image, root, FILEX_TEST_DIRECTORY)
     cluster_size = image.cluster_size
     UPDATE.write_file_any(image, test_cluster, FILEX_RESULT, b"HOSTPREP" + bytes(504))
+
+    for target in FILEX_BOUNDARIES:
+        UPDATE.write_file_any(image, test_cluster, f"B{target:X}.BIN", b"\xA6" * (target + 65536))
+    UPDATE.write_file_any(image, test_cluster, "NOSPWIN.BIN", b"\xA7" * 0x1FF01)
 
     fragmented = bytearray([0xA1]) * (cluster_size * 2)
     fragmented[cluster_size - 17 : cluster_size] = bytes([0xB2]) * 17
@@ -665,6 +673,25 @@ def inspect_filex_fixture(image: Fat32Image, failures: list[str]) -> None:
     cluster_size = manifest["cluster_size"]
     if cluster_size != image.cluster_size:
         failures.append(f"Манифест cluster_size={cluster_size}, образ={image.cluster_size}")
+
+    for target in FILEX_BOUNDARIES:
+        name = f"B{target:X}.BIN"
+        entry = image.find_entry(test_cluster, name)
+        if not entry or entry["size"] != target:
+            failures.append(f"{name}: неверный размер после SET_EOF32")
+            continue
+        raw = image.read_chain(entry["cluster"])
+        capacity = (target + cluster_size - 1) // cluster_size * cluster_size
+        if len(raw) != capacity or raw[:target] != b"\xA6" * target:
+            failures.append(f"{name}: цепочка или исходные данные повреждены")
+        sector_end = (target + 511) // 512 * 512
+        if any(raw[target:sector_end]):
+            failures.append(f"{name}: хвост последнего сектора не обнулён")
+    no_space = image.find_entry(test_cluster, "NOSPWIN.BIN")
+    if not no_space or image.read_file(test_cluster, "NOSPWIN.BIN") != b"\xA7" * 0x1FF01:
+        failures.append("NOSPWIN.BIN повреждён после отказа большого роста")
+    elif len(image.cluster_chain(no_space["cluster"])) != (0x1FF01 + cluster_size - 1) // cluster_size:
+        failures.append("NOSPWIN.BIN: изменилась длина цепочки после NO_SPACE")
 
     fragment_entry = image.find_entry(test_cluster, "FRAGREAD.BIN")
     if not fragment_entry:

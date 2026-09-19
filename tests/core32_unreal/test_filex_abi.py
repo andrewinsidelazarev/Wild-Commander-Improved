@@ -43,6 +43,23 @@ def main() -> int:
     provider = load_symbols(BUILD / "FILEX.sym")
     payload = (BUILD / "boot.payload.bin").read_bytes()
 
+    # Независимый фиксированный контракт: адреса нельзя брать из текущих
+    # символов как эталон, иначе одновременный сдвиг ядра и провайдера скроет
+    # несовместимость с уже собранными плагинами. Проверяем все 18 входов,
+    # перечисленных в заголовке CORE32, включая границу рабочего образа.
+    frozen_core = {
+        "START": 0x4000, "NXTETY2": 0x4067, "NXTETY": 0x413F,
+        "LOAD512": 0x43A0, "SAVE512": 0x4398,
+        "CURIT": 0x44A5, "GIPAG": 0x44D7,
+        "MKSG": 0x4880, "DLSG": 0x49B4, "SRHDRN": 0x4A4C,
+        "MKFILE": 0x4D34, "MKDIR": 0x4D5B,
+        "DELFL": 0x4CDD, "RENAME": 0x4D13,
+        "HDD": 0x4E71, "DOS_SWP": 0x4FF8, "DEHR": 0x5AAA,
+        "END": 0x5BF2,
+    }
+    for name, address in frozen_core.items():
+        expect(f"фиксированный вход WDOS.{name}", boot.get("WDOS." + name), address)
+
     required_boot = {
         "PLUGIN_API_TABLE",
         "FEX",
@@ -109,7 +126,8 @@ def main() -> int:
 
     print(
         "FILEX ABI PASS: API77=#6AFD, gate=#6A47, provider=#06, "
-        "FILEXT=#03, FILEXNST=#06, block=32, operations=8, caps=#FF"
+        "FILEXT=#03, FILEXNST=#06, block=32, operations=8, caps=#FF, "
+        "18 fixed CORE32 addresses"
     )
     return 0
 

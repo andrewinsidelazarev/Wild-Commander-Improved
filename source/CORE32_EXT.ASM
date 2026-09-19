@@ -63,6 +63,7 @@ ENTRY_TABLE:
         JP NOTE_FREED_CHAIN
         JP SAVE_NEXT_FREE_HINT
         JP GET_DATA_CLUSTER_LIMIT
+        JP STREAM_NEXT_CLUSTER
 ; Codex - 2026-07-17 - end
 ; Codex - 2026-07-16 - end
 ENTRY_TABLE_END:
@@ -72,6 +73,13 @@ ENTRY_TABLE_END:
 ; IX указывает на сохранённый стековый кадр, L содержит номер функции.
 ; Кадр: HL'/DE'/BC'/AF', IX, HL/DE/BC/AF, адрес возврата.
 GATE_CONTINUE:
+        ; Номер функции прочитан до paging, когда байт ещё принадлежал
+        ; вызывающей странице. Сам адрес возврата увеличиваем уже здесь:
+        ; кадр находится в постоянном окне и переживает вложенные шлюзы.
+        INC (IX+18)
+        JR NZ,.return_address_ready
+        INC (IX+19)
+.return_address_ready:
         LD H,0
         LD C,L
         LD B,H
@@ -79,45 +87,67 @@ GATE_CONTINUE:
         ADD HL,BC
         LD BC,ENTRY_TABLE
         ADD HL,BC
-        LD BC,@WDOS.EXTENSION_GATE_AFTER
+        LD BC,GATE_FINISH
         PUSH BC
         PUSH HL
 
+        ; POP читает тот же входной кадр, не меняя его содержимого.
+        ; После восстановления всех регистров SP стоит на адресе возврата.
+        ; 24 DEC SP возвращают его к подготовленным target/GATE_FINISH;
+        ; DEC SP не меняет ни регистры, ни возвращённые входные флаги.
+        LD SP,IX
         EXX
-        LD L,(IX+0)
-        LD H,(IX+1)
-        LD E,(IX+2)
-        LD D,(IX+3)
-        LD C,(IX+4)
-        LD B,(IX+5)
+        POP HL
+        POP DE
+        POP BC
         EXX
-
-        LD L,(IX+6)
-        LD H,(IX+7)
-        PUSH HL
         EX AF,AF'
         POP AF
         EX AF,AF'
-
-        LD C,(IX+14)
-        LD B,(IX+15)
-        LD E,(IX+12)
-        LD D,(IX+13)
-
-        LD L,(IX+16)
-        LD H,(IX+17)
-        PUSH HL
-        POP AF
-
-        LD L,(IX+10)
-        LD H,(IX+11)
-        PUSH HL
-        LD L,(IX+8)
-        LD H,(IX+9)
-        PUSH HL
         POP IX
         POP HL
+        POP DE
+        POP BC
+        POP AF
+        DUP 24
+        DEC SP
+        EDUP
         RET
+
+; Перенести оба возвращённых набора и IX поверх уже ненужных входных
+; регистров. Всё состояние принадлежит текущему стековому кадру: вложенный
+; вызов не может перезаписать указатель или регистры внешнего вызова.
+; На входе SP -> page/IFF, затем 18 байт входного кадра и адрес возврата.
+; После PUSH новый блок выходов начинается на 18 байт ниже page/IFF.
+; Копируем его на 20 байт выше, оставляя само слово page/IFF нетронутым.
+; Дополнительная глубина стека этой фазы — 20 байт; IY не используется.
+GATE_FINISH:
+        PUSH AF,BC,DE,HL,IX
+        EX AF,AF'
+        EXX
+        PUSH AF,BC,DE,HL
+        LD HL,17
+        ADD HL,SP
+        PUSH HL
+        LD BC,20
+        ADD HL,BC
+        EX DE,HL
+        POP HL
+        LD BC,18
+        LDDR
+        ; После LDDR DE указывает на второй байт page/IFF.
+        EX DE,HL
+        DEC HL
+        LD SP,HL
+        JP @WDOS.EXTENSION_GATE_AFTER
+
+; Перейти по FAT из потокового LOAD512/SAVE512. После отказа CURIT HL
+; больше не является указателем на FAT-запись: GIPAG вызывать запрещено.
+; Общая ошибка выставляет ABT/EOC и CF, как остальные повреждённые ссылки.
+STREAM_NEXT_CLUSTER:
+        CALL @WDOS.CURIT
+        JP C,FAT_LINK_ERROR
+        JP @WDOS.GIPAG
 
 ; Вызвать общий потоковый код с временным обработчиком DE и восстановить именно
 ; прежний адрес NW0, а не безусловно RDDSE. Флаги/A/HL результата LOAD512
@@ -528,7 +558,8 @@ APPEND_PREPARE:
         LD A,1
         LD (APPEND_NEEDS_CLUSTER),A
         DEC HL
-        LD A,H:CP #FF:JR NZ,.store_skip
+        ; Заём из high16 нужен только при переходе 0000 -> FFFF.
+        LD A,H:AND L:CP #FF:JR NZ,.store_skip
         DEC DE
 .store_skip:
         LD (APPEND_SKIP_COUNT),HL
@@ -545,7 +576,7 @@ APPEND_PREPARE:
         LD (APPEND_CURRENT_CLUSTER+2),DE
         LD HL,(APPEND_SKIP_COUNT),DE,(APPEND_SKIP_COUNT+2)
         DEC HL
-        LD A,H:CP #FF:JR NZ,.skip_stored
+        LD A,H:AND L:CP #FF:JR NZ,.skip_stored
         DEC DE
 .skip_stored:
         LD (APPEND_SKIP_COUNT),HL
@@ -1408,10 +1439,22 @@ INIT_FREE_SCAN:
         XOR A:LD (@WDOS.DUBA),A
         RET
 
+; Проверить текущий CADE:CAHL перед чтением свободного слота. Последний
+; сектор FAT может содержать нулевые записи за концом data-области: они не
+; являются кластерами. При достижении границы сразу перейти к кластеру 2.
+; Выход: CF=1 при полном обороте; HL сохранён либо указывает на новый слот
+; после wrap. AF/BC/DE временные; BC'/DE'/HL' сохранены. VALIDATE_FREE_HINT
+; через DEL128 также меняет AF', как и обычный переход к сектору FAT.
 CHECK_FREE_SCAN_LIMIT:
-        LD A,(@WDOS.DUBA):OR A:RET Z
         PUSH HL
-        LD HL,(@WDOS.CAHL),DE,(@WDOS.DABC)
+        LD HL,(@WDOS.CAHL),DE,(@WDOS.CADE)
+        CALL VALIDATE_FREE_HINT
+        JR Z,.valid
+        POP HL
+        JP NEXT_FREE_FAT_SECTOR.wrap
+.valid:
+        LD A,(@WDOS.DUBA):OR A:JR Z,.more
+        LD DE,(@WDOS.DABC)
         OR A:SBC HL,DE:JR NZ,.more
         LD HL,(@WDOS.CADE),DE,(@WDOS.DAHL)
         OR A:SBC HL,DE:JR NZ,.more
@@ -1423,35 +1466,16 @@ CHECK_FREE_SCAN_LIMIT:
         OR A
         RET
 
-; Перейти к следующему сектору FAT. На конце FAT один раз продолжить с
-; кластера 2; повторный конец означает реальное отсутствие свободных кластеров.
+; Загрузить FAT-сектор текущего CADE:CAHL. Курсор уже увеличен вызывающим
+; FC/GETZE. Одинаковый путь нужен после занятого сектора, свободного последнего
+; слота и записи очередной порции GENBU: ни один путь не должен обходить wrap.
+; ID сохранён для внутренней ABI. На конце области данных разрешён один
+; переход к кластеру 2; повторный конец означает отсутствие места.
 NEXT_FREE_FAT_SECTOR:
-        LD HL,(@WDOS.LSTSE),DE,(@WDOS.LSTSE+2)
-; Codex - 2026-07-16 - begin
-        ; INC HL не меняет флаг Z, поэтому перенос нельзя определять через JR NZ.
-        INC HL
-        LD A,H:OR L:JR NZ,.next_sector_ready
-        INC DE
-.next_sector_ready:
-; Codex - 2026-07-16 - end
-
-        PUSH HL,DE
-        LD BC,(@WDOS.BFTSZ)
-        OR A:SBC HL,BC
-        EX DE,HL
-        LD BC,(@WDOS.BFTSZ+2)
-        SBC HL,BC
-        POP DE,HL
-        JR NC,.wrap
-
-        LD (@WDOS.LSTSE),HL,(@WDOS.LSTSE+2),DE
-        CALL POSITION_FAT_READ
-        LD HL,@WDOS.SECBU,A,1
-        CALL READ_SECTORS
-        RET NZ
-        LD HL,@WDOS.SECBU
-        OR A
-        RET
+        LD HL,(@WDOS.CAHL),DE,(@WDOS.CADE)
+        CALL VALIDATE_FREE_HINT
+        JR NZ,.wrap
+        JP @WDOS.CURIT
 
 .wrap:
         LD A,(@WDOS.DUBA):OR A:JR NZ,.full

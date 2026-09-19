@@ -380,6 +380,9 @@ if (-not (Test-Path -LiteralPath $UnzipOutput -PathType Leaf)) {
     throw 'UNZIP.WMF was not created.'
 }
 
+# WPLAYER поставляется из побайтово проверенного эталона. Восстановленный
+# исходник пока не воспроизводит этот бинарник и в runtime не собирается.
+
 # Codex - 2026-07-16 - begin
 $MainSourceAscii = "$ProjectRootAscii/source/BOOT.ASM"
 $PayloadAscii = "$ProjectRootAscii/Build/boot.payload.bin"
@@ -492,6 +495,21 @@ if ($LASTEXITCODE -ne 0) { throw 'LFN/SFN namespace machine tests failed.' }
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_plugin_panel_refresh.py')
 if ($LASTEXITCODE -ne 0) { throw 'Plugin panel refresh machine tests failed.' }
 
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_wcini_version.py')
+if ($LASTEXITCODE -ne 0) { throw 'WCINI version compatibility tests failed.' }
+
+# Замороженный ABI: CURIT/GIPAG/DLSG и шлюз FILEX обязаны остаться на своих
+# адресах, иначе уже собранные плагины входят в середину процедуры. Набор
+# существовал, но в сборку включён не был, и сдвиг на 8 байт прошёл незамеченным.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_abi.py')
+if ($LASTEXITCODE -ne 0) { throw 'FILEX/WildDOS frozen ABI tests failed.' }
+
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_core32_regressions.py')
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 boundary/gate/rollback regressions failed.' }
+
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_allocator_wrap.py')
+if ($LASTEXITCODE -ne 0) { throw 'MKSG wrap/count/data preservation tests failed.' }
+
 # Плагины, меню и конфигурация — готовые runtime-файлы.
 # boot.$C собирается выше, а WC_History.txt и WC_todo.txt ведутся самим
 # Improved; остальные неизменяемые файлы берутся из локального эталона.
@@ -544,6 +562,11 @@ $ViewerByteEncoding = [Text.Encoding]::GetEncoding(28591)
 $ViewerIniText = $ViewerByteEncoding.GetString([IO.File]::ReadAllBytes($ViewerIniPath))
 $ViewerIniText = [regex]::Replace($ViewerIniText,
     '(?im)(^|[\r\n])([ \t]*)RE\.WMF(?=[ \t;\r\n]|$)', '$1$2TXTVIEW.WMF')
+# Эталон содержит историческую версию 1.1. Поставляемый INI должен совпадать
+# с заголовком Improved и результатом F9; меняем только первую строку,
+# сохраняя OEM-байты комментариев и исходные одиночные CR.
+$ViewerIniText = [regex]::Replace($ViewerIniText,
+    '\AWild Commander v1\.1(?=\r|\n|$)', 'Wild Commander v1.10i')
 [IO.File]::WriteAllBytes($ViewerIniPath, $ViewerByteEncoding.GetBytes($ViewerIniText))
 
 # UNZIP запускается по Enter на расширении ZIP и располагается сразу после

@@ -3,12 +3,24 @@
 ; перечитать противоположную панель и вернуть исходный контекст.
 ; Сначала выполняется прежний SEXY для активной панели. В конце сохраняется
 ; его прежний результат A=0, Z=1, CF=0. Нового кода возврата не требуется.
+; Рабочие восемь байт устанавливаются сразу за CORE32 в постоянной странице
+; #05, до таблицы IM2. #BF60 содержит только загрузочный шаблон: F9 и другие
+; операции вправе затереть его вместе с буфером #B000..#BFFF после запуска.
+; DISP меняет адреса исполнения, но оставляет шаблон в прежнем месте файла.
         DS #BF60-$,0
+PLUGIN_REFRESH_TEMPLATE:
+        DISP #5BF2
 PLUGIN_REFRESH_BOTH:
         CALL WCFX.SEXY
         CALL WCFX.TERM
         XOR A
         RET
-        ASSERT PLUGIN_REFRESH_BOTH == #BF60, изменился адрес обновления панелей
-        ASSERT $ == #BF68, обработчик обновления должен занимать 8 байт
+PLUGIN_REFRESH_END:
+PLUGIN_REFRESH_LENGTH EQU PLUGIN_REFRESH_END-PLUGIN_REFRESH_BOTH
+        ASSERT PLUGIN_REFRESH_BOTH == #5BF2, изменился адрес обновления панелей
+        ASSERT PLUGIN_REFRESH_LENGTH == 8, обработчик обновления должен занимать 8 байт
+        ASSERT PLUGIN_REFRESH_END <= #5BFB, обработчик пересёк нижний слот IM2
+        ENT
+        ASSERT PLUGIN_REFRESH_TEMPLATE == #BF60, сдвинулся загрузочный шаблон
+        ASSERT $ == #BF68, изменился размер загрузочного шаблона
         DS #BF69-$,0

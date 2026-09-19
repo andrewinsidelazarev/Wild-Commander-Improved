@@ -1,0 +1,327 @@
+{
+  "date": "2026-09-19",
+  "passed": true,
+  "runtime": {
+    "boot.$C": {
+      "bytes": 31761,
+      "sha256": "07635bd65d7a65024456bc8217a077c7c484ab8ba3c77078ad0bef12a4800c81"
+    },
+    "Help.txt": {
+      "bytes": 1871,
+      "sha256": "123d4e3297622511b3fa595210d8003a02950448506740e202f93baaedf0b646"
+    },
+    "WC/BMPV.WMF": {
+      "bytes": 5935,
+      "sha256": "82a707d1fa2ab573f497d9158251f50005b4b7b4129c6b46107cbefe69d13bb4"
+    },
+    "WC/CHKDSK.WMF": {
+      "bytes": 11599,
+      "sha256": "f44b80016dd8e8dea87936ec21b206a066efdbcb5b7d7c0ebb5ce3b9dff562f3"
+    },
+    "WC/CLOCK.WMF": {
+      "bytes": 75009,
+      "sha256": "8957c4d0cb2d5437fdb90c8a2adec10663e52118e54c0d74e584546dd5626998"
+    },
+    "WC/COMPILER.WMF": {
+      "bytes": 18412,
+      "sha256": "29d2c7f9db3f546909206aeca3c0bab970c9a57f880307f411a4e20a53470693"
+    },
+    "WC/FILE_CR.WMF": {
+      "bytes": 20241,
+      "sha256": "18e9ca95813e7988f4102bc96aa407aa25541b5e1162027b6bf75986deaade13"
+    },
+    "WC/FILEX.WMF": {
+      "bytes": 7237,
+      "sha256": "943472d960d3f8a9f0143d19d12532846a42ac622e39e6c79c567c24684d7093"
+    },
+    "WC/FTVIEW.WMF": {
+      "bytes": 9305,
+      "sha256": "6e60dbf05f2d44166c0393ef25d755b44911a025d36584c6c88a0a24538a820f"
+    },
+    "WC/GIFVIEW.WMF": {
+      "bytes": 3298,
+      "sha256": "49162fa8e3eade9259cdf2bf1269065120eb394efb31a5e69208078322c2bb82"
+    },
+    "WC/GSPLAYER.WMF": {
+      "bytes": 12534,
+      "sha256": "69c40c10631e14663986c88c62f1216cb14227c442fd91fe023aff841b29aeeb"
+    },
+    "WC/ILBMVIEW.WMF": {
+      "bytes": 18944,
+      "sha256": "5ff5186062e9531190596c2f96a8356440f4f0c97ddd580c12fe1d69df3a335b"
+    },
+    "WC/MCGSV.WMF": {
+      "bytes": 2154,
+      "sha256": "929e23debd0d6508e9f9d1d6f668aacd31d8724c69ced95154dfd01cb1d9ca62"
+    },
+    "WC/MENU/Hrust v1.3.spg": {
+      "bytes": 9762,
+      "sha256": "7609625d462b3e9a143561564f7b179be9e901ca0f742df598e68a6722d9fb20"
+    },
+    "WC/MENU/RUD v2.42.spg": {
+      "bytes": 14553,
+      "sha256": "45049127c571bf1a10fbc941583ea77a4f796df60511f7bff77ab070dd4cfba9"
+    },
+    "WC/MENU/WDC v1.60.$C": {
+      "bytes": 21777,
+      "sha256": "9bd3ca4886227769ae3727a5bf2840af4b8676680822004523db265535f1490e"
+    },
+    "WC/MOUNTER.WMF": {
+      "bytes": 42482,
+      "sha256": "4c0756cafb0a42ea6a669313b0d56c2f8d6cb0b31770a8e7d4d1b0ee7411e6d0"
+    },
+    "WC/PLASMATW.WMF": {
+      "bytes": 44032,
+      "sha256": "c4de7bc6a614d04766b5ce045c5bb260bcafef8c55c0dcf9a681a091d6832f85"
+    },
+    "WC/ROM_PROG.WMF": {
+      "bytes": 2022,
+      "sha256": "c33dc920ed9327a64fc2bb171ce11a5abd79563d2dca67cb547a90053328c7f8"
+    },
+    "WC/SCRSAVER.WMF": {
+      "bytes": 819,
+      "sha256": "28d0e101dc52dc3863ac7ed639d58e6d08338d9fcac6dcf67e5661b244dc575e"
+    },
+    "WC/SETIME.WMF": {
+      "bytes": 1762,
+      "sha256": "5cd01fe56b427f31a0c48940893dbcebb2abf0fba2591932ea4984e4c2e2fab1"
+    },
+    "WC/TAPM.WMF": {
+      "bytes": 53760,
+      "sha256": "d12797aa0f40aacc0facd66b1deddb8a5f45da597ca2a67479f1f5eb23ea0103"
+    },
+    "WC/TRDisp.wmf": {
+      "bytes": 8552,
+      "sha256": "508cd851a69d0f93188862f02f0d1f936eb4bd331c1ea98ea38019d18fc63a43"
+    },
+    "WC/TRDUMP.WMF": {
+      "bytes": 6137,
+      "sha256": "e8c07419396538b457a3d45a2662c4c452482ce584c31217f05bca8d17650845"
+    },
+    "WC/TXTEDIT.WMF": {
+      "bytes": 11311,
+      "sha256": "2a7c7935ca73205455b08c4f3b8673f7ef4ac03bdb19b4e07fda8d941d380495"
+    },
+    "WC/TXTVIEW.WMF": {
+      "bytes": 7168,
+      "sha256": "eb5c87d1b8164b6ba72276eb3a07e6a7a2627b3590f6a0bfa009871fa431df02"
+    },
+    "WC/TXTVIEW2.LIC": {
+      "bytes": 4377,
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb"
+    },
+    "WC/TXTVIEW2.WMF": {
+      "bytes": 157696,
+      "sha256": "a3d04135fa8289ec786de7f024be52de5fb4273fc642133dd0f4cee13eb541a1"
+    },
+    "WC/UNZIP.WMF": {
+      "bytes": 16896,
+      "sha256": "4868f7c35fe1debecadf92f08acdc99b937ea30e280e3ccc988733b93cd2d502"
+    },
+    "WC/VIDEO_PL.WMF": {
+      "bytes": 2522,
+      "sha256": "8c205f21b70d3d1535b33ab1536f565ff1fee9da5af86e5ebf62453968e2a2d0"
+    },
+    "WC/wc.ini": {
+      "bytes": 1631,
+      "sha256": "bd7a2be6278337a8550989642a742c5a5e4bd8ab3108761c311b2de97437f903"
+    },
+    "WC/wc.mnu": {
+      "bytes": 127,
+      "sha256": "1ef183a2f0b5bb3400d248b5f7cdd92ab8367c1ec626ab092f9850714542ed11"
+    },
+    "WC/WPLAYER.WMF": {
+      "bytes": 29407,
+      "sha256": "dbabc08bf4f501fd8a07df3cc19ded870fda717b9c5d6a2dd0bdac60ba3a4d34"
+    },
+    "WC_History.txt": {
+      "bytes": 86346,
+      "sha256": "e2934824453e92eac1b9941304208e6c04c94f58f78d33aadfd73673545ecebf"
+    },
+    "WC_todo.txt": {
+      "bytes": 2130,
+      "sha256": "4a0354f31d95303a988e3b852519905c4cea1dcb17cd9cc730b96299ae52664f"
+    }
+  },
+  "abi": {
+    "entry_count": 18,
+    "passed": true,
+    "entries": {
+      "START": "0x4000",
+      "NXTETY2": "0x4067",
+      "NXTETY": "0x413f",
+      "LOAD512": "0x43a0",
+      "SAVE512": "0x4398",
+      "CURIT": "0x44a5",
+      "GIPAG": "0x44d7",
+      "MKSG": "0x4880",
+      "DLSG": "0x49b4",
+      "SRHDRN": "0x4a4c",
+      "MKFILE": "0x4d34",
+      "MKDIR": "0x4d5b",
+      "DELFL": "0x4cdd",
+      "RENAME": "0x4d13",
+      "HDD": "0x4e71",
+      "DOS_SWP": "0x4ff8",
+      "DEHR": "0x5aaa",
+      "END": "0x5bf2"
+    },
+    "guard_in_build": true
+  },
+  "tests": {
+    "full_build_passed": true,
+    "build_log_sha256": "1988bbf91b5bdb423b34a5025151d39f74ae28ad12de41e4ed3af0d6bd7e4ca5",
+    "core32_regression_groups": 8,
+    "allocator_wrap_groups": 4,
+    "allocator_wrap_scenarios": 16,
+    "unzip_tests": 31,
+    "autoexec_menu_filter_passed": true,
+    "append_lba_cache_passed": true,
+    "f9_ini_editor_viewer_machine_suites_passed": true
+  },
+  "images": [
+    {
+      "case": "publish-spc1",
+      "passed": true,
+      "sectors_per_cluster": 1,
+      "fat_mode": "mirrored",
+      "before_sha256": "390594c0eac4665ae8746b6b468338a7982e4b71e5f4f390345c1cdc6bb88a2d",
+      "after_sha256": "1a0596d3d7f1ca18d983d6c01a247a5724b95d2f6e494cc6859657f8fa1613e0",
+      "compared_sectors": 98304,
+      "protected_objects": 55,
+      "protected_files": 52,
+      "changed_sector_categories": {
+        "FSInfo counters": 1,
+        "test FAT links": 142,
+        "test data/directories": 7402,
+        "free scratch before and after": 2
+      },
+      "unexpected_changes": 0,
+      "foreign_data_including_slack_records_and_chains_unchanged": true,
+      "runtime_matches_release": true,
+      "f9_save_editor_cycles": 5,
+      "editor_save_as": true,
+      "viewer": {
+        "vdac": false,
+        "file": "wc.ini",
+        "operations": [
+          "F3",
+          "Down",
+          "PgDn",
+          "HEX",
+          "F1",
+          "ESC"
+        ],
+        "passed": true
+      },
+      "zip": {
+        "passed": true,
+        "files": [
+          {
+            "file": "IS-DOS/IS-ASM.ZIP",
+            "size": 25091,
+            "sha256": "a2b7c387fd918e08fa8643011e7a085627642b22cc01251f03f63e8801434d10",
+            "clusters": 50
+          },
+          {
+            "file": "IS-DOS/ISDOS.ZIP",
+            "size": 3364010,
+            "sha256": "e16b5060c8e7eadc621e49627b7c3b6307e62f3ab94a62ffcc355a75d4c29298",
+            "clusters": 6571
+          },
+          {
+            "file": "IS-DOS/ISDOSFOR.SCL",
+            "size": 14903,
+            "sha256": "fced742444eb0a1f10aef5c611362d8b1086ecde5d5feb56dd0525dc6eaac947",
+            "clusters": 30
+          },
+          {
+            "file": "IS-DOS/Miha Ulanov's IS-DOS.rar",
+            "size": 94249,
+            "sha256": "717266e87c8be21bc0f875b4e293c69dd54467d617eca29205e5c18574916c6f",
+            "clusters": 185
+          }
+        ],
+        "ini_size": 569,
+        "ini_version": "Wild Commander v1.10i",
+        "ini_no_nul": true
+      },
+      "core32t_inspection_passed": true
+    },
+    {
+      "case": "publish-vdac-spc8",
+      "passed": true,
+      "sectors_per_cluster": 8,
+      "fat_mode": "active1",
+      "before_sha256": "cad8ba441b7351f9c9b8a4b6bf518c3f9b10a4f04babd0fd67a9136bab7543de",
+      "after_sha256": "ade3e8f96ec851d34c798be628de9ef6dbff71eaace4f5d98b1220bfe359ff82",
+      "compared_sectors": 600000,
+      "protected_objects": 55,
+      "protected_files": 52,
+      "changed_sector_categories": {
+        "FSInfo counters": 1,
+        "test FAT links": 12,
+        "test data/directories": 7406,
+        "free scratch before and after": 2
+      },
+      "unexpected_changes": 0,
+      "foreign_data_including_slack_records_and_chains_unchanged": true,
+      "runtime_matches_release": true,
+      "f9_save_editor_cycles": 5,
+      "editor_save_as": true,
+      "viewer": {
+        "vdac": true,
+        "file": "wc.ini",
+        "operations": [
+          "F3",
+          "Down",
+          "PgDn",
+          "HEX",
+          "F1",
+          "ESC"
+        ],
+        "passed": true
+      },
+      "zip": {
+        "passed": true,
+        "files": [
+          {
+            "file": "IS-DOS/IS-ASM.ZIP",
+            "size": 25091,
+            "sha256": "a2b7c387fd918e08fa8643011e7a085627642b22cc01251f03f63e8801434d10",
+            "clusters": 7
+          },
+          {
+            "file": "IS-DOS/ISDOS.ZIP",
+            "size": 3364010,
+            "sha256": "e16b5060c8e7eadc621e49627b7c3b6307e62f3ab94a62ffcc355a75d4c29298",
+            "clusters": 822
+          },
+          {
+            "file": "IS-DOS/ISDOSFOR.SCL",
+            "size": 14903,
+            "sha256": "fced742444eb0a1f10aef5c611362d8b1086ecde5d5feb56dd0525dc6eaac947",
+            "clusters": 4
+          },
+          {
+            "file": "IS-DOS/Miha Ulanov's IS-DOS.rar",
+            "size": 94249,
+            "sha256": "717266e87c8be21bc0f875b4e293c69dd54467d617eca29205e5c18574916c6f",
+            "clusters": 24
+          }
+        ],
+        "ini_size": 570,
+        "ini_version": "Wild Commander v1.10i",
+        "ini_no_nul": true
+      },
+      "core32t_inspection_passed": true
+    }
+  ],
+  "physical_zx_evolution_tested": false,
+  "validation_scope": "Built Z80 machine code, isolated Unreal runs, read-only full image comparisons; no physical card writes or physical hardware acceptance.",
+  "zip_input": {
+    "name": "is-dos.zip",
+    "bytes": 3485057,
+    "sha256": "776828e9ec8d5e89c25ecdb138660e85e307df5140f9a7d42160957af4f9e547"
+  }
+}

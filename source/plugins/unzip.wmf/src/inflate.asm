@@ -284,6 +284,9 @@ inf_getbits:
                 ret
 
 ; Следующий целый байт входа (для блоков без сжатия, когда резервуар пуст).
+; Сохраняет BC: inf_stored держит в C младший байт NLEN, пока читает старший.
+; Если эти байты разделены границей входного окна, in_more портит BC; без
+; сохранения корректный блок ошибочно отвергается проверкой LEN/NLEN.
 inf_inbyte:
                 ld a,(in_end)
                 cp ixl
@@ -293,7 +296,9 @@ inf_inbyte:
                 jr nz,.have
                 push hl
                 push de
+                push bc
                 call in_more
+                pop bc
                 pop de
                 pop hl
                 jp c,inf_fail           ; здесь нехватка — уже ошибка
