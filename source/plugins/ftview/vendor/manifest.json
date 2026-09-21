@@ -1,0 +1,22 @@
+{
+  "source": "pentevo/sdk/ft812sdk/lib and pentevo/esp32/src/main/esp_spi_defs.h",
+  "files": {
+    "sdk/defs.h": "f0de9ac32e473a2df66bb9641658a4ba9b66a474961e51201039a67f694133db",
+    "sdk/sdklib.h": "78cac1b35097e516a2ca1c5e7a9918719c25c404d63f3728be156c2e92712c9f",
+    "sdk/sdk.lib": "f7f778d3fb74a12d587cecf5dec0a1769936900d754a0165764c60b9a56f626e",
+    "sdk/func.c": "c74ddd2207576cf0aedf144d7bf5c97002d52b2e74c0217686f470ce276a46db",
+    "tsconf/ts.h": "334f7d5ef5d45ef06a8bf2b3ccfc624fb1da86b1424792761e347ffc72bc6c69",
+    "tsconf/tslib.h": "ed077b0121ed0eaa1b4efd6d4d21d1853969a4d5afb38fc5bb65adff3367c524",
+    "tsconf/ts.lib": "12f5ee166393eb426ff044b66d7adfe6c422c1e478b505adb34e36a9039154f0",
+    "tsconf/tsfunc.c": "2057a6bc761fbcc35303fdd8d262b785e577592ae2934879c946c77e16de8adb",
+    "ft812/ft812.h": "f500b354711e5494bb520521e8ed251d4687cf0be62cbf7c3ca48bd0f79b0b21",
+    "ft812/ft812lib.h": "839dfcdb4a71a8458c504b2bc53160c92f074de65d1273179f8ab7d6818c7129",
+    "ft812/ft812.lib": "6637394ce5829ad3b20fb22052e421888bceaa8a586980afa66e83777e670fb3",
+    "ft812/ft812cp.c": "b5328ca93192837ff4c3bb60faf287f1175c91f2e081576280f3020b63879b06",
+    "ft812/ft812dl.c": "1cfdb49efb3b2ca1c17ab581f255d2dc5a4c38d4b31b9288409b1a5e1e405dba",
+    "ft812/ft812func.c": "2a483cfce2dd259a214d55737fa11387fd317f1665d48a847d2a96494dce3a01",
+    "ft812/ft812math.c": "89a3d366634f1d1d9eff7a1c0c7dacfcb77e80d70f31cdb498f720fd93505fc8",
+    "esp32/esp32.c": "00485e280b451f117439427c9a367c10c60daf07c41195b7f24e8977803e3445",
+    "esp32/esp_spi_defs.h": "f6d2c0d19b08decdc87ffa8e6ac1fee5592d7d351c3dfb02f3770515d28a33b5"
+  }
+}

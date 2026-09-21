@@ -8,10 +8,10 @@ static const WC_HDR hdr =
   /* +16 Magic string        */   {'W', 'i', 'l', 'd', 'C', 'o', 'm', 'm', 'a', 'n', 'd', 'e', 'r', 'M', 'D', 'L'},
   /* +32 Format version      */   7,
   /* +33 -reserved-          */   "",
-  /* +34 Number of pages     */   1,
+  /* +34 Number of pages     */   10, // два банка кода и восемь страниц буфера EVO
   /* +35 Page at 0x8000      */   0,
   /* +36 Page definitions    */   {
-  /*  +0 Page, +1 NBlocks    */     {0, N_BLK0}
+  /*  +0 Page, +1 NBlocks    */     {0, N_BLK0}, {9, N_BLK9}, {1, 0}
   /*                         */   },
   /* +48 -reserved-          */   "",
   /* +64 Extensions          */   {

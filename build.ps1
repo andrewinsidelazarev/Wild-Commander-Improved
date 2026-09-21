@@ -383,6 +383,21 @@ if (-not (Test-Path -LiteralPath $UnzipOutput -PathType Leaf)) {
 # WPLAYER поставляется из побайтово проверенного эталона. Восстановленный
 # исходник пока не воспроизводит этот бинарник и в runtime не собирается.
 
+# FTView собирается из локальных исходников и проверенного vendor SDK.
+# Проверки исполняют собранный Z80-код, сверяют поток DMA и границы страниц.
+# Только после их успеха ниже заменяется runtime; эталон его не перезаписывает.
+$FtViewProject = Join-Path $ProjectRoot 'source\plugins\ftview'
+$FtViewBuild = Join-Path $BuildDir 'ftview'
+$FtViewOutput = Join-Path $FtViewBuild 'FTVIEW.WMF'
+& python (Join-Path $FtViewProject 'build.py') --out $FtViewBuild
+if ($LASTEXITCODE -ne 0) { throw 'FTVIEW.WMF build failed.' }
+& python (Join-Path $FtViewProject 'tests\test_ftview.py') --out $FtViewBuild
+if ($LASTEXITCODE -ne 0) { throw 'FTView Z80/DMA regression tests failed.' }
+# Звук AVI на General Sound: код плагина вместе с ПЗУ GS и драйвером.
+# Без образа ПЗУ GS (Unreal rom/gs105a.rom) тесты пропускаются.
+& python (Join-Path $FtViewProject 'tests\test_gs.py') --out $FtViewBuild
+if ($LASTEXITCODE -ne 0) { throw 'FTView General Sound tests failed.' }
+
 # Codex - 2026-07-16 - begin
 $MainSourceAscii = "$ProjectRootAscii/source/BOOT.ASM"
 $PayloadAscii = "$ProjectRootAscii/Build/boot.payload.bin"
@@ -517,7 +532,7 @@ if ($LASTEXITCODE -ne 0) { throw 'MKSG wrap/count/data preservation tests failed
 $ProjectOwnedRuntime = @(
     'boot.$C', 'WC_History.txt', 'WC_todo.txt',
     'WC\TXTEDIT.WMF', 'WC\TXTVIEW.WMF', 'WC\TXTVIEW2.WMF', 'WC\TXTVIEW2.LIC',
-    'WC\UNZIP.WMF', 'WC\CHKDSK.WMF'
+    'WC\UNZIP.WMF', 'WC\CHKDSK.WMF', 'WC\FTVIEW.WMF'
 )
 # Старое имя встречается только в эталоне. Не возвращаем второй просмотрщик
 # в runtime при каждой сборке после переименования в TXTVIEW.WMF.
@@ -541,6 +556,8 @@ if ($LASTEXITCODE -ne 0) { throw 'FILEX runtime installation failed.' }
 
 $TxtEditRuntime = Join-Path $ExeDir 'WC\TXTEDIT.WMF'
 [IO.File]::Copy($TxtEditOutput, $TxtEditRuntime, $true)
+[IO.File]::Copy($FtViewOutput, (Join-Path $ExeDir 'WC\FTVIEW.WMF'), $true)
+[IO.File]::Copy($FtViewOutput, (Join-Path $FtViewProject 'ftview.wmf'), $true)
 [IO.File]::Copy($TxtHexOutput, (Join-Path $ExeDir 'WC\TXTVIEW.WMF'), $true)
 [IO.File]::Copy($TxtHexVdac2Output, (Join-Path $ExeDir 'WC\TXTVIEW2.WMF'), $true)
 [IO.File]::Copy((Join-Path $TxtHexVdac2Project 'fonts\OFL.txt'),
@@ -604,7 +621,7 @@ if ($HashExitCode -ne 0) {
         'boot.$C', 'WC_History.txt', 'WC_todo.txt',
         'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/RE.WMF', 'WC/TXTVIEW.WMF',
         'WC/TXTVIEW2.WMF', 'WC/TXTVIEW2.LIC', 'WC/UNZIP.WMF',
-        'WC/CHKDSK.WMF', 'WC/wc.ini'
+        'WC/CHKDSK.WMF', 'WC/FTVIEW.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -628,7 +645,7 @@ if ($HashExitCode -ne 0) {
             throw "Unexpected audit status for $($Mismatch.path): $($Mismatch.status)"
         }
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.

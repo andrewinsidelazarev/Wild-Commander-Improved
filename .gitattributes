@@ -1,2 +1,5 @@
 # История релиза должна оставаться текстом: Git хранит LF, Windows выдаёт CRLF.
 exe/WC_History.txt text eol=crlf
+# Копия SDK для FTView сверяется build.py по SHA-256 из manifest.json:
+# байты хранятся без преобразования концов строк.
+source/plugins/ftview/vendor/** -text
