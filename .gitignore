@@ -1,2 +1,4 @@
 # Карантин не публикуется.
 /source/to delete/
+# Сборка FTViewConvert: exe ~105 МБ (больше предела GitHub) и архив ffmpeg.
+/Build/ftview-convert/
