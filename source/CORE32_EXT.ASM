@@ -153,8 +153,14 @@ STREAM_NEXT_CLUSTER:
 ; прежний адрес NW0, а не безусловно RDDSE. Флаги/A/HL результата LOAD512
 ; сохраняются.
 STREAM_WITH_HANDLER:
-        LD BC,(@WDOS.NW0+1)
-        PUSH BC
+; Claude - 2026-09-21 - begin
+        ; B — число блоков для LOAD512: прежний LD BC,(NW0+1) заменял его
+        ; старшим байтом адреса обработчика, и LOADNON/LOAD256 проходили не
+        ; B блоков, а ~#51. Прежний обработчик сохраняем через HL (те же 5 байт).
+        PUSH HL
+        LD HL,(@WDOS.NW0+1)
+        EX (SP),HL
+; Claude - 2026-09-21 - end
         LD (@WDOS.NW0+1),DE
         CALL @WDOS.LOAD512
         POP DE

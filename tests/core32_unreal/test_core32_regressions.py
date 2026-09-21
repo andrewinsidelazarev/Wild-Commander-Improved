@@ -196,5 +196,31 @@ class FilesystemTests(unittest.TestCase):
         self.assertFalse(visited)
 
 
+class StreamHandlerTests(unittest.TestCase):
+    # LOADNON (API 61) и LOAD256 (API 60) идут через STREAM_WITH_HANDLER: он
+    # ставит обработчик DE в NW0, зовёт LOAD512 и возвращает прежний. Прежний
+    # код сохранял обработчик через BC и затирал число блоков B старшим байтом
+    # адреса SAFE_RDDSE (#51): вызов проходил ~81 блок вместо B.
+    def test_block_count_buffer_and_previous_handler_preserved(self):
+        core = lambda name: p.BOOT['WDOS.' + name]
+        for blocks in (1, 2, 255):
+            with self.subTest(blocks=blocks):
+                cpu = p.base()
+                previous = p.h.get16(cpu.memory, core('NW0') + 1)
+                seen = []
+
+                def load512(machine):
+                    seen.append((machine.b, machine.hl, p.h.get16(machine.memory, core('NW0') + 1)))
+                    machine.a, machine.hl = 0x0F, 0x9E00
+                    p.ret(machine)
+
+                cpu.bc, cpu.de, cpu.hl = blocks << 8 | 0x3C, core('Z0'), 0x8000
+                p.run(cpu, p.EXT['WDOS_EXT.STREAM_WITH_HANDLER'], {core('LOAD512'): load512})
+                self.assertEqual(seen, [(blocks, 0x8000, core('Z0'))])
+                self.assertEqual(p.h.get16(cpu.memory, core('NW0') + 1), previous)
+                # Результат LOAD512 (A, HL) доходит до вызывающего.
+                self.assertEqual((cpu.a, cpu.hl), (0x0F, 0x9E00))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
