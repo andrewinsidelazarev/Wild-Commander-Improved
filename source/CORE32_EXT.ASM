@@ -144,9 +144,17 @@ GATE_FINISH:
 ; Перейти по FAT из потокового LOAD512/SAVE512. После отказа CURIT HL
 ; больше не является указателем на FAT-запись: GIPAG вызывать запрещено.
 ; Общая ошибка выставляет ABT/EOC и CF, как остальные повреждённые ссылки.
+; Claude - 2026-09-21 - begin
+; Сюда LOAD512 приходит только при промахе кэша STREAM_NEXT_CACHED. Удачно
+; прочитанный CURIT сектор помечается признаком FATTAG текущего поколения FAT:
+; следующие переходы в пределах этого сектора обходятся без чтения и шлюзов.
+; Claude - 2026-09-21 - end
 STREAM_NEXT_CLUSTER:
         CALL @WDOS.CURIT
         JP C,FAT_LINK_ERROR
+; Claude - 2026-09-21 - begin
+        CALL @WDOS.FAT_CACHE_TAG        ; HL (запись в SECBU) сохраняется
+; Claude - 2026-09-21 - end
         JP @WDOS.GIPAG
 
 ; Вызвать общий потоковый код с временным обработчиком DE и восстановить именно
@@ -1406,6 +1414,11 @@ FAT_SECTOR_IN_RANGE:
 ; Записать текущий SECBU/LSTSE в корректные копии FAT. При обычном режиме —
 ; во все BFATS, при BPB_ExtFlags.bit7 — только в выбранную активную FAT.
 SAVE_FAT_SECTOR:
+; Claude - 2026-09-21 - begin
+        ; FAT меняется: кэш сектора FAT всех страниц недействителен. Сброс до
+        ; записи, чтобы и частично неудачная запись не оставила старый кэш.
+        CALL @WDOS.FAT_CACHE_BUMP       ; разрушает HL, B, флаги
+; Claude - 2026-09-21 - end
         LD A,(@WDOS.FATFLAGS)
         BIT 7,A:JR Z,.mirrored
         AND #0F

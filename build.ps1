@@ -525,6 +525,22 @@ if ($LASTEXITCODE -ne 0) { throw 'CORE32 boundary/gate/rollback regressions fail
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_allocator_wrap.py')
 if ($LASTEXITCODE -ne 0) { throw 'MKSG wrap/count/data preservation tests failed.' }
 
+# Claude - 2026-09-21 - begin
+# Кэш сектора FAT потока LOAD512/SAVE512/LOADNON: те же данные и флаги, что
+# модель цепочки, одно чтение на сектор FAT и сброс кэша записью FAT с
+# клона страницы, CURIT, DEVINI, DOS_SWP, HDD и NXTINI; цикл UCHN и DELEN.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_fat_stream_cache.py')
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 FAT stream cache tests failed.' }
+# Claude - 2026-09-21 - end
+
+# Claude - 2026-09-22 - begin
+# Перезапись существующего файла (DELETE, MKFILE, APPEND) — путь плагина FTP:
+# одна живая запись в каталоге, новая цепочка и содержимое, отсутствие
+# потерянных кластеров и чтение новых данных через кэш сектора FAT.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_overwrite_path.py')
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 file overwrite path tests failed.' }
+# Claude - 2026-09-22 - end
+
 # Плагины, меню и конфигурация — готовые runtime-файлы.
 # boot.$C собирается выше, а WC_History.txt и WC_todo.txt ведутся самим
 # Improved; остальные неизменяемые файлы берутся из локального эталона.

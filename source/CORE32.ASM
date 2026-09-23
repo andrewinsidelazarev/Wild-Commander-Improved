@@ -218,21 +218,16 @@ LNPARS  LD A,(HL)
         CP C:JR NZ,SNM3:INC C
 
         INC L
- DUP 5
-         CALL UCH:JR NC,SNMX
- EDUP
- DUP 3
-         INC L
- EDUP
- DUP 6
-         CALL UCH:JR NC,SNMX
- EDUP
- DUP 2
-         INC L
- EDUP
- DUP 2
-         CALL UCH:JR NC,SNMX
- EDUP
+; Claude - 2026-09-21 - begin
+        ; 13 символов записи LFN: 5, пропуск атрибута/типа/суммы, 6, пропуск
+        ; кластера, 2. Прежние 13 развёрнутых CALL UCH заменены циклом UCHN:
+        ; освобождённые 32 байта занимает проверка кэша FAT перед GENTRY.
+        LD B,5:CALL UCHN:JR NC,SNMX
+        INC L:INC L:INC L
+        LD B,6:CALL UCHN:JR NC,SNMX
+        INC L:INC L
+        LD B,2:CALL UCHN:JR NC,SNMX
+; Claude - 2026-09-21 - end
         DEC L
 
         LD A,C:CP #40:JR NC,NXLEXI
@@ -240,6 +235,19 @@ LNPARS  LD A,(HL)
         OR A:LD C,64-1:SBC HL,BC
         LD C,A:JR C,SNM3
         JR LNPARS
+; Claude - 2026-09-21 - begin
+; UCHN — принять B символов UTF-16 подряд через UCH (HL — младший байт
+; очередного символа, DE — выход). Выход: CF=1 — все B символов приняты;
+; CF=0 — отказ UCH с его же Z/NZ (Z — несовпадение, NZ — конец имени), как
+; ждёт SNMX. B=0 на обоих выходах: ниже BC служит смещением при B=0.
+UCHN    CALL UCH:JR NC,UCHN_STOP
+        DJNZ UCHN
+        SCF
+        RET
+UCHN_STOP:
+        LD B,0
+        RET
+; Claude - 2026-09-21 - end
 
 NXLEXI  XOR A:LD (DE),A:INC DE
         LD HL,(CGHL)
@@ -270,6 +278,10 @@ SNM_    DEC DE:LD A,(DE)
 ; Codex - 2026-09-08 - begin
 ; Три одинаковых преобразования сведены в цикл. Освободившийся участок вместе
 ; с прежними четырьмя NOP хранит обработчик ошибки поиска; SNMD не сдвигается.
+; Claude - 2026-09-21 - begin
+; С 2026-09-21 весь участок NXLEXI..NXTINI сдвинут на 32 байта вниз циклом
+; UCHN в LNPARS; внешних ссылок на эти адреса нет, GENTRY и далее на месте.
+; Claude - 2026-09-21 - end
 SFN_EXTENSION_START:
         LD B,3
 SFN_EXTENSION_CHAR:
@@ -344,7 +356,14 @@ LNCRC   XOR A
          RRCA:ADD A,(HL):INC L
  EDUP
         RET
-NXTINI  LD HL,1
+NXTINI
+; Claude - 2026-09-21 - begin
+        ; Новое перечисление каталога (выбор каталога, обновление панелей после
+        ; плагина) снимает кэш FAT всех страниц. Это страховка от плагинов,
+        ; которые пишут FAT мимо SAVE_FAT_SECTOR прямыми вызовами драйвера.
+        CALL FAT_CACHE_BUMP
+; Claude - 2026-09-21 - end
+        LD HL,1
         LD (CGFL),HL
 
         LD HL,LSTCAT:CALL GIPAG
@@ -354,6 +373,45 @@ NXTINI  LD HL,1
         LD (HL),0
         RET
 
+; Claude - 2026-09-21 - begin
+; STREAM_CACHE_GEN — вторая половина проверки кэша сектора FAT (первая —
+; STREAM_CACHE_SECTOR): признак страницы FATTAG равен текущему поколению
+; FAT_CACHE_GENERATION, то есть после чтения сектора потоком FAT никто не
+; писал, том и драйвер не менялись.
+; Вход: A — номер записи в секторе FAT (0..127). Выход: Z — кэш действителен,
+; HL = SECBU+4*A (адрес записи, как у CURIT); NZ — перечитать сектор.
+; Разрушает BC, DE; при Z флаг CF=0.
+STREAM_CACHE_GEN:
+        LD C,A
+        LD HL,FAT_CACHE_GENERATION
+        LD DE,FATTAG
+        LD B,4
+STREAM_CACHE_GEN_BYTE:
+        LD A,(DE)
+        CP (HL)
+        RET NZ
+        INC HL
+        INC DE
+        DJNZ STREAM_CACHE_GEN_BYTE
+        ; Адрес записи = (SECBU/1024*256+A)*4, поэтому SECBU кратен 1024.
+        ASSERT SECBU % 1024 == 0, SECBU должен быть кратен 1024
+        LD L,C
+        LD H,SECBU/1024
+        ADD HL,HL
+        ADD HL,HL
+        RET
+
+; DEVINI_INVALIDATE — вход +#03 таблицы START. DEVINI драйверов IDE Nemo/SMUC
+; читает IDENTIFY прямо в #3000 (SECBU), поэтому кэш FAT сбрасывается до
+; вызова драйвера. Входных регистров у DEVINI нет.
+DEVINI_INVALIDATE:
+        CALL FAT_CACHE_BUMP
+        JP DEVINI
+        ; GENTRY/TENTRY/APPEND/Z0 и следующие входы остаются на прежних адресах.
+        ASSERT $ <= #4350, проверка кэша FAT не помещается перед GENTRY
+        DS #4350-$,0
+        ASSERT $ == #4350, сдвинулся GENTRY
+; Claude - 2026-09-21 - end
 GENTRY
 ; Codex - 2026-07-17 - begin
         ; Три компактных шлюза занимают исходные 17 байт GENTRY/TENTRY и
@@ -505,12 +563,19 @@ LOAD512_IO_OK:
 ; Codex - 2026-07-17 - end
 
         LD HL,(CUHL),DE,(CUDE)
-; Codex - 2026-07-17 - begin
-        ; Расширение проверяет CF от CURIT до разыменования записи в GIPAG.
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_NEXT_CLUSTER
+; Claude - 2026-09-21 - begin
+        ; Переход к следующему кластеру: сначала кэш сектора FAT в SECBU этой
+        ; страницы, при промахе — прежний путь расширения, где CF от CURIT
+        ; проверяется до разыменования записи в GIPAG.
+        CALL STREAM_NEXT_CACHED
+; Claude - 2026-09-21 - end
         JR Z,NXTC
-; Codex - 2026-07-17 - end
         RET
+; Claude - 2026-09-21 - begin
+        ; SRHFCL остаётся на прежнем адресе: на него ссылается FILEX.WMF.
+        DS 1,0
+        ASSERT $ == #4449, сдвинулся SRHFCL
+; Claude - 2026-09-21 - end
 
 SRHFCL  LD HL,FSTFRC,DE,CAHL,BC,4:LDIR
 ; Codex - 2026-07-16 - begin
@@ -534,22 +599,16 @@ FC      CALL_WDOS_EXTENSION WDOS_EXT.ID_CHECK_FREE_SCAN_LIMIT
 
         EX DE,HL
         LD HL,CAHL
-; Codex - 2026-07-17 - begin
-        INC (HL):JR NZ,AGA:INC HL
-; Codex - 2026-07-17 - end
-        INC (HL):JR NZ,AGA:INC HL
-        INC (HL):JR NZ,AGA:INC HL
-        INC (HL)
-AGA     EX DE,HL
-; Codex - 2026-07-17 - begin
+; Claude - 2026-09-21 - begin
+        ; Тот же 32-битный инкремент CADE:CAHL, что и в GETZE. B и DE здесь
+        ; не живут: CHECK_FREE_SCAN_LIMIT на каждом шаге FC и так их разрушает.
+        CALL INC4b
+        EX DE,HL
         LD A,H:CP high SECBE:JR C,FC
-; Codex - 2026-07-17 - end
-
-; Codex - 2026-07-16 - begin
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_NEXT_FREE_FAT_SECTOR
-        RET C
-; Codex - 2026-07-16 - end
-        JP FC
+        ; SRHFC — ровно прежний хвост: переход к следующему сектору FAT с
+        ; проверкой границы и wrap (NEXT_FREE_FAT_SECTOR), RET C, затем FC.
+        JR SRHFC
+; Claude - 2026-09-21 - end
 GETZE   EXX
         LD HL,(CAHL),DE,(CADE)
         PUSH HL:LD HL,CAHL:CALL INC4b
@@ -557,11 +616,42 @@ GETZE   EXX
         XOR A
         RET
 
+; Claude - 2026-09-21 - begin
+; STREAM_NEXT_CACHED — переход потока LOAD512/SAVE512 (и LOADNON/LOAD256) к
+; следующему кластеру цепочки. Вход: DE:HL — текущий кластер (CUHL/CUDE).
+; Выход как у GIPAG: Z — следующий кластер установлен; NZ/CF=0 — EOC (#0F);
+; CF=1 — ошибка FAT/носителя (ABT/EOC выставлены).
+; Попадание: SECBU этой страницы уже хранит сектор FAT этого кластера (LSTSE)
+; и FATTAG совпадает с поколением FAT. Тогда нет ни чтения сектора, ни трёх
+; шлюзов CURIT; GIPAG получает ту же запись в SECBU, что вернул бы CURIT.
+; Промах: прежний STREAM_NEXT_CLUSTER (CURIT с чтением, проверка CF, пометка
+; FAT_CACHE_TAG, GIPAG).
+STREAM_NEXT_CACHED:
+        PUSH DE
+        PUSH HL
+        CALL STREAM_CACHE_SECTOR
+        CALL Z,STREAM_CACHE_GEN
+        JR NZ,STREAM_NEXT_MISS
+        POP BC
+        POP BC
+        JP GIPAG
+STREAM_NEXT_MISS:
+        POP HL
+        POP DE
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_NEXT_CLUSTER
+        RET
+; Claude - 2026-09-21 - end
+
 ; CURIT — найти 32-битную FAT32-запись заданного кластера.
 ; Вход: DE:HL — номер кластера. Выход при успехе: CF=0, HL указывает на его
 ; четырёхбайтовую запись внутри SECBU; при выходе за BFTSZ возвращается CF=1.
 ; Побочные эффекты: вычисляет относительный сектор FAT в LSTSE, переводит его
 ; в абсолютный LBA через SFAT/ADDTOP и читает один сектор в SECBU.
+; Claude - 2026-09-21 - begin
+; CURIT по-прежнему читает сектор при каждом вызове; кэшем SECBU пользуется
+; только переход потока STREAM_NEXT_CACHED. Сам CURIT снимает признак кэша
+; FATTAG страницы, поэтому правки SECBU после него кэшу не видны.
+; Claude - 2026-09-21 - end
 ; Вход CURIT зафиксирован: на #44A5 ссылаются внешние плагины и заголовок
 ; этого файла. Изменения выше (потоковый переход по FAT, голова SRHFC)
 ; поглощаются добивкой, как это сделано перед SNCEN.
@@ -570,7 +660,12 @@ GETZE   EXX
         ASSERT $ == #44A5, сдвинулся фиксированный вход CURIT
 CURIT
 
-        CALL DEL128
+; Claude - 2026-09-21 - begin
+        ; Любой вызов CURIT снимает признак кэша FAT страницы до того, как ниже
+        ; изменятся LSTSE и SECBU: вызывающий код вправе править запись в SECBU.
+        ; Поток после удачного чтения снова помечает сектор (FAT_CACHE_TAG).
+        CALL CURIT_INVALIDATE           ; FATTAG недействителен, затем DEL128
+; Claude - 2026-09-21 - end
  DUP 2
          SLA C:RL B
  EDUP
@@ -928,6 +1023,16 @@ FIND_ALIAS:
         LD (HL),0
         LD (CGDE),HL
         JP FNDSN
+; Claude - 2026-09-21 - begin
+; FAT_CACHE_GENERATION — поколение содержимого FAT, общее для всех файловых
+; страниц (лежит в окне #4000). FAT_CACHE_BUMP увеличивает его при записи FAT,
+; монтировании, смене и инициализации драйвера, начале чтения каталога.
+; Страница, чей FATTAG не совпадает, перечитывает сектор FAT. Начало с 1:
+; нулевой FATTAG свежей страницы (после DOS_SWP) никогда не совпадает, а
+; старший байт #FF (метка CURIT_INVALIDATE) недостижим.
+FAT_CACHE_GENERATION:
+        DB 1,0,0,0
+; Claude - 2026-09-21 - end
         ASSERT $ <= #481F, исправления имён не помещаются перед SNCEN
         DS #481F-$,0
         ASSERT $ == #481F, изменился фиксированный адрес SNCEN
@@ -1107,6 +1212,16 @@ LSTsr   CALL LSTSR
 
         XOR A:INC A
         RET
+
+; Claude - 2026-09-21 - begin
+; CURIT_INVALIDATE — первый шаг CURIT: снять признак кэша FAT текущей страницы
+; (FATTAG+3=#FF; у FAT_CACHE_GENERATION такого старшего байта не бывает) и
+; перейти в DEL128. A разрушается, как и прежде при DEL128.
+CURIT_INVALIDATE:
+        LD A,#FF
+        LD (FATTAG+3),A
+        JP DEL128
+; Claude - 2026-09-21 - end
 
 ; DLSG — освободить FAT-цепочку.
 ; Вход: HL указывает на четырёхбайтовый номер первого кластера.
@@ -1442,7 +1557,8 @@ Lyo     LD A,#F1:RET
 ; DELFL — удалить файл или каталог по имени.
 ; Вход: HL указывает на [флаг, имя, 0]. Выход: Z — запись не найдена;
 ; NZ — запись помечена #E5 и её кластерная цепочка освобождена.
-; Побочные эффекты: DELEN записывает сектор каталога через STAMP, FCTS получает
+; Побочные эффекты: DELEN записывает сектор каталога через расширение
+; DELETE_ENTRY_WITH_LFN (прежняя STAMP удалена), FCTS получает
 ; первый кластер удаляемого объекта, DLSG изменяет FAT. Проверка пустоты
 ; каталога здесь не выполняется и должна быть сделана вызывающим кодом.
 DELFL
@@ -1459,23 +1575,35 @@ DELEN   CALL SRHDRN:LD A,8:RET Z
 
 ; Codex - 2026-07-16 - begin
         CALL_WDOS_EXTENSION WDOS_EXT.ID_DELETE_ENTRY_WITH_LFN
-        JR NZ,DELEN_WRITE_ERROR
 ; Codex - 2026-07-16 - end
-        XOR A:INC A
+; Claude - 2026-09-21 - begin
+        ; DELETE_ENTRY_WITH_LFN завершается через WRITE_SECTORS: CF=1 ровно при
+        ; ошибке записи (NZ). Прежние ветки: успех A=1/NZ, ошибка A=0/Z, CF=0
+        ; в обоих случаях. Та же выдача на два байта короче.
+        CCF
+        SBC A,A
+        AND 1
         RET
-; Codex - 2026-07-16 - begin
-DELEN_WRITE_ERROR:
-        XOR A
-        RET
-; Codex - 2026-07-16 - end
-STAMP   PUSH HL
-        LD HL,(LLHL),DE,(LLHL+2)
-        CALL PROZ
-        POP HL
 
-; Codex - 2026-07-16 - begin
-        LD A,1:JP SAFE_SDDSE
-; Codex - 2026-07-16 - end
+; Прежняя STAMP здесь удалена: после переноса удаления SFN/LFN в расширение на
+; неё не осталось ни одной ссылки в ядре, расширении, FILEX и WC.
+; STREAM_CACHE_SECTOR — первая половина проверки кэша сектора FAT: SECBU этой
+; страницы хранит сектор FAT кластера DE:HL (LSTSE равен номеру сектора).
+; Вход: DE:HL — кластер. Выход: Z — совпадает, тогда CF=0; A — номер записи
+; в секторе (0..127). Разрушает BC, DE, HL и AF' (через DEL128, как CURIT).
+STREAM_CACHE_SECTOR:
+        CALL DEL128                     ; DE:HL=сектор, A=запись, CF=0
+        LD BC,(LSTSE)
+        SBC HL,BC
+        RET NZ
+        EX DE,HL
+        LD BC,(LSTSE+2)
+        SBC HL,BC
+        RET
+        ASSERT $ <= #4D13, проверка кэша FAT не помещается перед RENAME
+        DS #4D13-$,0
+        ASSERT $ == #4D13, сдвинулся фиксированный вход RENAME
+; Claude - 2026-09-21 - end
 ; RENAME — создать запись с новым именем и удалить старую.
 ; Вход: HL — [флаг, старое имя, 0], DE — новое имя с нулевым окончанием.
 ; Выход: NZ — переименование завершено; Z — старая запись не найдена либо
@@ -1774,7 +1902,12 @@ NER     OR A:JP NZ,FHDD
         LD (CGFL),HL
 
         CALL_WDOS_EXTENSION WDOS_EXT.ID_LOAD_FREE_HINT
-        DS 4,0
+; Claude - 2026-09-21 - begin
+        ; Смонтирован (возможно, другой) том: кэш FAT всех страниц недействителен.
+        ; Прежние четыре NOP заняты вызовом; размер HDD не изменился.
+        CALL FAT_CACHE_BUMP
+        NOP
+; Claude - 2026-09-21 - end
 
         CALL TOS
         RET
@@ -1807,7 +1940,9 @@ DRR     PUSH IX
 ; Расширение выполняет прежнюю распаковку и применяет проверенную runtime-
 ; заплатку только к SD-ZC. NOP сохраняет адреса GARY и четырёх packed-блоков.
         CALL_WDOS_EXTENSION WDOS_EXT.ID_UNPACK_DRIVER
-        CALL SELDEV
+; Claude - 2026-09-21 - begin
+        CALL SELDEV_INVALIDATE          ; сброс кэша FAT и прежний SELDEV(A)
+; Claude - 2026-09-21 - end
         NOP
 ; Codex - 2026-07-16 - end
         POP IX
@@ -1851,17 +1986,28 @@ L33t    SLA L:RL H,E,D
         SRL A:JR NC,L33t
         RET
 
-UMNOG
-        LD DE,HL
-        LD A,B,B,C,C,A:INC C
-        XOR A:DEC B:JR Z,ODN
-BSR     ADD HL,DE
-        DJNZ BSR
-ODN     LD B,A
-        DEC C
-        JR NZ,BSR
+; Claude - 2026-09-21 - begin
+; На месте прежней UMNOG: на неё не было ни одной ссылки в ядре, расширении,
+; FILEX и WC. Размер и адрес INC4b сохранены.
+; FAT_CACHE_TAG — пометить SECBU текущей страницы как кэш сектора LSTSE для
+; текущего поколения FAT. Вызывается расширением после удачного CURIT потока.
+; HL (указатель CURIT на запись) сохраняется, BC и DE разрушаются.
+FAT_CACHE_TAG:
+        PUSH HL
+        LD HL,FAT_CACHE_GENERATION
+        LD DE,FATTAG
+        LD BC,4
+        LDIR
+        POP HL
         RET
-
+        DB 0
+; FAT_CACHE_BUMP — сделать недействительным кэш FAT всех страниц сразу:
+; увеличить 32-битный FAT_CACHE_GENERATION (продолжение — INC4b).
+; Разрушает HL, B и флаги; A, C и DE сохраняются.
+FAT_CACHE_BUMP:
+        LD HL,FAT_CACHE_GENERATION
+        ASSERT $ == #5099, сдвинулся INC4b после FAT_CACHE_BUMP
+; Claude - 2026-09-21 - end
 INC4b   LD B,4
 EkE     INC (HL):RET NZ:INC HL:DJNZ EkE
         RET
@@ -2091,6 +2237,14 @@ EXTENSION_GATE_KEEP_DI:
         POP AF
 EXTENSION_GATE_RET_DI:
         RET
+; Claude - 2026-09-21 - begin
+; SELDEV_INVALIDATE — продолжение DOS_SWP после распаковки драйвера: носитель,
+; драйвер и VALS страницы другие, поэтому кэш FAT всех страниц сбрасывается
+; до SELDEV. A (выбор master/slave или слота SD) сохраняется FAT_CACHE_BUMP.
+SELDEV_INVALIDATE:
+        CALL FAT_CACHE_BUMP
+        JP SELDEV
+; Claude - 2026-09-21 - end
         ASSERT $ <= #5BEA, эпилог шлюза пересёк восстановление потока
         DS #5BEA-$,0
 ; Codex - 2026-07-16 - end
