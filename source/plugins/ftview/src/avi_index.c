@@ -14,36 +14,7 @@
 #define AVI_INDEX 0xD0000UL
 #define AVI_INDEX_MAX 5460
 
-// Общие поля AVI. В видеобанке это его рабочие переменные (см. макросы в
-// avi_controls.c); для far_call копия структуры кладётся в стек ядра, который
-// виден обоим банкам.
-typedef struct
-{
-  u8 op;              // AVI_OP_*
-  u8 ok;
-  u16 pcm_rate;
-  u32 movi_start;     // позиция после FOURCC 'movi'
-  u32 movi_end;       // конец LIST movi
-  u32 total, rate, scale, bytes, pcm_total;
-  u32 target;         // AVI_OP_SEEK: кадр назначения
-  u32 seek_pos, seek_frame, seek_audio;
-  u32 write;          // указатель записи media FIFO
-  u32 period;         // avih: микросекунд на кадр
-  u16 width, height;  // avih: размер кадра
-  u8 ulaw;            // звук µ-law (WAVEFORMAT 7): только звуковой блок FT812
-} AVI_SHARED;
-
-#define AVI_OP_SEEK 1     // точка входа для target (нули — с начала файла);
-                          // ok 2 — чтение idx1 сдвинуло позицию диска
-#define AVI_OP_HEADER 2   // заголовок в FIFO, поток на seek_pos
-#define AVI_OP_PROBE 3    // разбор заголовка: ok 1 — покадровый режим, 2 — сбой
-// Копия полей для банка изображений: свободный хвост первой страницы буфера.
-#define AVI_FAR ((AVI_SHARED*)0xFF00)
-
-// Раскладка RAM_G: слово результата декодера над двумя кадрами, кольцо PCM
-// FT812 с #C0000. Нужна и разбору заголовка в банке изображений.
-#define AVI_RESULT 0xDFFFCUL
-#define PCM_BASE 0xC0000UL
+#include "avi_shared.h"
 
 // Общие поля. В видеобанке — рабочие переменные плеера, в банке изображений —
 // копия для разбора заголовка. Имена полей — через макросы.
@@ -63,7 +34,15 @@ AVI_SHARED avi;
 #define avi_period avi.period
 #define avi_width avi.width
 #define avi_height avi.height
-#define avi_ulaw avi.ulaw
+
+// Начало текущего ролика: GIPAG по его первому кластеру. API 50 (GIPAGPL)
+// вернул бы поток к файлу, с которым WC запустил плагин, а после выбора в
+// списке (Enter) играет уже другой. Банк изображений получает кластер в
+// копии AVI_SHARED (far_entry).
+bool avi_rewind()
+{
+  return wc_gipag(&avi.cluster);
+}
 
 #ifndef FTVIEW_VIDEO_BANK
 
@@ -71,7 +50,7 @@ AVI_SHARED avi;
 u8 index_state;
 u16 index_step, index_count;
 
-// Пропуск секторов от начала файла (сразу после wc_rewind, на границе
+// Пропуск секторов от начала файла (сразу после avi_rewind, на границе
 // кластера). LOADNON ядра на каждый кластер заново читает сектор FAT (CURIT
 // без кэша): на файле 52 МБ с кластером 4 КиБ это 12 808 чтений SD, и первая
 // перемотка в Unreal шла ~30 с. Поэтому цепочку проходит сам плагин. CURIT
@@ -268,7 +247,7 @@ bool file_seek(u32 pos)
 {
   u16 skip = pos & 511;
   disk_moved = 1;
-  if (!wc_rewind() || !disk_skip(pos >> 9)) return false;
+  if (!avi_rewind() || !disk_skip(pos >> 9)) return false;
   header_left = filesize - (pos & ~511UL);
   header_pos = header_size = 0;
   while (skip--) header_byte();
@@ -293,10 +272,499 @@ u8 *idx_entry()
 // неглубокий, а здесь он глубже всего (перемотка -> чтение idx1 -> пропуск
 // секторов в ядре). ib_exit — шаг, на котором построение остановилось
 // (0 — таблица есть): после отказа его видно в памяти страницы.
-u32 ib_pos, ib_size, ib_n, ib_frame, ib_sample, ib_video, ib_audio, ib_base;
-u32 ib_entry[3], ib_sample_step, ib_pcm_total, ib_off, ib_len;
+// Раскладка — для ASM ниже: запись таблицы ib_entry — смещение чанка, затем
+// бегущие счётчики видеочанков и звуковых байтов (их не нужно копировать в
+// запись); смещение и длина чанка idx1 — рядом в ib_ol.
+u32 ib_pos, ib_size, ib_n, ib_frame, ib_sample, ib_base, ib_tmp;
+u32 ib_entry[3], ib_sample_step, ib_pcm_total, ib_ol[2];
 u16 ib_k, ib_count, ib_step, ib_rem, ib_sample_rem, ib_fps;
-u8 ib_tries, ib_exit;
+u8 ib_tries, ib_exit, ib_kind;
+#define ib_video ib_entry[1]
+#define ib_audio ib_entry[2]
+
+// Готовая таблица FTViewConvert — чанк JUNK между LIST movi и idx1 (другие
+// плееры JUNK пропускают): подпись "FTVIEWI1", шаг и число записей (u16),
+// побайтная копия полей AVI_SHARED от pcm_rate до pcm_total (30 байт: таблица
+// сделана именно для этого файла), два байта выравнивания и записи в формате
+// RAM_G. Записи поштучно проверяет index_seek, как и построенные по idx1.
+// Вход — ib_n: FOURCC чанка (не JUNK — сразу 0), ib_size — его размер, чтение
+// стоит на данных; 1 — таблица в RAM_G. Портит только ib_n и ib_ol
+// (построение по idx1 задаёт их заново). Отказ снимает view_failed: чтение за
+// концом оборванного файла не должно валить просмотр — тогда таблица строится
+// по idx1 или её нет. На ASM: на C с 32-битными статическими переменными
+// функция занимала 458 байт.
+// Шаги: подпись (подпрограмма 00050$ сравнивает B байтов потока с (HL));
+// шаг и число записей — в ib_n; 30 байт полей — с p+2 (IX = p, функции на C
+// его сохраняют); два байта выравнивания; шаг не 0, записей 1..AVI_INDEX_MAX;
+// ib_len = записи*12 (не больше 65520), чанк вмещает 44 + ib_len, файл не
+// обрывается раньше (header_left + остаток буфера); затем записи порциями
+// буфера чтения идут ft_write в RAM_G #D0000 + ib_off (SDK с ABI 0: n на
+// время вызова — в ib_off + 2). Комментариев внутри __asm нет: SDCC
+// переносит кириллицу в них как \U0000xxxx, и длинная строка роняет sdasz80.
+const u8 ix_magic[8] = {'F', 'T', 'V', 'I', 'E', 'W', 'I', '1'};
+bool index_embedded(AVI_SHARED *p) __naked
+{
+  p;
+  __asm
+    ld b, h
+    ld c, l
+    ld hl, (_ib_n)
+    ld de, #0x554A
+    or a
+    sbc hl, de
+    jr nz, 00091$
+    ld hl, (_ib_n + 2)
+    ld de, #0x4B4E
+    sbc hl, de
+    jr z, 00092$
+00091$:
+    xor a
+    ret
+00092$:
+    push ix
+    push bc
+    pop ix
+    ld hl, #_ix_magic
+    ld b, #8
+    call 00050$
+    jp nz, 00090$
+    ld hl, #_ib_n
+    ld b, #4
+00001$:
+    push hl
+    push bc
+    call _header_byte
+    pop bc
+    pop hl
+    ld (hl), a
+    inc hl
+    djnz 00001$
+    push ix
+    pop hl
+    inc hl
+    inc hl
+    ld b, #30
+    call 00050$
+    jp nz, 00090$
+    call _header_byte
+    call _header_byte
+    ld hl, (_ib_n)
+    ld a, h
+    or l
+    jp z, 00090$
+    ld hl, (_ib_n + 2)
+    ld a, h
+    or l
+    jp z, 00090$
+    ld de, #AVI_INDEX_MAX + 1
+    sbc hl, de
+    jp nc, 00090$
+    ld hl, (_ib_n + 2)
+    add hl, hl
+    add hl, hl
+    ld d, h
+    ld e, l
+    add hl, hl
+    add hl, de
+    ld (_ib_ol + 4), hl
+    ld de, #44
+    add hl, de
+    ld a, #0
+    adc a, a
+    ex de, hl
+    ld hl, (_ib_size)
+    sbc hl, de
+    ld e, a
+    ld d, #0
+    ld hl, (_ib_size + 2)
+    sbc hl, de
+    jp c, 00090$
+    ld hl, (_header_size)
+    ld de, (_header_pos)
+    or a
+    sbc hl, de
+    ld de, (_header_left)
+    add hl, de
+    jr c, 00005$
+    ld de, (_header_left + 2)
+    ld a, d
+    or e
+    jr nz, 00005$
+    ld de, (_ib_ol + 4)
+    sbc hl, de
+    jp c, 00090$
+00005$:
+    ld hl, #0
+    ld (_ib_ol), hl
+00010$:
+    ld hl, (_ib_ol + 4)
+    ld a, h
+    or l
+    jr z, 00020$
+    ld hl, (_header_pos)
+    ld de, (_header_size)
+    or a
+    sbc hl, de
+    jr nz, 00011$
+    call _header_byte
+    ld hl, (_header_pos)
+    dec hl
+    ld (_header_pos), hl
+00011$:
+    ld a, (_view_failed)
+    or a
+    jp nz, 00090$
+    ld hl, (_header_size)
+    ld de, (_header_pos)
+    sbc hl, de
+    ld de, (_ib_ol + 4)
+    push hl
+    sbc hl, de
+    pop hl
+    jr c, 00012$
+    ex de, hl
+00012$:
+    ld (_ib_ol + 2), hl
+    push hl
+    ld hl, #0x000D
+    push hl
+    ld hl, (_ib_ol)
+    push hl
+    ld hl, (_header_pos)
+    ld de, #_fs_buf
+    add hl, de
+    push hl
+    call _ft_write
+    ld hl, #8
+    add hl, sp
+    ld sp, hl
+    ld de, (_ib_ol + 2)
+    ld hl, (_header_pos)
+    add hl, de
+    ld (_header_pos), hl
+    ld hl, (_ib_ol)
+    add hl, de
+    ld (_ib_ol), hl
+    ld hl, (_ib_ol + 4)
+    or a
+    sbc hl, de
+    ld (_ib_ol + 4), hl
+    jr 00010$
+00020$:
+    ld hl, (_ib_n + 2)
+    ld (_index_count), hl
+    ld hl, (_ib_n)
+    ld (_index_step), hl
+    ld a, #1
+    ld (_index_state), a
+    xor a
+    ld (_ib_exit), a
+    inc a
+    pop ix
+    ret
+00090$:
+    xor a
+    ld (_view_failed), a
+    pop ix
+    ret
+00050$:
+    push hl
+    push bc
+    call _header_byte
+    pop bc
+    pop hl
+    cp (hl)
+    ret nz
+    inc hl
+    djnz 00050$
+    ret
+  __endasm;
+}
+
+// Проход idx1 (ib_n записей по 16 байт с текущей позиции чтения) — таблица
+// до ib_count записей. Для каждого чанка: смещение и длина — в ib_ol, вид
+// (ib_kind: 1 — видео "00dc"/"00db", 2 — звук "01wb", если он есть, 0 —
+// прочее); пока ничего не сосчитано, база смещений: от FOURCC 'movi', если
+// смещение меньше movi_start (так пишет ffmpeg), иначе абсолютные. Затем,
+// пока запись k нужна этому чанку (видео с номером не меньше кадра k*step
+// или звук, доходящий до сэмпла S(k)), — запись: base + смещение и бегущие
+// счётчики (ib_entry) в RAM_G #D0000 + k*12; k, кадр и S(k) растут (S — с
+// остатком от деления на fps, как в C-версии). Потом счётчик видеочанков +1
+// или звуковых байтов + длина. Выход — по концу idx1, числу записей, ошибке
+// чтения или Esc. Помощники: 00070$ — (HL)-1, 00075$ — (HL)+1, 00080$ —
+// CF = (HL) < (DE), 00090$ — (DE) += (HL); все над u32 в памяти. IX = p.
+// Было на C 1,3 КиБ; эталон — avigen.seek_table (IndexTests).
+void index_scan(AVI_SHARED *p) __naked
+{
+  p;
+  __asm
+    push ix
+    push hl
+    pop ix
+00001$:
+    ld hl, #_ib_n
+    ld a, (hl)
+    inc hl
+    or (hl)
+    inc hl
+    or (hl)
+    inc hl
+    or (hl)
+    jp z, 00099$
+    ld hl, #_ib_n
+    call 00070$
+    ld hl, (_ib_k)
+    ld de, (_ib_count)
+    or a
+    sbc hl, de
+    jp nc, 00099$
+    call _idx_entry
+    ld a, (_view_failed)
+    ld hl, #0x6004
+    or (hl)
+    jp nz, 00099$
+    push de
+    ld hl, #8
+    add hl, de
+    ld de, #_ib_ol
+    ld bc, #8
+    ldir
+    pop hl
+    ld c, #0
+    ld a, (hl)
+    cp #0x30
+    jr nz, 00010$
+    inc hl
+    ld a, (hl)
+    inc hl
+    cp #0x31
+    jr z, 00004$
+    cp #0x30
+    jr nz, 00010$
+    ld a, (hl)
+    cp #0x64
+    jr nz, 00010$
+    inc hl
+    ld a, (hl)
+    cp #0x63
+    jr z, 00003$
+    cp #0x62
+    jr nz, 00010$
+00003$:
+    inc c
+    jr 00010$
+00004$:
+    ld a, (hl)
+    cp #0x77
+    jr nz, 00010$
+    inc hl
+    ld a, (hl)
+    cp #0x62
+    jr nz, 00010$
+    ld hl, #_ib_pcm_total
+    ld a, (hl)
+    inc hl
+    or (hl)
+    inc hl
+    or (hl)
+    inc hl
+    or (hl)
+    jr z, 00010$
+    ld c, #2
+00010$:
+    ld a, c
+    ld (_ib_kind), a
+    ld hl, (_ib_k)
+    ld a, h
+    or l
+    jr nz, 00020$
+    ld hl, #_ib_entry + 4
+    ld b, #8
+00011$:
+    or (hl)
+    inc hl
+    djnz 00011$
+    jr nz, 00020$
+    push ix
+    pop de
+    ld hl, #4
+    add hl, de
+    push hl
+    ld de, #_ib_base
+    ld bc, #4
+    ldir
+    pop de
+    ld hl, #_ib_ol
+    call 00080$
+    ld hl, #_ib_base
+    jr c, 00012$
+    xor a
+    ld (hl), a
+    inc hl
+    ld (hl), a
+    inc hl
+    ld (hl), a
+    inc hl
+    ld (hl), a
+    jr 00020$
+00012$:
+    ld a, (hl)
+    sub #4
+    ld (hl), a
+    ld b, #3
+00013$:
+    inc hl
+    ld a, (hl)
+    sbc a, #0
+    ld (hl), a
+    djnz 00013$
+00020$:
+    ld hl, (_ib_k)
+    ld de, (_ib_count)
+    or a
+    sbc hl, de
+    jp nc, 00040$
+    ld a, (_ib_kind)
+    dec a
+    jr nz, 00022$
+    ld hl, #_ib_entry + 4
+    ld de, #_ib_frame
+    call 00080$
+    jp c, 00040$
+    jr 00030$
+00022$:
+    dec a
+    jp nz, 00040$
+    ld hl, #_ib_entry + 8
+    ld de, #_ib_tmp
+    ld bc, #4
+    ldir
+    ld hl, #_ib_ol + 4
+    ld de, #_ib_tmp
+    call 00090$
+    ld hl, #_ib_sample
+    ld de, #_ib_tmp
+    call 00080$
+    jp nc, 00040$
+00030$:
+    ld hl, #_ib_base
+    ld de, #_ib_entry
+    ld bc, #4
+    ldir
+    ld hl, #_ib_ol
+    ld de, #_ib_entry
+    call 00090$
+    ld hl, #12
+    push hl
+    ld hl, #0x000D
+    push hl
+    ld hl, (_ib_k)
+    add hl, hl
+    add hl, hl
+    ld d, h
+    ld e, l
+    add hl, hl
+    add hl, de
+    push hl
+    ld hl, #_ib_entry
+    push hl
+    call _ft_write
+    pop af
+    pop af
+    pop af
+    pop af
+    ld hl, (_ib_k)
+    inc hl
+    ld (_ib_k), hl
+    ld hl, (_ib_frame)
+    ld de, (_ib_step)
+    add hl, de
+    ld (_ib_frame), hl
+    jr nc, 00031$
+    ld hl, (_ib_frame + 2)
+    inc hl
+    ld (_ib_frame + 2), hl
+00031$:
+    ld hl, #_ib_sample_step
+    ld de, #_ib_sample
+    call 00090$
+    ld hl, (_ib_rem)
+    ld de, (_ib_sample_rem)
+    add hl, de
+    ld de, (_ib_fps)
+    or a
+    sbc hl, de
+    jr nc, 00032$
+    add hl, de
+    ld (_ib_rem), hl
+    jp 00020$
+00032$:
+    ld (_ib_rem), hl
+    ld hl, #_ib_sample
+    call 00075$
+    jp 00020$
+00040$:
+    ld a, (_ib_kind)
+    dec a
+    jr nz, 00041$
+    ld hl, #_ib_entry + 4
+    call 00075$
+    jp 00001$
+00041$:
+    dec a
+    jp nz, 00001$
+    ld hl, #_ib_ol + 4
+    ld de, #_ib_entry + 8
+    call 00090$
+    jp 00001$
+00099$:
+    pop ix
+    ret
+00070$:
+    ld b, #4
+    scf
+00071$:
+    ld a, (hl)
+    sbc a, #0
+    ld (hl), a
+    inc hl
+    ret nc
+    djnz 00071$
+    ret
+00075$:
+    ld b, #4
+00076$:
+    inc (hl)
+    ret nz
+    inc hl
+    djnz 00076$
+    ret
+00080$:
+    ld b, #4
+    or a
+00081$:
+    ld a, (de)
+    ld c, a
+    ld a, (hl)
+    sbc a, c
+    inc hl
+    inc de
+    djnz 00081$
+    ret
+00090$:
+    ld b, #4
+    or a
+00091$:
+    ld a, (de)
+    adc a, (hl)
+    ld (de), a
+    inc hl
+    inc de
+    djnz 00091$
+    ret
+  __endasm;
+}
+
 void index_build(AVI_SHARED *p)
 {
   ib_frame = ib_sample = ib_video = ib_audio = ib_base = ib_sample_step = 0;
@@ -309,7 +777,8 @@ void index_build(AVI_SHARED *p)
   if (p->bytes > AVI_INDEX / 2 || p->movi_start > 0x10000UL ||
       (p->pcm_rate && (p->scale != 1 || !ib_fps))) return;
   ib_pcm_total = p->pcm_rate ? p->pcm_total : 0;
-  // idx1 обычно сразу за LIST movi; допускаем несколько чанков JUNK.
+  // idx1 обычно сразу за LIST movi; допускаем несколько чанков JUNK. Чанк JUNK
+  // с готовой таблицей FTViewConvert стоит перед idx1: тогда idx1 не нужен.
   ib_pos = p->movi_end + (p->movi_end & 1);
   ib_exit = 2;
   for (ib_tries = 0;; ++ib_tries)
@@ -318,6 +787,7 @@ void index_build(AVI_SHARED *p)
     ib_n = avi_word();
     ib_size = avi_word();
     if (ib_n == 0x31786469UL) break; // idx1
+    if (index_embedded(p)) return;   // JUNK с готовой таблицей
     ib_pos += 8 + ib_size + (ib_size & 1);
   }
   ib_exit = 3;
@@ -334,34 +804,8 @@ void index_build(AVI_SHARED *p)
     ib_sample_rem = ib_sample_step % ib_fps;
     ib_sample_step /= ib_fps;
   }
-  while (ib_n-- && ib_k < ib_count)
-  {
-    u8 *e = idx_entry();
-    bool is_video, is_audio;
-    if (view_failed || *(volatile u8*)_ABT) return;
-    memcpy(&ib_off, e + 8, 4);
-    memcpy(&ib_len, e + 12, 4);
-    // Смещения idx1 бывают от FOURCC 'movi' (так пишет ffmpeg) и абсолютные.
-    if (!ib_video && !ib_audio && !ib_k)
-      ib_base = ib_off < p->movi_start ? p->movi_start - 4 : 0;
-    is_video = e[0] == '0' && e[1] == '0' && e[2] == 'd' && (e[3] == 'c' || e[3] == 'b');
-    is_audio = ib_pcm_total && !memcmp(e, "01wb", 4);
-    while (ib_k < ib_count && ((is_video && ib_video >= ib_frame) ||
-                               (is_audio && ib_audio + ib_len > ib_sample)))
-    {
-      ib_entry[0] = ib_base + ib_off;
-      ib_entry[1] = ib_video;
-      ib_entry[2] = ib_audio;
-      ft_write(ib_entry, AVI_INDEX + (u32)ib_k * 12, 12);
-      ++ib_k;
-      ib_frame += ib_step;
-      ib_sample += ib_sample_step;
-      ib_rem += ib_sample_rem;
-      if (ib_rem >= ib_fps) { ib_rem -= ib_fps; ++ib_sample; }
-    }
-    if (is_video) ++ib_video;
-    if (is_audio) ib_audio += ib_len;
-  }
+  index_scan(p);
+  if (view_failed || *(volatile u8*)_ABT) return;
   // Кадры за обрезанным idx1 перематываются от последней записи.
   ib_exit = 5;
   if (!ib_k) return;
@@ -407,7 +851,7 @@ bool index_header(AVI_SHARED *p)
   u32 left = p->movi_start;
   u16 count;
   wc_map_buffer(1);
-  if (!wc_rewind()) return false;
+  if (!avi_rewind()) return false;
   while (left)
   {
     count = min(left, FS_BUF_SIZE);
@@ -426,7 +870,7 @@ bool index_header(AVI_SHARED *p)
   ft_wreg32(REG_MEDIAFIFO_WRITE, p->write);
   // Пропуск идёт от начала файла: проход цепочки начинается с границы
   // кластера, а заголовок мог закончиться посреди кластера.
-  return wc_rewind() && disk_skip(p->seek_pos >> 9);
+  return avi_rewind() && disk_skip(p->seek_pos >> 9);
 }
 
 u32 avi_position()
@@ -445,7 +889,7 @@ bool avi_probe()
   avi_period = avi_total = 0;
   avi_scale = avi_rate = 0;
   avi_width = avi_height = 0;
-  avi_pcm_rate = 0; avi_pcm_total = 0; avi_ulaw = 0;
+  avi_pcm_rate = 0; avi_pcm_total = 0;
   if (avi_word() != 0x46464952UL) return false; // RIFF
   size = avi_word();
   if (filesize < 12 || size < 4 || size > filesize - 8 ||
@@ -488,7 +932,10 @@ bool avi_probe()
     else if (id == 0x68727473UL && size >= 28) // strh
     {
       id = avi_word();
-      if (id == 0x73646976UL && avi_word() == 0x47504A4DUL) // vids/MJPG
+      // Регистр FOURCC не важен: mjpg — тот же MJPEG. Чужой кодек ловит
+      // видеобанк перед штатным воспроизведением (avi_mjpeg): разбор сюда
+      // доходит не всегда (например, у файла с обрезанным хвостом).
+      if (id == 0x73646976UL && (avi_word() | 0x20202020UL) == 0x67706A6DUL) // vids/MJPG
       {
         if (stream != 1) return false;
         video = 1;
@@ -510,13 +957,12 @@ bool avi_probe()
     }
     else if (id == 0x66727473UL && kind && size >= 16) // audio strf/WAVEFORMAT
     {
-      // PCM (1) — беззнаковые 8 бит; µ-law (7) — родной формат звукового
-      // блока FT812 с большим динамическим диапазоном: байты идут в FT812
-      // без пересчёта. Оба — моно, 8 бит, байт на сэмпл.
-      id = avi_word();
-      if ((id == 0x00010001UL || id == 0x00010007UL) && avi_word() == avi_pcm_rate &&
+      // Только PCM (1): беззнаковые 8 бит моно (araw), байт на сэмпл. Его
+      // выводит ЦАП GS, а без GS — звуковой блок FT812 (после перевода в
+      // знаковый). Другой звук остаётся у штатного CMD_PLAYVIDEO.
+      if (avi_word() == 0x00010001UL && avi_word() == avi_pcm_rate &&
           avi_word() == avi_pcm_rate && avi_word() == 0x00080001UL)
-      { pcm_ok = 1; avi_ulaw = id == 0x00010007UL; }
+        pcm_ok = 1;
     }
     end += size & 1;
     if (end > ends[depth]) return false;
@@ -525,7 +971,7 @@ bool avi_probe()
   avi_bytes = ((u32)avi_width * avi_height * 2 + 3) & 0xFFFFFFFCUL;
   // Звук пойдёт на GS, если драйвер загружен, а частота не выше частоты его
   // прерываний: шаг фазы должен уместиться в 16 бит (то же решает видеобанк).
-  gs = gs_loaded && avi_pcm_rate && avi_pcm_rate <= GS_INT_HZ && !avi_ulaw;
+  gs = gs_loaded && avi_pcm_rate && avi_pcm_rate <= GS_INT_HZ;
   // Два RGB565-кадра, слово результата и 128 КиБ media FIFO не пересекаются.
   // Кольцо FT812 лежит в RAM_G с #C0000; GS его не требует.
   if (sound && (!pcm_ok || !avi_pcm_total || avi_scale != 1 ||
@@ -540,10 +986,15 @@ bool avi_probe()
 void far_entry(AVI_SHARED *p)
 {
   view_failed = 0;
+  avi.cluster = p->cluster;
+  filesize = p->size;
   if (p->op == AVI_OP_SEEK) index_seek(p);
   else if (p->op == AVI_OP_HEADER) p->ok = index_header(p) && !view_failed;
   else if (p->op == AVI_OP_PROBE)
   {
+    // Разбор — первое, что делается с файлом: таблица перемотки прежнего
+    // ролика (Enter в плеере выбрал другой) недействительна.
+    index_state = 0;
     avi = *p;
     avi.ok = avi_probe();
     if (view_failed) avi.ok = 2;

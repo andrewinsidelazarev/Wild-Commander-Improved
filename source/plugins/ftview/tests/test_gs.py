@@ -88,6 +88,48 @@ class Boot(unittest.TestCase):
         self.assertEqual(m.cpu.a, 1)
         self.assertEqual(bytes(g.cpu.memory[org:org + n]), code[:n])
 
+    def test_rom_memory_test_after_reset_is_awaited(self):
+        # Сразу после сброса ПЗУ GS проверяет память и команд не берёт:
+        # 512 КБ — ~2 с, 1 МБ — ~4,3 с времени GS. Прежнее ожидание #F3 в
+        # 3 тика WC отдавало звук FT812 ролику, запущенному сразу после
+        # включения Evo. Плагин ждёт до 400 тиков (8 с на плате). Тик WC в
+        # модели короче настоящего (граница кадра пакета z80): за 400 тиков
+        # модель GS проходит ~2,9 с, поэтому здесь карта 512 КБ.
+        sym = json.loads((OUT/'build.json').read_text())['gs']['symbols']
+        g = GS(ROM, pages=16, dac={sym['gs_dac_left']: 0, sym['gs_dac_right']: 2})
+        m = Machine(bank='image', gs=g)
+        m.call('_gs_boot', limit=3000)
+        self.assertEqual((m.cpu.a, m.get('_gs_stage')), (1, 0))
+        # Ожидание действительно понадобилось: цикл команд ПЗУ — после 2 с.
+        self.assertGreater(g.ticks, 12_000_000 * 2)
+
+    def test_card_that_never_answers_gives_up(self):
+        # Карта на шине, но бит команды не снимается: не дольше ~8 с (200 раз
+        # по два тика WC), затем звук остаётся у FT812, этап 2.
+        class BusyGS:
+            """Статус с битом команды; считает тики WC, прошедшие за опросы."""
+            m, last, ticks = None, None, 0
+
+            def run(self, ticks):
+                pass
+
+            def zx_in(self, port):
+                tmn = self.m.cpu.memory[0x6009]
+                if self.last is not None:
+                    self.ticks += (tmn - self.last) & 255
+                self.last = tmn
+                return 0x7F if port & 255 == 0xBB else 0xFF
+
+            def zx_out(self, port, value):
+                pass
+
+        gs = BusyGS()
+        m = Machine(bank='image', gs=gs)
+        gs.m = m
+        m.call('_gs_boot', limit=1000)
+        self.assertEqual((m.cpu.a, m.get('_gs_stage')), (0, 2))
+        self.assertTrue(380 <= gs.ticks <= 420, gs.ticks)
+
     def test_absent_card_is_quick(self):
         m = Machine(bank='image')
         m.call('_gs_boot', limit=100)
@@ -144,22 +186,32 @@ class GSPlayer(Machine):
             super().api()
 
 
-def segments(samples, pcm, starts):
-    """DAC должен дать pcm[starts[0]:...] + pcm[starts[1]:...] + ... подряд."""
+def segments(samples, pcm, starts, back=32, sign=64):
+    """DAC должен дать pcm[starts[0]:...] + pcm[starts[1]:...] + ... подряд.
+
+    Отрезок идёт строго по pcm до первого расхождения. Следующий начинается
+    там или до back сэмплов раньше и совпадает с pcm[start:] на sign сэмплах:
+    начало нового отрезка тестовой пилы бывает равно продолжению старого на
+    несколько сэмплов (пила повторяется каждые 3104 сэмпла), и первое
+    расхождение сдвигалось бы от такта к такту."""
     runs = []
-    it = iter(starts)
-    pos = None
-    for value in samples:
-        if pos is not None and pos < len(pcm) and pcm[pos] == value:
-            pos += 1
-            continue
-        start = next(it)
-        assert pcm[start] == value, ('segment start', start, value, pcm[start])
-        if pos is not None:
-            runs[-1][1] = pos
-        runs.append([start, None])
-        pos = start + 1
-    runs[-1][1] = pos
+    i = 0
+    for n, start in enumerate(starts):
+        k = 0
+        while i + k < len(samples) and start + k < len(pcm) and samples[i + k] == pcm[start + k]:
+            k += 1
+        if n + 1 < len(starts):
+            nxt = list(pcm[starts[n + 1]:starts[n + 1] + sign])
+            for d in range(min(back, k) + 1):
+                if samples[i + k - d:i + k - d + sign] == nxt:
+                    k -= d
+                    break
+            else:
+                raise AssertionError(('segment start', n + 1, starts[n + 1], i + k))
+        assert k, ('empty segment', n, start)
+        runs.append([start, start + k])
+        i += k
+    assert i == len(samples), ('samples after the last segment', i, len(samples))
     return runs
 
 
@@ -185,16 +237,19 @@ class Playback(unittest.TestCase):
             self.assertLessEqual(played, pcm_sample(frame + 2, rate, fps), (frame, played))
 
     def test_plays_all_samples_in_time(self):
-        data, pcm, _ = make_avi(60)
-        m, g = self.play(data)
-        left = [v for _, c, v in g.samples if c == 0]
-        right = [v for _, c, v in g.samples if c == 2]
-        self.assertEqual(left, list(pcm))
-        self.assertEqual(right, left)
-        self.assertEqual(m.get('_avi_frame', 4), 60)
-        # Первый кадр — до старта звука, остальные по часам GS.
-        self.check_sync(m)
-        self.assertEqual([f for f, _, _ in m.draws], list(range(60)) + [59])
+        # 22 050 Гц — по умолчанию в FTViewConvert, 32 000 Гц — на выбор.
+        for rate in (22050, 32000):
+            with self.subTest(rate=rate):
+                data, pcm, _ = make_avi(60, rate=rate)
+                m, g = self.play(data)
+                left = [v for _, c, v in g.samples if c == 0]
+                right = [v for _, c, v in g.samples if c == 2]
+                self.assertEqual(left, list(pcm))
+                self.assertEqual(right, left)
+                self.assertEqual(m.get('_avi_frame', 4), 60)
+                # Первый кадр — до старта звука, остальные по часам GS.
+                self.check_sync(m, rate=rate)
+                self.assertEqual([f for f, _, _ in m.draws], list(range(60)) + [59])
 
     def test_pause_holds_gs_and_resumes_without_restart(self):
         data, pcm, _ = make_avi(40)
@@ -245,6 +300,52 @@ class Playback(unittest.TestCase):
         # и GIPAG, а не повторным чтением файла с начала.
         self.assertTrue(m.gipags)
         self.check_sync(m)
+
+    def test_keys_after_end_of_video(self):
+        # В конце ролика плеер стоит на паузе. Space — просмотр сначала: звук
+        # GS проигрывается второй раз целиком (прежде продолжался с конца, и
+        # тестировщик получал «Cannot display file»). Left — перемотка на паузе.
+        class AfterEnd(GSPlayer):
+            def __init__(self, data, key, **kw):
+                super().__init__(data, **kw)
+                self.key, self.stage = key, 0
+
+            def api(self):
+                key = self.cpu.a
+                if 0x10 <= key <= 0x1C:
+                    end = (self.get('_avi_frame', 4) == self.get('_avi_total', 4) and self.get('_avi_paused'))
+                    pressed = False
+                    if self.stage == 0 and end and key == self.key:
+                        pressed, self.stage, self.polls = True, 1, 0
+                    elif self.stage == 1:
+                        # Esc — после второго конца (Space) или вскоре после
+                        # перемотки на паузе (Left).
+                        self.polls += 1
+                        if (end and len(self.restarts) > 1) or (self.key != 0x10 and self.polls > 300):
+                            self.cpu.memory[0x6004] = 1
+                    self.cpu.f = 0 if pressed else 0x40
+                    self.api_calls.append(key)
+                    self.ret()
+                else:
+                    Machine.api(self)
+
+        for key in (0x10, 0x13):
+            with self.subTest(key=hex(key)):
+                data, pcm, _ = make_avi(40)
+                g = booted_gs(OUT)
+                boot = Machine(bank='image', gs=g)
+                boot.call('_gs_boot', limit=200000)
+                g.samples.clear()
+                m = AfterEnd(data, key, gs=g)
+                m.call('_show_avi', limit=3000000)
+                self.assertEqual(m.get('_view_failed'), 0)
+                left = [v for _, c, v in g.samples if c == 0]
+                if key == 0x10:
+                    self.assertEqual(left, list(pcm) * 2)
+                    self.assertEqual(m.get('_avi_frame', 4), 40)
+                else:
+                    self.assertEqual(left, list(pcm))
+                    self.assertTrue(m.get('_avi_paused'))
 
     def test_seek_stream_is_header_junk_and_chunks(self):
         data, pcm, info = make_avi(120, split=576)

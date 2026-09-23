@@ -10,8 +10,9 @@
 #include "tsconf.h"
 #include <esp_spi_defs.h>
 
+#include <build_id.h>
 #include <wc_api.c>
-#ifndef FTVIEW_VIDEO_BANK
+#if !defined(FTVIEW_VIDEO_BANK) && !defined(FTVIEW_LIST_BANK)
 #include <esp32.c>
 #endif
 
@@ -53,7 +54,10 @@ typedef struct
 // Чтение восьми секторов за вызов уменьшает накладные расходы LOAD512/FAT.
 // Код, cmdl и состояние остаются в #8000..#BFFF, отдельно от файловых данных.
 __at (0xC000) u8 fs_buf[0x4000];
+// Банку списка не нужен: команды его окна — в странице буфера (avi_list.c).
+#ifndef FTVIEW_LIST_BANK
 u8 cmdl[0x180];
+#endif
 
 // У плагина нет стандартного CRT: инициализируем состояние явно при входе.
 // Запись через приведение указателя к const запрещена правилами C.
@@ -75,12 +79,21 @@ __at (0xBFEC) u8 gs_loaded;
 // бит 7 — видеосреда WC уже изменена и требует восстановления.
 __at (0xBFED) u8 ft_state;
 void wc_video_bank();
-void far_call(void *param);
+void far_call(u8 page, void *param);
 
 // Признак неудачной загрузки текущего файла. Сбрасывается при входе в плагин;
 // нужен для общего выхода в WC после ошибки чтения, формата или сопроцессора.
 u8 view_failed;
+// Место отказа плеера: номер видно в окне сообщения («Reason NN»). Редкий
+// сбой у пользователя так разбирается по номеру, а не по догадкам.
+u8 fail_at;
+void fail(u8 at)
+{
+  fail_at = at;
+  view_failed = 1;
+}
 #define VIEW_TOO_LARGE 2
+#define VIEW_CODEC 3        // AVI с чужим кодеком видео
 
 // left — число ещё не переданных байтов файла. Читаем не больше fs_buf,
 // округляя только запрос к WC до целых секторов. Возвращаем true лишь если
@@ -93,7 +106,7 @@ bool read_chunk(u32 left)
   if (!count || *(volatile u8*)_ABT ||
       wc_load512(fs_buf, sectors) != (u16)fs_buf + ((u16)sectors << 9))
   {
-    view_failed = 1;
+    fail(1);
     return false;
   }
   return true;
@@ -115,7 +128,7 @@ bool fifo_wait(u16 wanted)
     if (*(volatile u8*)_ABT || (space & 3)) break;
     if (space >= wanted && space <= 0xFFC) return true;
   } while (--polls && (u8)(*(volatile u8*)_TMN - tick) < 150);
-  view_failed = 1;
+  fail(2);
   ft_cp_reset();
   return false;
 }
@@ -157,7 +170,29 @@ bool fifo_flush()
   return fifo_send((u8*)ft_ccmdb, count);
 }
 
+#ifdef FTVIEW_LIST_BANK
+// Банк списка роликов (страница 10): общие определения и обмен с FT812 выше,
+// остальное — только его (чтение каталога, окно выбора).
+#include "avi_list.c"
+#else
 #include "gs_zx.c"
+
+// Остановка звука FT812 (кольцо PCM без GS и звук штатного PLAYVIDEO).
+// Запись в REG_PLAYBACK_PLAY запускает воспроизведение при любом значении
+// (руководство FT81x, Register Definition 26), поэтому прежний «PLAY = 0» не
+// останавливал звук, а перезапускал кольцо с LOOP = 1: последний фрагмент
+// играл по кругу до сброса. Останавливает пустой отрезок: длина 0 и запуск
+// (там же, Code snippet 7). Только если звук идёт (PLAY читается 1): при
+// звуке на GS звуковой блок не запускался, и лишний запуск ни к чему —
+// эмулятор Bridgetek в Unreal без звукового устройства Windows на любом
+// запуске звука падает.
+void ft_pb_stop()
+{
+  if (!ft_rreg8(FT_REG_PLAYBACK_PLAY)) return;
+  ft_wreg32(FT_REG_PLAYBACK_LENGTH, 0);
+  ft_wreg8(FT_REG_PLAYBACK_LOOP, 0);
+  ft_wreg8(FT_REG_PLAYBACK_PLAY, 1);
+}
 
 // Единый выход нужен и при ошибке, и при PgUp/PgDn: остановить видео/звук,
 // снять выбор SPI, вернуть палитру и теневые видеорегистры WC. API 64 пишет
@@ -177,7 +212,7 @@ void view_cleanup()
 #endif
   if (!graphics_active) return;
   ft_cp_reset();
-  ft_wreg8(FT_REG_PLAYBACK_PLAY, 0);
+  ft_pb_stop();
   ft_wreg8(FT_REG_INT_EN, 0);
   ft_spi_unsel();
   wc_video_clock(0);
@@ -209,6 +244,9 @@ enum
 };
 
 // --- Windows ------------------------------
+// В видеобанке окон нет: их показывает банк списка (list_error) — здесь на
+// них уже не хватает места. У банка списка свои копии (avi_list.c).
+#if !defined(FTVIEW_VIDEO_BANK) && !defined(FTVIEW_LIST_BANK)
 const WC_TX_WINDOW err_no_ft =
 {
   /* window with header and text   */  WC_WIND_HDR_TXT,
@@ -224,7 +262,6 @@ const WC_TX_WINDOW err_no_ft =
   /* window text                   */  "\x0E\x0C\x01" "No VDAC2 detected!",
 };
 
-#ifndef FTVIEW_VIDEO_BANK
 const WC_TX_WINDOW err_no_esp =
 {
   /* window with header and text   */  WC_WIND_HDR_TXT,
@@ -243,15 +280,20 @@ const WC_TX_WINDOW err_no_esp =
 
 // Сообщение остаётся на текстовом экране WC; повреждённый файл не должен
 // молча показывать последний кадр предыдущего просмотра.
+// Коды текста WC: 0E центрирует строку, меряя её до CR или конца текста;
+// 0C N — вниз на N строк; CR — в начало той же строки. Без перевода строки
+// вторая строка печаталась поверх первой («UnsuFT812 image memory: 1 MiB.rge.»).
+// В видеобанке окон сообщений нет: их показывает банк списка (list_error) —
+// в видеобанке на них уже не хватает места.
+#ifndef FTVIEW_VIDEO_BANK
 const WC_TX_WINDOW err_file =
 {
   WC_WIND_HDR_TXT, 0, 19, 10, 42, 7, 0x2F, 0, 0, 0, 0,
   "\x0E" " Cannot display file ", "",
   "\x0E\x0C\x01" "Unsupported, damaged or too large.\r"
-  "\x0E" "FT812 image memory: 1 MiB."
+  "\x0E\x0C\x02" "FT812 image memory: 1 MiB."
 };
 
-#ifndef FTVIEW_VIDEO_BANK
 const WC_TX_WINDOW err_size =
 {
   WC_WIND_HDR_TXT, 0, 19, 10, 42, 7, 0x2F, 0, 0, 0, 0,
@@ -273,7 +315,10 @@ const WC_TX_WINDOW win_about =
   /* separators                    */  0, 0,
   /* header text                   */  "\x0E" " About ",
   /* footer text                   */  "",
-  /* window text                   */  "\x0E\x0C\x01" "FT812 Viewer v1.2, (c)2024 TSL"
+  // Отметка сборки (build.py считает её по исходникам): по ней видно, какая
+  // версия плагина стоит на карте.
+  /* window text                   */  "\x0E\x0C\x01" "FT812 Viewer v1.21, (C)2026 INSiDE\r"
+                                       "\x0E\x0C\x02" "Build " BUILD_ID
 };
 #endif
 
@@ -604,19 +649,31 @@ void show_dls()
 
 // Штатное воспроизведение со звуком использует то же двухступенчатое чтение:
 // упреждающий буфер в собственных страницах EVO -> media FIFO FT812.
+// Enter в плеере открывает список роликов каталога; выбор другого ставит
+// avi_switch, и цикл запускает его заново (avi.cluster и avi.size уже его).
 void show_avi()
 {
-  u32 left = filesize;
   wc_video_clock(1);
   ft_wreg32(FT_REG_FREQUENCY, 64000000UL);
-  if (avi_controls()) return;
-  if (left < 12 || !read_chunk(left) ||
-      memcmp(fs_buf, "RIFF", 4) || memcmp(fs_buf + 8, "AVI ", 4))
-  { view_failed = 1; return; }
+  avi_first();
+  do
+  {
+    u32 left = avi.size;
+    avi_switch = 0;
+    if (avi_controls()) continue;
+    if (left < 12 || !read_chunk(left) ||
+        memcmp(fs_buf, "RIFF", 4) || memcmp(fs_buf + 8, "AVI ", 4))
+    { fail(17); return; }
+    // Чужой кодек не отдаём CMD_PLAYVIDEO: он покажет мусор и упрётся в
+    // таймаут. Плеер сообщает «Unsupported video codec». Разбор заголовка
+    // для этой проверки не годится: он бросает файл и раньше — скажем,
+    // когда размер в RIFF не сходится с длиной файла.
+    if (!avi_mjpeg()) { view_failed = VIEW_CODEC; return; }
 
-  wc_vmode(0x87);
-  ft_wreg32(FT_REG_FREQUENCY, 64000000UL);
-  avi_restart(true);
+    wc_vmode(0x87);
+    ft_wreg32(FT_REG_FREQUENCY, 64000000UL);
+    avi_restart(true);
+  } while (avi_switch && !view_failed);
 }
 #endif
 
@@ -666,25 +723,20 @@ void play_xm()
 #endif
 
 // --- Aux functions ------------------------
-void wait_esc_key()
+// Окно закрывает любая клавиша — теми же вызовами WC, что и его собственные
+// окна: USPO ждёт, пока клавиши отпущены (иначе окно закрыла бы та, которой
+// открыли просмотр), NUSP — нажатия любой.
+void wait_any_key()
 {
-  while (1)
-  {
-    __asm
-      ei
-      halt
-    __endasm;
-
-    if (wc_api__bool(_ESC))
-      break;
-  }
+  wc_api__bool(_USPO);
+  wc_api__bool(_NUSP);
 }
 
-// Окно ошибки или сведений до Esc, затем выход в WC.
+// Окно ошибки или сведений до нажатия клавиши, затем выход в WC.
 void show_window(const WC_TX_WINDOW *window)
 {
   wc_api_u16(_PRWOW, (u16)window);
-  wait_esc_key();
+  wait_any_key();
   wc_api_u16(_RRESB, (u16)window);
   wc_exit(WC_EXIT);
 }
@@ -720,7 +772,12 @@ void main_start()
 #endif
 
     if (state_ft != 1)
+#ifndef FTVIEW_VIDEO_BANK
       show_window(&err_no_ft);
+#else
+      // Окно показывает банк списка: в видеобанке для него нет места.
+      { list_error(LIST_OP_NOFT); wc_exit(WC_EXIT); }
+#endif
 
     else switch (file_ext)
     {
@@ -753,10 +810,17 @@ void main_start()
 #ifndef FTVIEW_VIDEO_BANK
       show_window(view_failed == VIEW_TOO_LARGE ? &err_size : &err_file);
 #else
-      show_window(&err_file);
+      // Окно показывает банк списка и возвращает управление сюда.
+      list_error(view_failed == VIEW_CODEC ? LIST_OP_CODEC : LIST_OP_FILE);
 #endif
     wc_exit(WC_EXIT);
   }
+
+  // Esc во время просмотра (ABT ставит прерывание WC, пока клавиша нажата)
+  // — выход сразу. Цикл ниже смотрит, нажата ли Esc сейчас: короткое нажатие
+  // во время перемотки или построения индекса к нему уже отпущено, и плагин
+  // ждал второго Esc.
+  if (*(volatile u8*)_ABT) wc_exit(WC_EXIT);
 
   // poll keys
   while (1)
@@ -782,8 +846,14 @@ void main_start()
 }
 
 // ------------------------------------------
+// WC входит только в банк изображений; в видеобанке вход #8000 не нужен.
 void main() __naked
 {
+#ifdef FTVIEW_VIDEO_BANK
+  __asm
+    ret
+  __endasm;
+#else
   __asm
     ld (_ret_sp), sp
     ld (_ret_ix), ix
@@ -795,6 +865,7 @@ void main() __naked
     ld (_filesize + 2), de
     jp _main_dispatch
   __endasm;
+#endif
 }
 
 // Входной регистровый контракт захвачен до возможного пролога SDCC.
@@ -843,3 +914,5 @@ void main_dispatch()
   main_start();
 #endif
 }
+
+#endif // FTVIEW_LIST_BANK

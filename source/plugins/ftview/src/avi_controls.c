@@ -1,23 +1,31 @@
-// Покадровый режим MJPEG AVI: без звука, с PCM8 или µ-law mono. CMD_PLAYVIDEO сам
-// строит дисплей-лист, поэтому поверх него нельзя надёжно дорисовать полосу.
+// Покадровый режим MJPEG AVI: без звука или с PCM8 mono (araw). CMD_PLAYVIDEO
+// сам строит дисплей-лист, поэтому поверх него нельзя надёжно дорисовать полосу.
 // Здесь CMD_VIDEOFRAME декодирует в один из двух буферов, а плагин рисует кадр
-// и HUD. Звук PCM8 выводит General Sound, без него — FT812; µ-law — всегда
-// звуковой блок FT812, это его родной формат (avi_pcm.c).
+// и HUD. Звук PCM8 выводит General Sound, без него — звуковой блок FT812
+// (avi_pcm.c).
 // Неподдержанный звук остаётся у штатного CMD_PLAYVIDEO: этот режим не должен
 // молча выключать звук. Проверка возможности управления выполняется до старта.
+
+#include "avi_list.h"
 
 #define AVI_FIFO 0xE0000UL
 #define AVI_FIFO_SIZE 0x20000UL
 // Поля, нужные банку изображений (разбор заголовка и перемотка), собраны в
 // структуру avi (avi_index.c): её копия передаётся через стек ядра (avi_far).
 u32 avi_frame;
-u32 avi_left;
+// Подача: avi_end — конец потока в файле (avi_restart), avi_left — сколько до
+// него осталось; позиция следующего блока — avi_end - avi_left.
+u32 avi_end, avi_left;
+// Позиция подаваемого блока в файле: avi_end - avi_left. Глобальная, потому
+// что локальной 32-битной переменной SDCC заводит в avi_feed стековый кадр.
+u32 avi_pos;
 u8 avi_paused, avi_keys;
 
 // Клавиши WC обновляет в прерывании (50 Гц), а эмулятор и пользователь держат
 // их считанные кадры. Опрос — раз в тик WC, в главном цикле и внутри долгих
 // ожиданий (декодирование, подкачка): нажатия копятся в avi_edges, пока их не
-// обработает главный цикл. Биты: Space, Left, Right, Home, PgDn, PgUp.
+// обработает главный цикл. Биты: Space, Left, Right, Home, PgDn, PgUp,
+// Enter (список роликов), любая клавиша (показывает панель управления).
 u8 avi_edges, key_tick;
 void avi_keys_poll()
 {
@@ -30,6 +38,8 @@ void avi_keys_poll()
   if (wc_api__bool(_HOME)) keys |= 8;
   if (wc_api__bool(_PGD)) keys |= 16;
   if (wc_api__bool(_PGU)) keys |= 32;
+  if (wc_api__bool(_ENKE)) keys |= 64;
+  if (wc_api__bool(_ANYK)) keys |= 128;
   avi_edges |= keys & ~avi_keys;
   avi_keys = keys;
 }
@@ -43,13 +53,19 @@ void avi_keys_poll()
 u32 avi_disk_left;
 u16 avi_cache_pos;
 u8 avi_cache_head, avi_cache_tail, avi_cache_count;
-// Диагностика стенда: число наблюдений пустого media FIFO после начала
-// подачи и до конца файла. Насыщение исключает ложный ноль после переполнения.
-u16 avi_empty_polls;
-u8 avi_feed_started;
-// Минимум данных, оставшихся в FT812 именно после блокирующего чтения SD.
-// Обычный опрос мог пропустить провал, если сразу после чтения шла DMA.
-u32 avi_min_after_read;
+
+// Сколько в блоке с позиции avi_pos настоящих данных: за концом movi
+// сопроцессор получает нули (см. avi_feed). Штатный CMD_PLAYVIDEO разбирает
+// файл сам и получает его целиком. Отдельная функция потому, что 32-битные
+// сравнения внутри avi_feed заметно портят распределение регистров.
+u8 avi_native;
+u16 avi_real(u16 count)
+{
+  u32 left = avi_movi_end - avi_pos;
+  if (avi_native) return count;
+  if (avi_pos >= avi_movi_end) return 0;
+  return left < count ? (u16)left : count;
+}
 
 bool avi_cache_fill()
 {
@@ -61,12 +77,7 @@ bool avi_cache_fill()
   wc_map_buffer(avi_cache_tail);
   if (*(volatile u8*)_ABT ||
       wc_load512(fs_buf, sectors) != 0xC000 + ((u16)sectors << 9))
-  { view_failed = 1; return false; }
-  if (avi_feed_started)
-  {
-    u32 queued = (avi_write - ft_rreg32(REG_MEDIAFIFO_READ)) & (AVI_FIFO_SIZE - 1);
-    if (queued < avi_min_after_read) avi_min_after_read = queued;
-  }
+  { fail(3); return false; }
   avi_disk_left -= count;
   if (++avi_cache_tail == 9) avi_cache_tail = 1;
   ++avi_cache_count;
@@ -95,8 +106,6 @@ bool avi_feed()
   count = min(avi_left, min(FS_BUF_SIZE, AVI_CACHE_BYTES - avi_cache_pos));
   read = ft_rreg32(REG_MEDIAFIFO_READ);
   free = (read - avi_write - 4) & (AVI_FIFO_SIZE - 1);
-  if (avi_feed_started && read == avi_write && avi_empty_polls != 0xFFFF)
-    ++avi_empty_polls;
   if (!avi_cache_count && !avi_cache_fill()) return false;
   if (count > AVI_FIFO_SIZE - avi_write) count = AVI_FIFO_SIZE - avi_write;
   padded = (count + 3) & 0xFFFC;
@@ -105,11 +114,17 @@ bool avi_feed()
     // volatile необходим для SDCC 4.3: вычисление адреса DMA иначе может
     // переиспользовать IY с указателем data. Проверяем реальные байты DMA.
     u8 * volatile data;
-    u16 tail = count;
+    // Позиция блока в файле; за концом movi сопроцессору нужен только запас
+    // данных, чтобы закончить последний кадр, и отдаём мы нули. Настоящий
+    // хвост файла — таблица перемотки и idx1 — он принимает за ещё один чанк
+    // и показывает в конце ролика мусор вместо последнего кадра.
+    u16 tail;
+    avi_pos = avi_end - avi_left;
+    tail = avi_real(count);
     wc_map_buffer(avi_cache_head);
     data = fs_buf + avi_cache_pos;
     // Звук FT812 идёт тем же SPI и временно меняет байты блока: только до DMA.
-    if (avi_pcm_rate && !pcm_gs && !pcm_tee(data, count, filesize - avi_left)) return false;
+    if (avi_pcm_rate && !pcm_gs && !pcm_tee(data, count, avi_pos)) return false;
     while (tail < padded) data[tail++] = 0;
     if (avi_pcm_rate && pcm_gs)
     {
@@ -120,7 +135,7 @@ bool avi_feed()
       ts_set_dma_saddr_p((u16)data & 0x3FFF, *(u8*)_PAGE3);
       ft_start_write(AVI_FIFO + avi_write);
       if (padded >> 9) { ts_set_dma_size(512, padded >> 9); ts_dma_start(TS_DMA_RAM_SPI); }
-      ok = pcm_tee(data, count, filesize - avi_left);
+      ok = pcm_tee(data, count, avi_pos);
       ts_dma_wait();
       if (padded & 0x1FF)
       { ts_set_dma_size(padded & 0x1FF, 1); ts_dma_start(TS_DMA_RAM_SPI); ts_dma_wait(); }
@@ -131,7 +146,6 @@ bool avi_feed()
   }
   avi_write = (avi_write + padded) & (AVI_FIFO_SIZE - 1);
   ft_wreg32(REG_MEDIAFIFO_WRITE, avi_write);
-  avi_feed_started = 1;
   avi_left -= count;
   avi_cache_pos += count;
   if (avi_cache_pos == AVI_CACHE_BYTES)
@@ -167,7 +181,12 @@ bool avi_decode_wait()
     if (cmd == 0xFFC) return true;
     if (avi_feed()) { tick = *(volatile u8*)_TMN; polls = 0xFFFF; }
   } while (--polls && (u8)(*(volatile u8*)_TMN - tick) < 150);
-  view_failed = 1;
+  // Поток кончился, а сопроцессор всё ждёт данных: в заголовке AVI кадров
+  // больше, чем чанков в movi (обычное дело у чужих файлов и у оборванной
+  // записи), либо последнему кадру не хватило хвоста. Это конец ролика, а не
+  // сбой: кадров дальше нет, и плеер встаёт на последнем показанном. Сброс
+  // снимает зависший VIDEOFRAME; кадр и панель дальше рисуются как обычно.
+  if (avi_left) fail(4); else avi_total = avi_frame;
   ft_cp_reset();
   return false;
 }
@@ -195,35 +214,47 @@ bool avi_far(u8 op)
   avi.ok = 1;
   wc_map_buffer(1);
   *AVI_FAR = avi;
-  far_call(AVI_FAR);
+  far_call(0, AVI_FAR);
   wc_map_buffer(1);
   avi = *AVI_FAR;
   return avi.ok;
 }
 
 // avi_seek_pos != 0: поток продолжается с чанка перемотки после заголовка.
+// Покадровый режим подаёт файл только до конца movi. Хвост — готовая таблица
+// перемотки и idx1, у длинного ролика до мегабайта — плееру не нужен, а FIFO
+// и кэш EVO держат около секунды потока: его чтение с SD и передача в FIFO
+// приходились на последние 1–2 с ролика. Сопроцессору данные за последним
+// чанком не нужны. Штатный PLAYVIDEO получает файл целиком: для него разбор
+// заголовка мог не дойти до movi.
 bool avi_restart(bool native)
 {
   u32 base = avi_seek_pos & ~3UL;
+  avi_native = native;
+  // Сопроцессору за последним чанком нужен запас данных: пока он не дочитает
+  // их, последний кадр не заканчивается. Сколько именно — неизвестно, поэтому
+  // отдаём страницу хвоста файла (idx1 целиком по-прежнему не читается, у
+  // длинного ролика это сотни килобайт). Если и её не хватит или хвоста нет,
+  // конец потока закрывает avi_decode_wait, а не окно с ошибкой.
+  avi_end = avi_movi_end + 4096;
+  if (avi_native || avi_end > avi.size) avi_end = avi.size;
   if (avi_pcm_rate) pcm_reset();
   ft_cp_reset();
   avi_ahead = 0;
   avi_write = 0; avi_frame = avi_seek_frame;
-  avi_empty_polls = 0; avi_feed_started = 0;
-  avi_min_after_read = AVI_FIFO_SIZE;
   ft_ccmd_start(cmdl);
   ft_MediaFifo(AVI_FIFO, AVI_FIFO_SIZE);
   if (!fifo_flush() || !fifo_wait(0xFFC)) return false;
   // Заголовок, JUNK и позицию диска готовит банк изображений; без
   // перемотки поток просто открывается заново с начала файла.
-  if (base ? !avi_far(AVI_OP_HEADER) : !wc_rewind()) { view_failed = 1; return false; }
-  avi_left = filesize - base;
-  avi_disk_left = filesize - (base & ~511UL); avi_cache_pos = base & 511;
+  if (base ? !avi_far(AVI_OP_HEADER) : !avi_rewind()) { fail(5); return false; }
+  avi_left = avi_end - base;
+  avi_disk_left = avi_end - (base & ~511UL); avi_cache_pos = base & 511;
   avi_cache_head = avi_cache_tail = 1; avi_cache_count = 0;
   // Небольшая задержка перед стартом: заполняем собственный RAM-буфер EVO.
   while (avi_disk_left && avi_cache_count != 8)
     if (!avi_cache_fill()) return false;
-  if (native) ft_PlayVideo(OPT_FULLSCREEN | OPT_SOUND | OPT_NOTEAR | OPT_MEDIAFIFO);
+  if (avi_native) ft_PlayVideo(OPT_FULLSCREEN | OPT_SOUND | OPT_NOTEAR | OPT_MEDIAFIFO);
   else ft_VideoStart();
   // PLAYVIDEO забирает свои параметры из командного FIFO до конца видео.
   // Поэтому CMDB_SPACE=FFC без следующей команды ещё не означает завершение!
@@ -256,17 +287,41 @@ void avi_time(u16 x, u16 seconds)
 
 // Постоянная часть HUD вычисляется один раз на файл: размер и масштаб
 // картинки, шаг полосы и полное время.
-u16 hud_w, hud_h, hud_bar, hud_total;
-u32 hud_ta, hud_te, hud_unit;
-u8 hud_state;   // шаблон построен для avi_paused+1; 0 — не построен
+u16 hud_bar, hud_total;
+u32 hud_unit;
+// Растяжение кадра на экран. Одной структурой: ту же картинку под окном
+// списка рисует банк списка, блок параметров получает копию (avi_list).
+LIST_VIEW hud_v;
+#define hud_w hud_v.w
+#define hud_h hud_v.h
+#define hud_ta hud_v.ta
+#define hud_te hud_v.te
+u8 hud_state;   // шаблон построен для hud_want(); 0 — не построен
+// Панель управления (полоса прокрутки, время, подсказки, звук) видна первые
+// 15 с и 15 с после нажатия любой клавиши, на паузе — всегда: застывший кадр
+// без неё непонятен. hud_left — оставшиеся тики WC (50 Гц).
+#define HUD_TICKS 750
+u16 hud_left;
+// Вид шаблона: avi_paused + 1, бит 2 — панель видна.
+u8 hud_want()
+{
+  return avi_paused + 1 | (avi_paused || hud_left ? 4 : 0);
+}
+// Кадр растягивается на экран с билинейной фильтрацией FT812: при нецелом
+// растяжении (2,39:1, маленькие ролики) ступеньки мягче. По руководству FT81x
+// такая точка рисуется за 1/4 такта вместо 1/16: кадр шириной до 1024 точек —
+// до 256 тактов на строку при бюджете не меньше 2048.
 void avi_hud_init()
 {
   // Сначала выбираем ограничивающую сторону в 32 битах. Промежуточная
   // высота узкого кадра могла переполнить u16; округлённая ширина 0 затем
   // приводила к делению на ноль при расчёте матрицы. Минимум — один пиксель.
-  if ((u32)avi_height * 1024 > (u32)avi_width * 700)
+  // Кадр вписывается во весь экран 1024×768, HUD рисуется поверх низа
+  // (кадр 4:3 512×384 — ровно вдвое на весь экран, 16:9 512×288 — 1024×576 по
+  // центру, HUD тогда на нижнем чёрном поле).
+  if ((u32)avi_height * 1024 > (u32)avi_width * 768)
   {
-    hud_h = 700; hud_w = (u32)avi_width * 700 / avi_height;
+    hud_h = 768; hud_w = (u32)avi_width * 768 / avi_height;
     if (!hud_w) hud_w = 1;
   }
   else
@@ -285,10 +340,11 @@ void avi_hud_init()
 // Команды кадра с HUD собираются один раз (и при смене паузы) шаблоном. На
 // кадр меняются четыре слова: адрес картинки, положение полосы, минуты и
 // секунды. Раньше каждый кадр заново строил ~60 слов вызовами SDK — около
-// 47 000 тактов. Шаблон (до 292 байт со строкой звукового устройства) лежит
-// в свободном хвосте кода видеобанка: область DATA до #BF80 занята. Код не
-// заходит на этот адрес — проверяет build.py, длину шаблона — тест.
-__at (0xBBD0) u32 hud_cmd[76];
+// 47 000 тактов. Шаблон (до ~330 байт со строкой звукового устройства) лежит
+// в свободном хвосте кода видеобанка #BB80..#BCFF: область DATA до #BF80
+// занята. Код не заходит на этот адрес — проверяет build.py, длину — тест.
+__at (0xBB80) u32 hud_cmd[96];
+
 #define HUD_CMD hud_cmd
 u16 hud_len, hud_i_addr, hud_i_prog, hud_i_min, hud_i_sec;
 void avi_hud_build()
@@ -297,37 +353,44 @@ void avi_hud_build()
   ft_Dlstart(); ft_Clear(1, 1, 1);
   hud_i_addr = ft_ccmdp + 1;
   ft_SetBitmap(0, FT_RGB565, avi_width, avi_height);
-  ft_BitmapSize(FT_NEAREST, FT_BORDER, FT_BORDER, hud_w, hud_h);
+  ft_BitmapSize(FT_BILINEAR, FT_BORDER, FT_BORDER, hud_w, hud_h);
   ft_BitmapTransformA(hud_ta);
   ft_BitmapTransformE(hud_te);
   ft_Begin(FT_BITMAPS);
-  ft_Vertex2ii((1024 - hud_w) / 2, (700 - hud_h) / 2, 0, 0);
-  // Виджеты/шрифт не должны наследовать матрицу масштабирования видео.
-  ft_BitmapTransformA(256); ft_BitmapTransformE(256);
-  ft_ColorRGB(255, 255, 255);
-  hud_i_prog = ft_ccmdp + 3;
-  ft_Progress(24, 708, 976, 12, FT_OPT_FLAT, 0, hud_bar);
-  hud_i_min = ft_ccmdp + 3;
-  ft_Number(80, 730, 26, FT_OPT_RIGHTX, 0);
-  ft_Text(80, 730, 26, 0, ":");
-  hud_i_sec = ft_ccmdp + 3;
-  ft_Number(89, 730, 26, 2, 0);
-  avi_time(980, hud_total);
-  // Куда идёт звук. PCM8 без GS — номер этапа, на котором не загрузился
-  // его драйвер (gs_stage: 1 — карты нет, 2..5 — ответ ПЗУ или драйвера).
-  // Файл с µ-law сделан для FT812: «FT812 ulaw».
-  if (avi_pcm_rate)
+  ft_Vertex2ii((1024 - hud_w) / 2, (768 - hud_h) / 2, 0, 0);
+  if (hud_want() & 4)
   {
-    ft_Text(988, 748, 26, FT_OPT_RIGHTX,
-            pcm_gs ? "GS" : avi_ulaw ? "FT812 ulaw" : "FT812 GS");
-    if (!pcm_gs && !avi_ulaw) ft_Number(992, 748, 26, 0, ft_state >> 2 & 7);
+    // Виджеты/шрифт не должны наследовать матрицу масштабирования видео.
+    ft_BitmapTransformA(256); ft_BitmapTransformE(256);
+    // Полоса прокрутки и текст — поверх кадра, на полупрозрачной тёмной
+    // полосе: белый текст читается и на светлой картинке.
+    ft_ColorRGB(0, 0, 0); ft_ColorA(160);
+    ft_Begin(FT_RECTS);
+    ft_Vertex2f(0, 700 * 16); ft_Vertex2f(1023 * 16, 767 * 16);
+    ft_ColorA(255);
+    ft_ColorRGB(255, 255, 255);
+    hud_i_prog = ft_ccmdp + 3;
+    ft_Progress(24, 708, 976, 12, FT_OPT_FLAT, 0, hud_bar);
+    hud_i_min = ft_ccmdp + 3;
+    ft_Number(80, 730, 26, FT_OPT_RIGHTX, 0);
+    ft_Text(80, 730, 26, 0, ":");
+    hud_i_sec = ft_ccmdp + 3;
+    ft_Number(89, 730, 26, 2, 0);
+    avi_time(980, hud_total);
+    // Куда идёт звук. PCM8 без GS — номер этапа, на котором не загрузился
+    // его драйвер (gs_stage: 1 — карты нет, 2..5 — ответ ПЗУ или драйвера).
+    if (avi_pcm_rate)
+    {
+      ft_Text(988, 748, 26, FT_OPT_RIGHTX, pcm_gs ? "GS" : "FT812 GS");
+      if (!pcm_gs) ft_Number(992, 748, 26, 0, ft_state >> 2 & 7);
+    }
+    ft_Text(512, 730, 26, FT_OPT_CENTERX,
+            avi_paused ? "Paused: Space play | Left/Right seek | Enter list | Esc exit" :
+                         "Space pause | Left/Right seek | Home restart | Enter list | Esc exit");
   }
-  ft_Text(512, 730, 26, FT_OPT_CENTERX,
-          avi_paused ? "Paused: Space play | Left/Right seek | Esc exit" :
-                       "Space pause | Left/Right seek | Home restart | Esc exit");
   ft_Display(); ft_ccmd(FT_CCMD_SWAP);
   hud_len = ft_ccmdp << 2;
-  hud_state = avi_paused + 1;
+  hud_state = hud_want();
 }
 
 // Время и полоса на соседний кадр — приращениями, без четырёх делений на
@@ -339,7 +402,7 @@ u16 hud_sub, hud_min, hud_s60, hud_prog, hud_psub;
 bool avi_draw(u32 address)
 {
   u32 *c = HUD_CMD;
-  if (hud_state != avi_paused + 1) avi_hud_build();
+  if (hud_state != hud_want()) avi_hud_build();
   if (avi_frame != hud_frame)
   {
     if (avi_frame == hud_frame + 1 && avi_scale == 1 && avi_rate &&
@@ -362,9 +425,12 @@ bool avi_draw(u32 address)
     hud_frame = avi_frame;
   }
   c[hud_i_addr] = address;
-  ((u16*)&c[hud_i_prog])[1] = hud_prog;
-  c[hud_i_min] = hud_min;
-  c[hud_i_sec] = hud_s60;
+  if (hud_state & 4)
+  {
+    ((u16*)&c[hud_i_prog])[1] = hud_prog;
+    c[hud_i_min] = hud_min;
+    c[hud_i_sec] = hud_s60;
+  }
   return fifo_send((u8*)c, hud_len) && fifo_wait(0xFFC);
 }
 
@@ -449,6 +515,58 @@ bool avi_seek(u32 target)
 // сэмпл, а не округлённый кадр; продолжение не повторяет его звуковое начало.
 // GS держит позицию сам: пауза и продолжение — его команды, без перезапуска.
 // Неподдержанная аудиодорожка остаётся у штатного PLAYVIDEO со звуком.
+// Первый ролик — файл, с которым WC запустил плагин. API 50 (GIPAGPL) ставит
+// поток ядра на его начало, а текущий кластер потока ядро держит в CUHL/CUDE
+// (#38A8, страница WildDOS в окне #0000): оттуда же его берёт перемотка.
+// API 51 (TENTRY) не подходит: по #7F6B WC хранит имя файла, а не запись
+// каталога. Дальше avi.cluster меняет список роликов.
+void avi_first()
+{
+  wc_rewind();
+  avi.cluster = *(u32*)0x38A8;
+  avi.size = filesize;
+}
+
+// Список роликов каталога (банк списка, страница 10) поверх кадра address.
+// true — выбран ролик (Enter, в том числе текущий): avi.cluster и avi.size
+// уже его (банк списка пишет их в копию AVI_FAR), avi_switch просит
+// show_avi запустить его с начала. false — Esc.
+u8 avi_switch;
+bool avi_list(u32 address)
+{
+  wc_map_buffer(1);
+  *AVI_FAR = avi;
+  LIST_FAR->op = LIST_OP_PICK;
+  LIST_FAR->address = address;
+  LIST_FAR->view = hud_v;
+  far_call(LIST_PAGE, LIST_FAR);
+  wc_map_buffer(1);
+  avi = *AVI_FAR;
+  return avi_switch = LIST_FAR->chosen;
+}
+
+// Кодек ролика проверяет банк списка тем же правилом, что и список: в
+// видеобанке места на проверку нет. Начало файла уже прочитано в fs_buf
+// (страница буфера 1), лишнего чтения с SD не будет.
+bool avi_mjpeg()
+{
+  wc_map_buffer(1);
+  LIST_FAR->op = LIST_OP_MJPEG;
+  far_call(LIST_PAGE, LIST_FAR);
+  wc_map_buffer(1);
+  return LIST_FAR->chosen;
+}
+
+// Окно сообщения показывает банк списка (в видеобанке для него нет места) и
+// возвращает управление: выход в WC делает вызывающий.
+void list_error(u8 op)
+{
+  wc_map_buffer(1);
+  LIST_FAR->op = op;
+  LIST_FAR->code = fail_at;
+  far_call(LIST_PAGE, LIST_FAR);
+}
+
 bool avi_controls()
 {
   u32 target = 0, elapsed = 0, address = 0, next = 0, pause_sample = 0;
@@ -458,12 +576,14 @@ bool avi_controls()
   avi_seek_pos = avi_seek_frame = avi_seek_audio = 0;
   // Разбор заголовка — в банке изображений: 1 — покадровый режим, 2 — сбой
   // чтения. Звук идёт на GS, если драйвер загружен, а частота не выше частоты
-  // его прерываний: шаг фазы должен уместиться в 16 бит.
+  // его прерываний: шаг фазы должен уместиться в 16 бит. Поток — с начала
+  // ролика: после выбора в списке он стоял в чужом файле.
+  if (!avi_rewind()) { fail(6); return true; }
   avi_far(AVI_OP_PROBE);
   available = avi.ok == 1;
-  if (avi.ok == 2) view_failed = 1;
-  pcm_gs = gs_loaded && avi_pcm_rate && avi_pcm_rate <= GS_INT_HZ && !avi_ulaw;
-  if (!wc_rewind()) { view_failed = 1; return true; }
+  if (avi.ok == 2) fail(7);
+  pcm_gs = gs_loaded && avi_pcm_rate && avi_pcm_rate <= GS_INT_HZ;
+  if (!avi_rewind()) { fail(6); return true; }
   if (!available) { avi_pcm_rate = 0; return view_failed != 0; }
   if (avi_pcm_rate && pcm_gs)
   {
@@ -471,10 +591,11 @@ bool avi_controls()
     u16 step = avi_pcm_rate == GS_INT_HZ ? 0xFFFF :
                ((u32)avi_pcm_rate << 16) / GS_INT_HZ;
     if (!gs_cmd(GS_RATE) || !gs_cmd(step) || !gs_cmd(step >> 8))
-    { view_failed = 1; return true; }
+    { fail(8); return true; }
   }
   wc_vmode(0x87);
   avi_paused = avi_keys = avi_edges = index_asked = 0;
+  hud_left = HUD_TICKS;
   key_tick = *(volatile u8*)_TMN;
   avi_hud_init();
   pcm_tick = avi_pcm_rate / 40 + 1;
@@ -492,9 +613,16 @@ bool avi_controls()
     bool restart = false, due;
     // Часы видео без звука — раз в тик: 32-битное умножение на каждом круге
     // цикла отнимало заметную долю подачи. Клавиши — avi_keys_poll().
-    while (*(volatile u8*)_TMN != tick) { ++tick; elapsed += 20000; }
+    while (*(volatile u8*)_TMN != tick)
+    {
+      ++tick; elapsed += 20000;
+      if (hud_left) --hud_left;
+    }
     avi_keys_poll();
     edge = avi_edges; avi_edges = 0;
+    // Любое нажатие — панель ещё на 15 с. Видимость меняет шаблон: avi_draw
+    // следующего кадра построит его заново (на паузе панель видна и так).
+    if (edge) hud_left = HUD_TICKS;
     if ((edge | avi_keys) & 16) wc_exit(WC_NEXT_FILE);
     if ((edge | avi_keys) & 32) wc_exit(WC_PREV_FILE);
     // Кольцо FT812 опрашиваем всегда: его курсор оборачивается каждые 32 КиБ.
@@ -503,7 +631,16 @@ bool avi_controls()
     if (edge & 1)
     {
       avi_paused ^= 1; elapsed = 0;
-      if (avi_pcm_rate)
+      // Space в конце ролика — просмотр сначала, как Home: звук кончился, и
+      // продолжать нечего. Прежде звук FT812 начинался со старой отметки
+      // паузы (у паузы в конце её нет) при кадре в конце, опрос кольца ловил
+      // опережение, и плагин выходил с «Cannot display file».
+      if (!avi_paused && avi_frame == avi_total)
+      {
+        target = 0; restart = true;
+        pcm_drop = pause_sample = 0;
+      }
+      else if (avi_pcm_rate)
       {
         if (avi_paused) { pause_sample = pcm_drop + pcm_played; pcm_stop(); }
         else if (pcm_gs) pcm_start();
@@ -530,6 +667,23 @@ bool avi_controls()
       }
       restart = true;
       elapsed = 0;
+    }
+    if (edge & 64)
+    {
+      // Enter — список роликов каталога: видео на паузе, окно поверх
+      // показанного кадра. Выбран ролик — выходим, show_avi запустит его.
+      // Esc — тот же ролик дальше: чтение каталога сдвинуло поток SD и
+      // заняло кэш EVO, поэтому поток заново с показанного кадра.
+      u8 was_paused = avi_paused;
+      if (!avi_paused && avi_pcm_rate)
+      { pause_sample = pcm_drop + pcm_played; pcm_stop(); }
+      avi_paused = 1;
+      if (avi_list(address)) break;
+      target = avi_frame ? avi_frame - 1 : 0;
+      if (avi_pcm_rate) pcm_drop = pause_sample;
+      restart = true;
+      avi_paused = was_paused;
+      hud_state = 0; elapsed = 0;
     }
     if (restart)
     {
@@ -558,7 +712,9 @@ bool avi_controls()
         !avi_paused && !ft_rreg8(FT_REG_DLSWAP))
     {
       next = buffer ? avi_bytes : 0; buffer ^= 1;
-      if (!avi_decode(next)) return true;
+      // Сбой и Esc завершают цикл сами; конец потока (avi_decode_wait) —
+      // просто конец ролика, кадр не готов и показывать его нельзя.
+      if (!avi_decode(next)) continue;
       avi_ahead = 1;
     }
     if (avi_pcm_rate)
@@ -584,7 +740,7 @@ bool avi_controls()
       if (!avi_ahead)
       {
         next = buffer ? avi_bytes : 0; buffer ^= 1;
-        if (!avi_decode(next)) return true;
+        if (!avi_decode(next)) continue;
       }
       avi_ahead = 0;
       address = next;
@@ -599,9 +755,19 @@ bool avi_controls()
       if (elapsed >= avi_period) elapsed -= avi_period;
       if (avi_frame <= target) elapsed = 0;
     }
+    // Конец ролика: звук доигран или данных больше нет (в заголовке сэмплов
+    // объявлено больше, чем в movi — иначе кадр застыл бы без паузы). Сразу
+    // список роликов каталога поверх последнего кадра: Enter запускает
+    // выбранный (show_avi), Esc оставляет кадр на паузе — Space начнёт
+    // просмотр сначала. Поток дальше не нужен, поэтому без перезапуска.
     if (avi_frame == avi_total && !avi_paused &&
-        (!avi_pcm_rate || (!pcm_live && pcm_played == avi_pcm_total - pcm_drop)))
-    { avi_paused = 1; if (!avi_draw(address)) return true; }
+        (!avi_pcm_rate ||
+         (!pcm_live && (pcm_played == avi_pcm_total - pcm_drop || !avi_left))))
+    {
+      avi_paused = 1;
+      if (avi_list(address)) break;
+      if (!avi_draw(address)) return true;
+    }
   }
   if (avi_pcm_rate) pcm_stop();
   return true;

@@ -20,8 +20,8 @@ u32 pcm_sample(u32 frame)
 
 void pcm_stop()
 {
-  if (pcm_gs) { if (!gs_cmd(GS_PAUSE)) view_failed = 1; }
-  else ft_wreg8(FT_REG_PLAYBACK_PLAY, 0);
+  if (pcm_gs) { if (!gs_cmd(GS_PAUSE)) fail(9); }
+  else ft_pb_stop();
   pcm_live = 0;
 }
 
@@ -37,7 +37,7 @@ void pcm_poll()
     {
       // Запись GS = pcm_written mod 32768, чтение — ответ драйвера.
       u16 read = gs_pos();
-      if (!read) { pcm_live = 0; view_failed = 1; return; }
+      if (!read) { pcm_live = 0; fail(10); return; }
       pcm_played = pcm_written - (((u16)pcm_written - read) & 0x7FFF);
     }
     else
@@ -50,14 +50,22 @@ void pcm_poll()
         pcm_written == avi_pcm_total - pcm_drop)
     { pcm_played = avi_pcm_total - pcm_drop; pcm_stop(); }
     else if (pcm_played > pcm_written)
-    { ++pcm_underruns; pcm_stop(); view_failed = 1; }
+    {
+      // Кольцо FT812 доиграло записанное и пошло по кругу. Данных больше
+      // нет (конец ролика) — это конец звука, а не сбой: в заголовке
+      // объявлено больше сэмплов, чем лежит в movi.
+      ++pcm_underruns;
+      pcm_stop();
+      if (avi_left) fail(11);
+      else pcm_played = pcm_written;
+    }
   }
 }
 
 void pcm_reset()
 {
   pcm_stop();
-  if (pcm_gs) { if (!gs_cmd(GS_FLUSH)) view_failed = 1; }
+  if (pcm_gs) { if (!gs_cmd(GS_FLUSH)) fail(12); }
   // PLAY=1 принимается звуковым блоком асинхронно. Курсор некоторое время
   // ещё указывает в старый буфер. Выбираем непересекающуюся половину 64 КиБ:
   // переход курсора в неё однозначно подтверждает принятие нового старта.
@@ -74,14 +82,14 @@ void pcm_start()
   if (!pcm_written || pcm_drop >= avi_pcm_total) return;
   if (pcm_gs)
   {
-    if (!gs_cmd(GS_PLAY)) { view_failed = 1; return; }
+    if (!gs_cmd(GS_PLAY)) { fail(13); return; }
     pcm_live = 1;
     return;
   }
   ft_wreg32(FT_REG_PLAYBACK_START, PCM_BASE + pcm_base);
   ft_wreg32(FT_REG_PLAYBACK_LENGTH, PCM_CAPACITY);
   ft_wreg16(FT_REG_PLAYBACK_FREQ, avi_pcm_rate);
-  ft_wreg8(FT_REG_PLAYBACK_FORMAT, avi_ulaw ? FT_ULAW_SAMPLES : FT_LINEAR_SAMPLES);
+  ft_wreg8(FT_REG_PLAYBACK_FORMAT, FT_LINEAR_SAMPLES);
   ft_wreg8(FT_REG_PLAYBACK_LOOP, 1);
   ft_wreg8(FT_REG_VOL_PB, 255);
   ft_wreg8(FT_REG_PLAYBACK_PLAY, 1);
@@ -91,7 +99,7 @@ void pcm_start()
     if (read < PCM_CAPACITY)
     { pcm_played = read; pcm_read_last = read; pcm_live = 1; return; }
   } while (--polls && !*(volatile u8*)_ABT);
-  pcm_stop(); view_failed = 1;
+  pcm_stop(); fail(14);
 }
 
 // AVI PCM8 беззнаковый, FT812 LINEAR_SAMPLES знаковый. После отправки
@@ -108,11 +116,11 @@ bool pcm_write(u8 *data, u16 size)
   u16 part;
   if (!pcm_gs || pcm_written + size - pcm_played >= PCM_CAPACITY) pcm_poll();
   if (view_failed || pcm_written + size - pcm_played >= PCM_CAPACITY)
-  { view_failed = 1; return false; }
+  { fail(15); return false; }
   if (pcm_gs)
   {
     // GS принимает беззнаковые сэмплы AVI как есть.
-    if (!gs_send(data, size)) { view_failed = 1; return false; }
+    if (!gs_send(data, size)) { fail(16); return false; }
     pcm_written += size;
     return true;
   }
@@ -120,9 +128,9 @@ bool pcm_write(u8 *data, u16 size)
   {
     u16 offset = pcm_written & 0x7FFF;
     part = min(size, PCM_CAPACITY - offset);
-    if (!avi_ulaw) pcm_flip(data, part);
+    pcm_flip(data, part);
     ft_write(data, PCM_BASE + pcm_base + offset, part);
-    if (!avi_ulaw) pcm_flip(data, part);
+    pcm_flip(data, part);
     pcm_written += part; data += part; size -= part;
   }
   return true;
