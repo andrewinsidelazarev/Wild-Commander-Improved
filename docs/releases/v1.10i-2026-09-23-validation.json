@@ -284,5 +284,58 @@
     "general_sound_audio_confirmed_by_user": true,
     "fat_sector_cache_tested": false
   },
-  "validation_scope": "Собранный код Z80, машинные тесты ядра и плагинов, модели носителя и прогоны в Unreal; на физический ZX Evolution в рамках выпуска записи и приёмки не было, кроме подтверждённого пользователем звука General Sound."
+  "validation_scope": "Собранный код Z80, машинные тесты ядра и плагинов, модели носителя и прогоны в Unreal; на физический ZX Evolution в рамках выпуска записи и приёмки не было, кроме подтверждённого пользователем звука General Sound.",
+  "bundled_tool": {
+    "archive": "FTViewConvert.zip",
+    "bytes": 39009327,
+    "sha256": "358b7537926a1b13c575978197e95b67f4d9d4ddba3bc0b56906302c8f596b63",
+    "built_from_commit": "d6daadb",
+    "files": {
+      "FTViewConvert.exe": {
+        "bytes": 105567744,
+        "sha256": "516568b359ae6954ce00025c96daaa9ae73cc96dd623b17834aeadff04acf68a",
+        "matches_repository_source": true
+      },
+      "ffmpeg-LICENSE.txt": {
+        "bytes": 35147,
+        "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+        "matches_repository_source": true
+      },
+      "README.md": {
+        "bytes": 13281,
+        "sha256": "7fd13e0b2cff3c683a2ceca93123ab670929019230d55ad2c7910c6dd5a91347",
+        "matches_repository_source": true
+      },
+      "source/Program.cs": {
+        "bytes": 54415,
+        "sha256": "b1ff6470998fbdc93b041514175d39cc06e7126aa9318eda903a7d05a478e4f9",
+        "matches_repository_source": true
+      },
+      "source/build.ps1": {
+        "bytes": 3996,
+        "sha256": "87c332d3e130238b170c3abe30b9d1a69ec34852afb2400894ccf48789dc4f0e",
+        "matches_repository_source": true
+      },
+      "source/make_icon.py": {
+        "bytes": 3343,
+        "sha256": "6dc9a4a7bc46f55d1fa48f23bb2db9a9e35a527e2f3e0fe17af788bd8ef58596",
+        "matches_repository_source": true
+      },
+      "source/app.ico": {
+        "bytes": 54180,
+        "sha256": "d92cc4641766b568cc3c1126d7942995399cd721296a0f37581fb16b98e74012",
+        "matches_repository_source": true
+      },
+      "source/README.md": {
+        "bytes": 13281,
+        "sha256": "7fd13e0b2cff3c683a2ceca93123ab670929019230d55ad2c7910c6dd5a91347",
+        "matches_repository_source": true
+      }
+    },
+    "note": "Перекодировщик публикуется вторым архивом релиза; FTViewConvert.exe в репозиторий не кладётся (каталог сборки в .gitignore)."
+  },
+  "release_assets": [
+    "Wild-Commander-Improved-v1.10i-2026-09-23.zip",
+    "FTViewConvert.zip"
+  ]
 }
