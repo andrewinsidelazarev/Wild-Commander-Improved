@@ -15,6 +15,59 @@
           CALL DrawString
         ENDM
 
+; Один показанный список обнуляет старшие поля геометрии (BITMAP_LAYOUT_H и
+; BITMAP_SIZE_H) у дескрипторов шрифта. Каждая программа задаёт их для своих
+; bitmap, а сброс ядра FT812 таблицу дескрипторов не очищает: FTView
+; показывает кадры 1024x768 через handle 0 и оставляет в нём старшие биты —
+; глифы панелей читались с чужим шагом, мусор вместо текста. FontSetup старших
+; полей не пишет (каждое слово DL стоит тактов на каждой растровой строке), а
+; значения дескрипторов между кадрами сохраняются: достаточно одного кадра.
+; Ждём, пока смена списка выполнится (REG_DLSWAP = 0): с этого кадра FT812
+; исполняет список на каждой строке, и следующий кадр его уже не вытеснит.
+; Выход: CF=1 — чип не ответил.
+FONT_HANDLES EQU (FONT_GLYPH_COUNT+127)/128
+FT_ResetHandles:
+        CALL Cmd_Begin
+        DLW #FFFFFF00                 ; CMD_DLSTART
+        LD C,0
+.handle:
+        PUSH BC
+        LD L,C
+        LD H,0
+        LD DE,#0500                   ; BITMAP_HANDLE(C)
+        CALL Cmd_Word
+        LD HL,0
+        LD DE,#2800                   ; BITMAP_LAYOUT_H(0, 0)
+        CALL Cmd_Word
+        LD HL,0
+        LD DE,#2900                   ; BITMAP_SIZE_H(0, 0)
+        CALL Cmd_Word
+        POP BC
+        INC C
+        LD A,C
+        CP FONT_HANDLES
+        JR C,.handle
+        DLW 0                         ; DISPLAY
+        DLW #FFFFFF01                 ; CMD_SWAP
+        CALL Cmd_End
+        CALL FT_WaitIdle
+        RET C
+        LD BC,16384                   ; кадр — 17 мс, опросов с большим запасом
+.swap:
+        PUSH BC
+        LD HL,REG_DLSWAP & #FFFF
+        CALL FT_Rd16
+        POP BC
+        LD A,L
+        OR A
+        RET Z                         ; CF=0: смена списка выполнена
+        DEC BC
+        LD A,B
+        OR C
+        JR NZ,.swap
+        SCF
+        RET
+
 PresentScreen:
         LD A,(FtReady)
         OR A

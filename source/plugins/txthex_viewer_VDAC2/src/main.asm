@@ -143,6 +143,8 @@ RE:
         JP C,VideoFailed
         CALL FT_LoadAssets
         JP C,VideoFailed
+        CALL FT_ResetHandles
+        JP C,VideoFailed
         LD A,1
         LD (FtReady),A
         CALL GoHome

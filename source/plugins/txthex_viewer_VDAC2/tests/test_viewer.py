@@ -390,6 +390,35 @@ class GraphicsTests(unittest.TestCase):
         finally:
             v.close()
 
+    def test_foreign_handle_high_bits_do_not_break_panels(self):
+        # Сброс ядра FT812 не очищает таблицу дескрипторов. FTView показывает
+        # кадр 1024x768 через handle 0 и оставляет в нём старшие поля
+        # геометрии: шаг 1024 байта (LAYOUT_H) и размер 1024x768 (SIZE_H).
+        # FontSetup их не пишет — панели выходили мусором, а текст (полосы
+        # handle 31) оставался цел. FT_ResetHandles обнуляет их один раз
+        # после загрузки шрифта: экран совпадает с запуском на чистом чипе.
+        from PIL import ImageChops
+        shots=[]
+        for foreign in (False,True):
+            v=Viewer(SAMPLE.encode(),chip=True)
+            try:
+                if foreign:
+                    v.chip.boot()
+                    v.chip.cmd(struct.pack('<6I',0xffffff00,0x05000000,0x28000004,0x29000009,
+                                           0x00000000,0xffffff01))
+                    v.chip.wait_idle()
+                    v.chip.frame()
+                for name in ('FT_Boot','FT_LoadAssets','FT_ResetHandles'):
+                    _,fault=v.call(name)
+                    self.assertFalse(fault,name)
+                v.put('FtReady',1,1)
+                v.draw()
+                shots.append(v.chip.frame())
+                self.assertFalse(v.chip.errors,v.chip.errors)
+            finally:
+                v.close()
+        self.assertIsNone(ImageChops.difference(*shots).getbbox())
+
     def test_z80_boot_font_upload_dense_page_and_help(self):
         v=Viewer(SAMPLE.encode(),chip=True)
         budgets={}

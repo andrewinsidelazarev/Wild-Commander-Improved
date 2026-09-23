@@ -41,6 +41,7 @@ REG_VOFFSET     equ #302044
 REG_VSIZE       equ #302048
 REG_VSYNC0      equ #30204C
 REG_VSYNC1      equ #302050
+REG_DLSWAP      equ #302054             ; 0 — отложенная смена списка выполнена
 REG_CSPREAD     equ #302068
 REG_PCLK_POL    equ #30206C
 REG_PCLK        equ #302070             ; делитель частоты точек, 0 — вывод стоит
