@@ -97,7 +97,8 @@ New-Item -ItemType Directory -Path $BuildDir, $ExeDir -Force | Out-Null
 # Карантин `source\to delete` намеренно не входит в эту проверку.
 $Utf8Strict = [Text.UTF8Encoding]::new($false, $true)
 $TextExtensions = '.asm', '.a80', '.s', '.c', '.h', '.txt', '.md'
-Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'source') -Recurse -File |
+$TextRoots = (Join-Path $ProjectRoot 'source'), (Join-Path $ProjectRoot 'FTViewConvert')
+Get-ChildItem -LiteralPath $TextRoots -Recurse -File |
     Where-Object {
         $_.Extension.ToLowerInvariant() -in $TextExtensions -and
         $_.FullName -notlike '*\to delete\*'
