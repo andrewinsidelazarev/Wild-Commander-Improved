@@ -1,4 +1,8 @@
-# Карантин не публикуется.
-/source/to delete/
+# Локальная корзина: ненужное лежит там с прежними путями (опись — MANIFEST.md).
+/.to-delete/
+# Кэш Python.
+__pycache__/
+# Результаты сборки и проверок.
+/Build/
 # Сборка FTViewConvert: exe ~105 МБ (больше предела GitHub) и архив ffmpeg.
-/Build/ftview-convert/
+/FTViewConvert/build/
