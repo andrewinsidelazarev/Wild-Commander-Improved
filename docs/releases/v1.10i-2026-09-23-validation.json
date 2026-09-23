@@ -1,0 +1,288 @@
+{
+  "date": "2026-09-23",
+  "passed": true,
+  "runtime": {
+    "Help.txt": {
+      "bytes": 1871,
+      "sha256": "123d4e3297622511b3fa595210d8003a02950448506740e202f93baaedf0b646"
+    },
+    "WC/BMPV.WMF": {
+      "bytes": 5935,
+      "sha256": "82a707d1fa2ab573f497d9158251f50005b4b7b4129c6b46107cbefe69d13bb4"
+    },
+    "WC/CHKDSK.WMF": {
+      "bytes": 11599,
+      "sha256": "f44b80016dd8e8dea87936ec21b206a066efdbcb5b7d7c0ebb5ce3b9dff562f3"
+    },
+    "WC/CLOCK.WMF": {
+      "bytes": 75009,
+      "sha256": "8957c4d0cb2d5437fdb90c8a2adec10663e52118e54c0d74e584546dd5626998"
+    },
+    "WC/COMPILER.WMF": {
+      "bytes": 18412,
+      "sha256": "29d2c7f9db3f546909206aeca3c0bab970c9a57f880307f411a4e20a53470693"
+    },
+    "WC/FILEX.WMF": {
+      "bytes": 7237,
+      "sha256": "943472d960d3f8a9f0143d19d12532846a42ac622e39e6c79c567c24684d7093"
+    },
+    "WC/FILE_CR.WMF": {
+      "bytes": 20241,
+      "sha256": "18e9ca95813e7988f4102bc96aa407aa25541b5e1162027b6bf75986deaade13"
+    },
+    "WC/FTVIEW.WMF": {
+      "bytes": 49664,
+      "sha256": "08c1e44a9845872d335fecc4d57fb9a3e911d01d1fc909c857468d753b22ae51"
+    },
+    "WC/GIFVIEW.WMF": {
+      "bytes": 3298,
+      "sha256": "49162fa8e3eade9259cdf2bf1269065120eb394efb31a5e69208078322c2bb82"
+    },
+    "WC/GSPLAYER.WMF": {
+      "bytes": 12534,
+      "sha256": "69c40c10631e14663986c88c62f1216cb14227c442fd91fe023aff841b29aeeb"
+    },
+    "WC/ILBMVIEW.WMF": {
+      "bytes": 18944,
+      "sha256": "5ff5186062e9531190596c2f96a8356440f4f0c97ddd580c12fe1d69df3a335b"
+    },
+    "WC/MCGSV.WMF": {
+      "bytes": 2154,
+      "sha256": "929e23debd0d6508e9f9d1d6f668aacd31d8724c69ced95154dfd01cb1d9ca62"
+    },
+    "WC/MENU/Hrust v1.3.spg": {
+      "bytes": 9762,
+      "sha256": "7609625d462b3e9a143561564f7b179be9e901ca0f742df598e68a6722d9fb20"
+    },
+    "WC/MENU/RUD v2.42.spg": {
+      "bytes": 14553,
+      "sha256": "45049127c571bf1a10fbc941583ea77a4f796df60511f7bff77ab070dd4cfba9"
+    },
+    "WC/MENU/WDC v1.60.$C": {
+      "bytes": 21777,
+      "sha256": "9bd3ca4886227769ae3727a5bf2840af4b8676680822004523db265535f1490e"
+    },
+    "WC/MOUNTER.WMF": {
+      "bytes": 42482,
+      "sha256": "4c0756cafb0a42ea6a669313b0d56c2f8d6cb0b31770a8e7d4d1b0ee7411e6d0"
+    },
+    "WC/PLASMATW.WMF": {
+      "bytes": 44032,
+      "sha256": "c4de7bc6a614d04766b5ce045c5bb260bcafef8c55c0dcf9a681a091d6832f85"
+    },
+    "WC/ROM_PROG.WMF": {
+      "bytes": 2022,
+      "sha256": "c33dc920ed9327a64fc2bb171ce11a5abd79563d2dca67cb547a90053328c7f8"
+    },
+    "WC/SCRSAVER.WMF": {
+      "bytes": 819,
+      "sha256": "28d0e101dc52dc3863ac7ed639d58e6d08338d9fcac6dcf67e5661b244dc575e"
+    },
+    "WC/SETIME.WMF": {
+      "bytes": 1762,
+      "sha256": "5cd01fe56b427f31a0c48940893dbcebb2abf0fba2591932ea4984e4c2e2fab1"
+    },
+    "WC/TAPM.WMF": {
+      "bytes": 53760,
+      "sha256": "d12797aa0f40aacc0facd66b1deddb8a5f45da597ca2a67479f1f5eb23ea0103"
+    },
+    "WC/TRDUMP.WMF": {
+      "bytes": 6137,
+      "sha256": "e8c07419396538b457a3d45a2662c4c452482ce584c31217f05bca8d17650845"
+    },
+    "WC/TRDisp.wmf": {
+      "bytes": 8552,
+      "sha256": "508cd851a69d0f93188862f02f0d1f936eb4bd331c1ea98ea38019d18fc63a43"
+    },
+    "WC/TXTEDIT.WMF": {
+      "bytes": 11311,
+      "sha256": "2a7c7935ca73205455b08c4f3b8673f7ef4ac03bdb19b4e07fda8d941d380495"
+    },
+    "WC/TXTVIEW.WMF": {
+      "bytes": 7168,
+      "sha256": "eb5c87d1b8164b6ba72276eb3a07e6a7a2627b3590f6a0bfa009871fa431df02"
+    },
+    "WC/TXTVIEW2.LIC": {
+      "bytes": 4377,
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb"
+    },
+    "WC/TXTVIEW2.WMF": {
+      "bytes": 158208,
+      "sha256": "8acfffb5570d67b2d6527ffc69ac2310bb71cb72072e0df27e7efc0f51e4c907"
+    },
+    "WC/UNZIP.WMF": {
+      "bytes": 16896,
+      "sha256": "4868f7c35fe1debecadf92f08acdc99b937ea30e280e3ccc988733b93cd2d502"
+    },
+    "WC/VIDEO_PL.WMF": {
+      "bytes": 2522,
+      "sha256": "8c205f21b70d3d1535b33ab1536f565ff1fee9da5af86e5ebf62453968e2a2d0"
+    },
+    "WC/WPLAYER.WMF": {
+      "bytes": 29407,
+      "sha256": "dbabc08bf4f501fd8a07df3cc19ded870fda717b9c5d6a2dd0bdac60ba3a4d34"
+    },
+    "WC/wc.ini": {
+      "bytes": 1631,
+      "sha256": "bd7a2be6278337a8550989642a742c5a5e4bd8ab3108761c311b2de97437f903"
+    },
+    "WC/wc.mnu": {
+      "bytes": 127,
+      "sha256": "1ef183a2f0b5bb3400d248b5f7cdd92ab8367c1ec626ab092f9850714542ed11"
+    },
+    "WC_History.txt": {
+      "bytes": 90646,
+      "sha256": "8179feb292f6fdf97d854d483e795f3689cd0c277a2d8e79531b2ed59ff5ac9b"
+    },
+    "WC_todo.txt": {
+      "bytes": 2130,
+      "sha256": "4a0354f31d95303a988e3b852519905c4cea1dcb17cd9cc730b96299ae52664f"
+    },
+    "boot.$C": {
+      "bytes": 31761,
+      "sha256": "ddc49c18299cd1e7e06c40560d9058f998fe437f50702c7bf92dcea712ab79b4"
+    }
+  },
+  "abi": {
+    "entry_count": 18,
+    "passed": true,
+    "entries": {
+      "START": "0x4000",
+      "NXTETY2": "0x4067",
+      "NXTETY": "0x413f",
+      "LOAD512": "0x43a0",
+      "SAVE512": "0x4398",
+      "CURIT": "0x44a5",
+      "GIPAG": "0x44d7",
+      "MKSG": "0x4880",
+      "DLSG": "0x49b4",
+      "SRHDRN": "0x4a4c",
+      "MKFILE": "0x4d34",
+      "MKDIR": "0x4d5b",
+      "DELFL": "0x4cdd",
+      "RENAME": "0x4d13",
+      "HDD": "0x4e71",
+      "DOS_SWP": "0x4ff8",
+      "DEHR": "0x5aaa",
+      "END": "0x5bf2"
+    },
+    "guard_in_build": true,
+    "unchanged_since": "2026-09-19"
+  },
+  "tests": {
+    "full_build_passed": true,
+    "build_log_sha256": "e3e389f2f483cbe08ba821530f10a809da12fcc84bf76d4945e1a15cd7f19bab",
+    "unittest_runs": [
+      {
+        "tests": 24,
+        "status": "OK"
+      },
+      {
+        "tests": 17,
+        "status": "OK"
+      },
+      {
+        "tests": 44,
+        "status": "OK"
+      },
+      {
+        "tests": 10,
+        "status": "OK"
+      },
+      {
+        "tests": 9,
+        "status": "OK"
+      },
+      {
+        "tests": 4,
+        "status": "OK"
+      },
+      {
+        "tests": 11,
+        "status": "OK"
+      },
+      {
+        "tests": 5,
+        "status": "OK"
+      }
+    ],
+    "unittest_tests_total": 124,
+    "suites": [
+      "test_allocator_wrap.py",
+      "test_core32_regressions.py",
+      "test_fat_allocator_hint.py",
+      "test_fat_stream_cache.py",
+      "test_filex_abi.py",
+      "test_lfn_namespace.py",
+      "test_overwrite_path.py",
+      "test_plugin_panel_refresh.py",
+      "test_txtedit_editing.py",
+      "test_txtedit_features.py",
+      "test_txtedit_navigation.py",
+      "test_txtedit_safety.py",
+      "test_txthex_viewer.py",
+      "test_wcfx_copy_bounds.py",
+      "test_wcini_version.py"
+    ],
+    "fat_stream_cache_tests": 11,
+    "file_overwrite_path_tests": 5,
+    "unzip_tests": 31,
+    "abi_guard_passed": true
+  },
+  "kernel_fat_cache": {
+    "invalidated_by": [
+      "запись сектора FAT",
+      "монтирование тома (DOS_SWP)",
+      "смена и инициализация драйвера (HDD, DEVINI)",
+      "начало чтения каталога (NXTINI)",
+      "любое чтение FAT ядром (CURIT)"
+    ],
+    "differential_vs_previous_kernel": {
+      "streams_compared": 60,
+      "directories_compared": 40,
+      "delete_cases": 20,
+      "allocations": 40,
+      "data_flags_and_stream_state_identical": true,
+      "documented_difference": "LTHL/CLHL после конца цепочки на попадании в кэш",
+      "fat_sector_reads_before": 19101,
+      "fat_sector_reads_after": 668
+    },
+    "model_measurement": {
+      "chain_clusters": 12808,
+      "fat_reads_before": 12808,
+      "fat_reads_after": 101,
+      "kernel_tstates_per_cluster_before": 10005,
+      "kernel_tstates_per_cluster_after": 3671
+    },
+    "unreal_measurement": {
+      "file": "MUSE.AVI",
+      "file_bytes": 52460702,
+      "bytes_per_cluster": 4096,
+      "first_seek_seconds_before": 29.89,
+      "first_seek_seconds_after": 10.89,
+      "note": "FTView со сбросом через LOADNON; закоммиченный FTView проходит цепочку сам"
+    },
+    "filex_wmf_unchanged": true
+  },
+  "unreal_runs": [
+    {
+      "case": "WC с настоящим комплектом",
+      "checks": [
+        "воспроизведение AVI",
+        "звук на FT812",
+        "список роликов",
+        "конец ролика",
+        "TXTVIEW2 после FTView"
+      ],
+      "passed": true,
+      "reported_by": "сессия FTView",
+      "reverified_in_this_step": false
+    }
+  ],
+  "physical_zx_evolution_tested": false,
+  "physical_hardware": {
+    "general_sound_audio_confirmed_by_user": true,
+    "fat_sector_cache_tested": false
+  },
+  "validation_scope": "Собранный код Z80, машинные тесты ядра и плагинов, модели носителя и прогоны в Unreal; на физический ZX Evolution в рамках выпуска записи и приёмки не было, кроме подтверждённого пользователем звука General Sound."
+}
