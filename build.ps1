@@ -1,4 +1,4 @@
-# Codex - 2026-07-16 - begin
+﻿# Codex - 2026-07-16 - begin
 [CmdletBinding()]
 param(
     [string]$ReferenceRoot,
@@ -399,6 +399,38 @@ if ($LASTEXITCODE -ne 0) { throw 'FTView Z80/DMA regression tests failed.' }
 & python (Join-Path $FtViewProject 'tests\test_gs.py') --out $FtViewBuild
 if ($LASTEXITCODE -ne 0) { throw 'FTView General Sound tests failed.' }
 
+# Claude - 2026-09-24 - begin
+# PLM — менеджер загрузки плагинов: резидент в одну страницу, который держит
+# плагины на диске и подгружает их при запуске. Он переписывает в RAM пять
+# известных кусков кода WC, поэтому ниже, уже после сборки boot.$C, эталоны
+# перехватов сверяются с собранным runtime.
+$PlmSource = Join-Path $ProjectRoot 'source\plugins\plm\PLM.ASM'
+$PlmOutput = Join-Path $BuildDir 'PLM.WMF'
+Remove-Item -LiteralPath $PlmOutput, (Join-Path $BuildDir 'PLM.sym'),
+    (Join-Path $BuildDir 'PLM.lst') -Force -ErrorAction SilentlyContinue
+if (-not (Test-Path -LiteralPath $PlmSource -PathType Leaf)) {
+    throw "PLM source not found: $PlmSource"
+}
+Push-Location -LiteralPath $ProjectRootAlias
+try {
+    & $SjasmPlus '--nologo' '--msg=err' `
+        "--sym=$ProjectRootAscii/Build/PLM.sym" `
+        "--lst=$ProjectRootAscii/Build/PLM.lst" `
+        "$ProjectRootAscii/source/plugins/plm/PLM.ASM"
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { throw 'PLM.ASM assembly failed.' }
+if (-not (Test-Path -LiteralPath $PlmOutput -PathType Leaf)) {
+    throw 'PLM.WMF was not created.'
+}
+# Заголовок 512 байт плюс одна страница пула: менеджер не имеет права занимать
+# больше, чем он освобождает.
+if ((Get-Item -LiteralPath $PlmOutput).Length -gt (512 + 0x4000)) {
+    throw 'PLM.WMF exceeds one 16-KiB runtime page.'
+}
+# Claude - 2026-09-24 - end
+
 # Codex - 2026-07-16 - begin
 $MainSourceAscii = "$ProjectRootAscii/source/BOOT.ASM"
 $PayloadAscii = "$ProjectRootAscii/Build/boot.payload.bin"
@@ -596,11 +628,13 @@ $ViewerByteEncoding = [Text.Encoding]::GetEncoding(28591)
 $ViewerIniText = $ViewerByteEncoding.GetString([IO.File]::ReadAllBytes($ViewerIniPath))
 $ViewerIniText = [regex]::Replace($ViewerIniText,
     '(?im)(^|[\r\n])([ \t]*)RE\.WMF(?=[ \t;\r\n]|$)', '$1$2TXTVIEW.WMF')
-# Эталон содержит историческую версию 1.1. Поставляемый INI должен совпадать
-# с заголовком Improved и результатом F9; меняем только первую строку,
-# сохраняя OEM-байты комментариев и исходные одиночные CR.
+# Эталон содержит историческую версию 1.1, а уже собранный exe — версию
+# прошлого выпуска. Поставляемый INI должен совпадать с заголовком Improved и
+# результатом сохранения настроек по F9, поэтому первая строка приводится к
+# текущей версии в обоих случаях; OEM-байты комментариев и одиночные CR
+# остаются как есть.
 $ViewerIniText = [regex]::Replace($ViewerIniText,
-    '\AWild Commander v1\.1(?=\r|\n|$)', 'Wild Commander v1.10i')
+    '\AWild Commander v1\.1[0-9]*i?(?=\r|\n|$)', 'Wild Commander v1.11i')
 [IO.File]::WriteAllBytes($ViewerIniPath, $ViewerByteEncoding.GetBytes($ViewerIniText))
 
 # UNZIP запускается по Enter на расширении ZIP и располагается сразу после
@@ -621,6 +655,20 @@ $ChkdskRuntime = Join-Path $ExeDir 'WC\CHKDSK.WMF'
     --wc-dir (Join-Path $ExeDir 'WC')
 if ($LASTEXITCODE -ne 0) { throw 'CHKDSK runtime installation failed.' }
 
+# Claude - 2026-09-24 - begin
+# Менеджер плагинов идёт второй строкой, сразу за обязательным FILEX: резидент
+# обязан получить страницу пула раньше остальных плагинов, иначе их страницы
+# останутся занятыми ниже его собственной.
+& python (Join-Path $ProjectRoot 'tools\install_plm_runtime.py') `
+    --plugin $PlmOutput `
+    --wc-dir (Join-Path $ExeDir 'WC')
+if ($LASTEXITCODE -ne 0) { throw 'PLM runtime installation failed.' }
+# Эталоны перехватов сверяются с собранным boot.$C, а рабочие подпрограммы
+# исполняются настоящим Z80 на модели страниц TS-Conf.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_plugin_manager.py')
+if ($LASTEXITCODE -ne 0) { throw 'Plugin manager machine tests failed.' }
+# Claude - 2026-09-24 - end
+
 $HashReport = Join-Path $BuildDir 'hash-report.tsv'
 & python (Join-Path $ProjectRoot 'tools\verify_hashes.py') `
     --actual $ExeDir `
@@ -638,7 +686,7 @@ if ($HashExitCode -ne 0) {
         'boot.$C', 'WC_History.txt', 'WC_todo.txt',
         'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/RE.WMF', 'WC/TXTVIEW.WMF',
         'WC/TXTVIEW2.WMF', 'WC/TXTVIEW2.LIC', 'WC/UNZIP.WMF',
-        'WC/CHKDSK.WMF', 'WC/FTVIEW.WMF', 'WC/wc.ini'
+        'WC/CHKDSK.WMF', 'WC/FTVIEW.WMF', 'WC/PLM.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -656,13 +704,14 @@ if ($HashExitCode -ne 0) {
             'WC/TXTVIEW.WMF' { 'EXTRA_ACTUAL' }
             'WC/TXTVIEW2.WMF' { 'EXTRA_ACTUAL' }
             'WC/TXTVIEW2.LIC' { 'EXTRA_ACTUAL' }
+            'WC/PLM.WMF' { 'EXTRA_ACTUAL' }
             default { $null }
         }
         if ($ExpectedStatus -and $Mismatch.status -ne $ExpectedStatus) {
             throw "Unexpected audit status for $($Mismatch.path): $($Mismatch.status)"
         }
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, PLM plugin manager, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.

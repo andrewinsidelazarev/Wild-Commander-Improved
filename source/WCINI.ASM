@@ -1386,7 +1386,8 @@ SETUP   DB "CPU_FREQ",0:DW SUL1
 
 IDNT    DB "SpectrumProg"
 IDNT2   DB "WildCommanderMDL"
-; Префикс проверки формата, общий для v1.1 и v1.10i. Не строка для сохранения.
+; Префикс проверки формата, общий для v1.1, v1.10i и v1.11i: строка для
+; сохранения берётся из заголовка WC.
 IDNT3   DB "Wild Commander v1.1"
 
 IVD     DB "IDE VideoDAC: "

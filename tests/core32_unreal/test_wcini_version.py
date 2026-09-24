@@ -5,7 +5,7 @@ import z80
 
 ROOT = Path(__file__).resolve().parents[2]
 STOP = 0xFF00
-CURRENT = b'Wild Commander v1.10i'
+CURRENT = b'Wild Commander v1.11i'
 
 
 def invoke(cpu, address, data=None):
@@ -86,7 +86,7 @@ def main():
     invoke(cpu, syms['WCINI.INILOAD'], b'Invalid Commander v1.1' + body)
     assert not cpu.f & 64, 'Invalid signature accepted'
     print('WCINI version PASS: old/new INI load, multi-sector comments, '
-          'plugin merge, v1.10i save/create, exact text size without NUL, '
+          'plugin merge, v1.11i save/create, exact text size without NUL, '
           'saved INI reload, invalid signature')
 
 

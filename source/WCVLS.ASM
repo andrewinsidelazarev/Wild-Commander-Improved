@@ -464,7 +464,7 @@ WND_H   DB 36
 TXT1    DB #0E,5,5
 TXTC
 ; Codex - 2026-07-17 - begin
-        DB "Wild Commander v1.10i",0
+        DB "Wild Commander v1.11i",0
 ; Codex - 2026-07-17 - end
 TXT2    DB 7,7,"F1",6,1,"Help  "
         DB 7,7,"F2",8,1
