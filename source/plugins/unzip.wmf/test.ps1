@@ -10,7 +10,12 @@ if (-not (Test-Path -LiteralPath 'U:\Desktop' -PathType Container)) {
 }
 
 $ProjectRoot = [IO.Path]::GetFullPath($PSScriptRoot)
-$ProjectAlias = 'U:\Desktop\WC\WildCommander Improved\source\plugins\unzip.wmf'
+# Тот же расчёт пути через U:, что и в build.ps1: без зашитого имени проекта.
+$ProfileRoot = [IO.Path]::GetFullPath($env:USERPROFILE)
+if (-not $ProjectRoot.StartsWith($ProfileRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Project must live inside the user profile for the U: alias: $ProjectRoot"
+}
+$ProjectAlias = 'U:' + $ProjectRoot.Substring($ProfileRoot.Length)
 $SjasmPlus = 'U:\Desktop\sjasmplus\sjasmplus-1.21.0.win\sjasmplus.exe'
 
 if (-not $SkipPluginBuild) {

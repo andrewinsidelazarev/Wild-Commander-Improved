@@ -19,7 +19,13 @@ if (-not (Test-Path -LiteralPath $SjasmPlus -PathType Leaf)) {
     throw "Build tool not found: $SjasmPlus"
 }
 
-$ProjectAlias = 'U:\Desktop\WC\WildCommander Improved\source\plugins\unzip.wmf'
+# Путь через U: считается от самого каталога плагина: зашитое имя проекта
+# ломало сборку из любой другой копии дерева, например из git worktree.
+$ProfileRoot = [IO.Path]::GetFullPath($env:USERPROFILE)
+if (-not $ProjectRoot.StartsWith($ProfileRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Project must live inside the user profile for the U: alias: $ProjectRoot"
+}
+$ProjectAlias = 'U:' + $ProjectRoot.Substring($ProfileRoot.Length)
 if (-not (Test-Path -LiteralPath $ProjectAlias -PathType Container)) {
     throw "U: does not expose the project: $ProjectAlias"
 }
