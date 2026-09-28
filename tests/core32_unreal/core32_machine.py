@@ -1,6 +1,7 @@
 """Общий запуск собранных CORE32/FILEX с точками дискового стенда."""
 from pathlib import Path
 import z80
+import runtime_image
 import test_fat_allocator_hint as h
 import test_lfn_namespace as ns
 
@@ -15,10 +16,13 @@ def base(filex=False):
     cpu = z80.Z80Machine()
     boot = (ROOT / 'exe/boot.$C').read_bytes()
     cpu.set_memory_block(0x6000, boot)
-    cpu.set_memory_block(0x4000, boot[0x600C:0x600C + BOOT['WDOS.END'] - 0x4000])
+    cpu.set_memory_block(0x4000, runtime_image.core_image())
     runtime = ((ROOT / 'Build/FILEX.WMF').read_bytes()[512:] if filex
                else (ROOT / 'Build/CORE32_EXT.bin').read_bytes())
     cpu.set_memory_block(0xC000, runtime)
+    # Как установщик: резидентный блок расширения — на место драйверов ядра.
+    runtime_image.apply(cpu.memory, EXT,
+                        (ROOT / 'Build/CORE32_EXT.bin').read_bytes() if filex else None)
     return cpu
 
 
@@ -43,4 +47,8 @@ def run(cpu, start, callbacks=None, stops=(), budget=500000):
             return cpu.pc
         if cpu.pc in callbacks:
             callbacks[cpu.pc](cpu)
+            # Подмена, завершённая переходом на верхний выход (JP в подменённую
+            # процедуру и её RET), сама точку останова не вызовет.
+            if cpu.pc in targets:
+                return cpu.pc
     raise AssertionError(f'Z80 did not finish at #{cpu.pc:04X}')

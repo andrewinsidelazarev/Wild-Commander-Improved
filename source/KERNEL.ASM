@@ -131,6 +131,11 @@ FCTS    EQU CLCNT+4
 BUTS    EQU FCTS+4
 
 LSTCAT  EQU BUTS+4
+; Claude - 2026-09-25 - begin
+; RECCAT не использовали ни ядро, ни драйверы, ни WC; с 2026-09-25 здесь
+; исключающая граница data-кластеров смонтированного тома
+; (WDOS_EXT.FAT_DATA_CLUSTER_LIMIT) — своя у каждой страницы потока.
+; Claude - 2026-09-25 - end
 RECCAT  EQU LSTCAT+4
 
 ; START (#4000) — стабильная таблица внешнего API WildDOSFileCore.

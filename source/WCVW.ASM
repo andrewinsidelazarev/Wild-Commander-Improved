@@ -635,8 +635,10 @@ ALPL    LD A,(LOBU+197)
         CP C:RET Z
         CP #11:JR C,MIMI
         CP #16:CALL C,WCINI.EDTPR
-MIMI    CP #01:CALL Z,RAJT
-        RET
+; Хвост (запуск #01 после ручной загрузки и установка #06 сразу при старте)
+; живёт в MD20: здесь нет ни байта, граница WCVW проверяется точно.
+MIMI    JP @ALPL_TAIL
+        DS 3,0
 ;-------
 PDCHECK LD HL,#C000+165
 PDC     LD BC,(PHED)

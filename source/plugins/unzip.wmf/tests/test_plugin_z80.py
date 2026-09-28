@@ -126,8 +126,15 @@ class VirtualWC:
         initial_files: dict[tuple[bytes, ...], bytes] | None = None,
         keys: bytes = b"",
         filex_available: bool = True,
+        rename_fails: bool = False,
+        delete_fails: str = "",
     ) -> None:
         self.archive_name = archive_name
+        self.rename_fails = rename_fails
+        # Отказ первого удаления (API 75, DELFL): "keep" — запись цела;
+        # "name" — имя уже удалено, но цепочка не освобождена (DLSG): DELFL
+        # тоже возвращает Z.
+        self.delete_fails = delete_fails
         self.files: dict[tuple[bytes, ...], bytes] = {(archive_name,): archive_data}
         self.directories: set[tuple[bytes, ...]] = {()}
         if initial_files:
@@ -292,7 +299,8 @@ class VirtualWC:
             new_name = read_cstring(memory, machine.de)
             old_path = self.find(old_kind, old_name)
             new_path = self.path_for(new_name)
-            if old_path is None or new_path in self.files or new_path in self.directories:
+            if (self.rename_fails or old_path is None or new_path in self.files
+                    or new_path in self.directories):
                 self.set_flags(machine, zero=True)
             else:
                 self.files[new_path] = self.files.pop(old_path)
@@ -305,6 +313,12 @@ class VirtualWC:
             name = read_cstring(memory, machine.hl + 1)
             target = self.find(kind, name)
             if target is None or target not in self.files:
+                self.set_flags(machine, zero=True)
+            elif self.delete_fails:
+                failure, self.delete_fails = self.delete_fails, ""
+                if failure == "name":
+                    del self.files[target]
+                self.events.append("delete failed")
                 self.set_flags(machine, zero=True)
             else:
                 del self.files[target]
@@ -536,6 +550,67 @@ class PluginZ80Tests(unittest.TestCase):
         self.assertLessEqual(len(temp_lookups), 2 * len(expected))
         self.assertGreater(wc.saved_sectors, 0)
         self.assertIn("append", wc.events)
+
+    def test_failed_rename_after_delete_keeps_the_new_data(self) -> None:
+        # Прежний файл уже удалён, а переименование временного не удалось:
+        # временный — единственная копия новых, проверенных по CRC данных.
+        # Прежде cleanup_temp удалял и его — пропадали обе версии.
+        payload = b"new verified data." * 20
+        archive_stream = io.BytesIO()
+        with zipfile.ZipFile(
+            archive_stream, "w", compression=zipfile.ZIP_STORED, allowZip64=False
+        ) as archive_file:
+            archive_file.writestr("ONLY.BIN", payload)
+        archive = archive_stream.getvalue()
+        archive_name = b"ONE.ZIP"
+        target = (b"ONLY.BIN",)
+        wc = VirtualWC(
+            archive_name,
+            archive,
+            initial_files={target: b"old version"},
+            keys=b"y",
+            rename_fails=True,
+        )
+
+        self.run_plugin(wc, archive_name, archive)
+
+        temps = [path for path in wc.files
+                 if path and path[-1].startswith(b"WCUZ") and path[-1].endswith(b".$$$")]
+        self.assertEqual(len(temps), 1, "временный файл с новыми данными удалён")
+        self.assertEqual(wc.files[temps[0]], payload)
+
+    def replace_with_failed_delete(self, failure: str):
+        payload = b"new verified data." * 20
+        archive_stream = io.BytesIO()
+        with zipfile.ZipFile(
+            archive_stream, "w", compression=zipfile.ZIP_STORED, allowZip64=False
+        ) as archive_file:
+            archive_file.writestr("ONLY.BIN", payload)
+        archive = archive_stream.getvalue()
+        archive_name = b"ONE.ZIP"
+        wc = VirtualWC(
+            archive_name,
+            archive,
+            initial_files={(b"ONLY.BIN",): b"old version"},
+            keys=b"y",
+            delete_fails=failure,
+        )
+        self.run_plugin(wc, archive_name, archive)
+        return wc, payload
+
+    def test_failed_delete_that_already_removed_the_name_keeps_the_new_data(self) -> None:
+        # DELFL вернул отказ, а имя прежнего файла уже удалено (не
+        # освободилась цепочка). Прежде это считалось «старый цел»: общий
+        # cleanup удалял временный — пропадали обе версии (аудит Codex, п. 16).
+        wc, payload = self.replace_with_failed_delete("name")
+        self.assertEqual(wc.files.get((b"ONLY.BIN",)), payload, "новые данные потеряны")
+        self.assert_no_temporary_files(wc)
+
+    def test_failed_delete_that_kept_the_old_file_keeps_it(self) -> None:
+        # Отказ удаления, прежний файл цел: он и остаётся, временный удалён.
+        wc, _ = self.replace_with_failed_delete("keep")
+        self.assertEqual(wc.files.get((b"ONLY.BIN",)), b"old version")
+        self.assert_no_temporary_files(wc)
 
     def test_existing_file_yes_replaces_it(self) -> None:
         archive_path, expected = make_archive()

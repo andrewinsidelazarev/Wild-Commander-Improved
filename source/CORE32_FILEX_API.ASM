@@ -33,7 +33,13 @@ FILEX_OP_GET_FS_INFO           EQU 4
 FILEX_OP_MOVE_RENAME           EQU 5
 FILEX_OP_SET_METADATA          EQU 6
 FILEX_OP_READ_FAT              EQU 7
-FILEX_OP_COUNT                 EQU 8
+; Claude - 2026-09-26 - begin
+; Прочитать атрибут и времена последнего FENTRY без записи (структура — как у
+; SET_METADATA). Есть, если QUERY_CAPS ставит FILEX_CAP2_GET_METADATA в байт
+; result_count+1; прежний FILEX там отдаёт 0, а на код 8 — BAD_OPERATION.
+FILEX_OP_GET_METADATA          EQU 8
+FILEX_OP_COUNT                 EQU 9
+; Claude - 2026-09-26 - end
 
 FILEX_CAP_READ_AT              EQU %00000001
 FILEX_CAP_WRITE_AT             EQU %00000010
@@ -43,6 +49,8 @@ FILEX_CAP_MOVE_RENAME          EQU %00010000
 FILEX_CAP_SET_METADATA         EQU %00100000
 FILEX_CAP_MOVE_CURRENT_DIR     EQU %01000000
 FILEX_CAP_READ_FAT             EQU %10000000
+; Второй байт возможностей (result_count+1), с 2026-09-26.
+FILEX_CAP2_GET_METADATA        EQU %00000001
 
 FILEX_FLAG_REPLACE             EQU %00000001
 FILEX_FLAG_CURRENT_DIR         EQU %00000010

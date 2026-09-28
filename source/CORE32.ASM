@@ -50,35 +50,38 @@ RMFL2   LD A,L:AND #F0:LD L,A
         JP NXFL2
 ; NXTETY2 — получить следующую подходящую запись активного каталога.
 ; Вход: DE — адрес выходного буфера; A — маска результата:
-;   бит 7: выдавать только короткие имена; бит 4: добавить время создания;
-;   бит 3: добавить дату создания; бит 2: добавить размер;
+;   бит 7: выдавать только короткие имена;
+;   бит 6: в полях битов 4 и 3 — время и дата ИЗМЕНЕНИЯ (+22/+24), а не
+;          создания (с 2026-09-26; старое ядро бит не знает и отдаёт создание);
+;   бит 4: добавить время создания (с битом 6 — изменения);
+;   бит 3: добавить дату создания (с битом 6 — изменения);
+;   бит 2: добавить размер;
 ;   биты 1..0: 0 — любая запись, 1 — файл, 2 — каталог, 3 — резерв.
 ; Выход: Z — конец каталога; NZ — запись помещена в буфер, DE указывает за
-; ней. Формат: выбранные поля, признак, имя и завершающий ноль.
+; ней. Формат: выбранные поля (размер 4, дата 2, время 2), признак, имя и
+; завершающий ноль. Штамп не из календаря — 2026-01-01 00:00 (см. BT3).
+; Z бывает и при отказе чтения: NXTINI/NXMR ставят ноль в начало
+; непрочитанного, отличает его ABT≠0 (той страницы, где шло перечисление;
+; до следующего обмена с носителем). Так же — недопустимый первый кластер
+; каталога (GIPAG: ABT=#FE; NXTINI тогда не читает).
 ; Побочные эффекты: изменяет состояние итератора CG*, при необходимости читает
-; продолжение цепочки через LOAD512. Процедура использует самоподстановки BT*
-; и NxMR, поэтому не является повторно-входимой.
+; продолжение цепочки через LOAD512. Маска целиком хранится операндом BT7, NxMR
+; тоже самоподстановка, поэтому процедура не является повторно-входимой.
 NXTETY2
-
-        LD C,A
-        XOR A:BIT 7,C:JR Z,$+3:INC A
+; Claude - 2026-09-26 - begin
+; Прежде каждый бит маски раскладывался в свой флаг BT* (по 9 байт на флаг);
+; теперь маска — одним байтом, и её читают сами проверки. Освободившееся место
+; — под дату и время записи (BT3): с битом 6 — изменения, штамп проверяется.
+; Адреса NXTETY2 и NXTETY прежние.
         LD (BT7+1),A
-        XOR A:BIT 4,C:JR Z,$+3:INC A
-        LD (BT4+1),A
-        XOR A:BIT 3,C:JR Z,$+3:INC A
-        LD (BT3+1),A
-        XOR A:BIT 2,C:JR Z,$+3:INC A
-        LD (BT2+1),A
-        LD A,C:AND %00000011
-        LD (BT0+1),A
-
+; Claude - 2026-09-26 - end
         PUSH DE
         LD A,(CGFL):OR A:CALL Z,NXTINI
         POP DE
 
         LD HL,NXFF2,(NxMR+1),HL
 NXFF2   LD HL,(CGPZ),B,0
-NXFL2   LD A,H:CP high NXTBE:JR NC,NXMR
+NXFL2   LD A,H:CP high NXTBE:JP NC,NXMR         ; JP: за BT3 NXMR дальше JR
         LD A,(HL)
         OR A:RET Z
         CP #E5:JR Z,RMFL2
@@ -86,48 +89,69 @@ NXFL2   LD A,H:CP high NXTBE:JR NC,NXMR
         LD C,11:ADD HL,BC
         LD A,(HL):BIT 3,A:JR NZ,RMFL2
         EXA
-BT0     LD A,0
-        OR A:JR Z,BT1
+BT0     LD A,(BT7+1):AND %00000011:JR Z,BT1    ; биты 1..0 маски: тип записи
         DEC A:JR NZ,BT01
         EXA:BIT 4,A:JR NZ,RMFL2,Bt1
 BT01    EXA:BIT 4,A
-DIR_FILTER_REJECT_BRANCH:
         JR Z,RMFL2
 
 Bt1     EXA
 BT1     LD C,16-11:ADD HL,BC
-BT2     LD A,0:OR A:JR Z,BT3
+BT2     LD A,(BT7+1):AND %00000100:JR Z,BT3    ; бит 2 маски: размер
         LD C,28-16:ADD HL,BC
  DUP 4
          LDI
  EDUP
         LD C,16:SBC HL,BC
 
-BT3     LD A,0:OR A:JR Z,BT4
- DUP 2
-         LDI
- EDUP
- DUP 2
-         DEC L
- EDUP
+; Claude - 2026-09-26 - begin
+; Бит 3 маски — дата записи, бит 4 — время; с битом 6 — изменения (+24, +22),
+; без него — создания (+16, +14). Здесь HL — +16 записи, B=0. Штамп проходит
+; CHECK_STAMP расширения: даты или времени нет в календаре — выводится
+; 2026-01-01 00:00; сама запись в буфере не меняется. B=0 после вызова —
+; снова (его ждёт NXTE2).
+BT3     LD A,(BT7+1)
+        BIT 6,A:JR Z,.creation
+        LD C,8:ADD HL,BC                        ; +16 -> +24: изменение
+.creation:
+        PUSH HL
+        PUSH DE
+        LD E,(HL):INC L:LD D,(HL)               ; DE — дата
+        DEC L:DEC L
+        LD B,(HL):DEC L:LD L,(HL):LD H,B        ; HL — время
+        PUSH AF
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_CHECK_STAMP
+        POP AF
+        EX (SP),HL                              ; HL — буфер, в стеке — время
+        BIT 3,A:JR Z,.time
+        LD (HL),E:INC HL:LD (HL),D:INC HL       ; дата
+.time:
+        POP DE
+        BIT 4,A:JR Z,.done
+        LD (HL),E:INC HL:LD (HL),D:INC HL       ; время
+.done:
+        EX DE,HL                                ; DE — за выводом
+        POP HL                                  ; +16 или +24
+        LD B,0
+; Claude - 2026-09-26 - end
 
-BT4     LD A,0:OR A:JR Z,BT8
- DUP 2
-         DEC L
- EDUP
- DUP 2
-         LDI
- EDUP
-
-BT8     RES 4,L:CALL LNCRC
+BT8     RES 4,L:RES 3,L                         ; +16 или +24 -> начало записи
+        CALL LNCRC
 
         EXA:LD (DE),A:INC DE
-BT7     LD A,0:OR A:JP Z,NXTE2
+BT7     LD A,0:RLA:JP NC,NXTE2                  ; операнд — маска, бит 7 — в CF
         LD A,L:AND #F0:LD L,A
         JP Snm
 
 ; Codex - 2026-07-16 - begin
-NXMR    LD A,(EOC):OR A:RET NZ
+; Claude - 2026-09-26 - begin
+; Буфер NXTBU пройден: конец цепочки (EOC=#0F) или отказ чтения (#FF) — конец
+; перечисления: Z, A=0, как у нулевой записи. Прежде «OR A:RET NZ» отдавал NZ
+; без новой записи: полный каталог от 8 КиБ (ноль за последней записью
+; попадал за NXTBE) перечислялся без конца. 2 байта — из выравнивания перед
+; NXTETY.
+NXMR    LD A,(EOC):CP 1:SBC A,A:RET Z           ; EOC=0: A=#FF, NZ — дальше
+; Claude - 2026-09-26 - end
 ; Codex - 2026-07-16 - end
 
         PUSH DE
@@ -143,11 +167,30 @@ NxMR    JP 0
 
 RMFL    LD C,32-11:ADD HL,BC:JP NXFL
 RMFL1   LD C,32:ADD HL,BC:JP NXFL
+; Claude - 2026-09-21 - begin
+; FAT_CACHE_GENERATION — поколение содержимого FAT, общее для всех файловых
+; страниц (лежит в окне #4000). FAT_CACHE_BUMP увеличивает его при записи FAT,
+; монтировании, смене и инициализации драйвера, начале чтения каталога.
+; Страница, чей FATTAG не совпадает, перечитывает сектор FAT. Начало с 1:
+; нулевой FATTAG свежей страницы (после DOS_SWP) никогда не совпадает, а
+; старший байт #FF (метка CURIT_INVALIDATE) недостижим. С 2026-09-26 лежит
+; здесь, в выравнивании перед NXTETY (данные: исполнение сюда не доходит —
+; выше безусловный JP), — прежнее место перед SNCEN ушло под PLAIN_ALIAS.
+FAT_CACHE_GENERATION:
+        DB 1,0,0,0
+; Claude - 2026-09-21 - end
+; Claude - 2026-09-26 - begin
+        ; NXTETY2 после переделки маски короче: вход NXTETY — на прежнем месте.
+        ASSERT $ <= #413F, NXTETY2 не помещается перед NXTETY
+        DS #413F-$,0
+        ASSERT $ == #413F, сдвинулся вход NXTETY
+; Claude - 2026-09-26 - end
 ; NXTETY — получить следующую полную запись активного каталога.
 ; Вход: DE — адрес выходного буфера.
 ; Выход: Z — конец каталога; NZ — запись создана, DE указывает за ней.
-; Формат результата: первый кластер (4), размер (4), дата (2), время (2),
-; инвертированный признак каталога, имя переменной длины и нулевой байт.
+; Формат результата: первый кластер (4), размер (4), время изменения (2),
+; дата изменения (2), инвертированный признак каталога, имя переменной длины
+; и нулевой байт. Время и дата вместе — ключ сортировки панели по дате.
 ; Побочные эффекты совпадают с NXTETY2: обновляются CG* и поток LOAD512;
 ; выходной буфер заполняется последовательно командами LDI.
 NXTETY
@@ -178,23 +221,20 @@ NXFL    LD A,H:CP high NXTBE:JR NC,NXMR
  DUP 4
          LDI
  EDUP
-        LD C,16:SBC HL,BC
-
- DUP 2
+; Claude - 2026-09-24 - begin
+        ; Время и дата ИЗМЕНЕНИЯ (+22, +24) подряд, как в записи FAT: панель
+        ; показывает их в строке информации и сортирует по ним (Ctrl+F5) как по
+        ; одному 32-битному ключу. Прежде здесь копировались дата и время
+        ; создания (+16, +14). Размер фрагмента прежний: два байта — NOP.
+        LD C,10:SBC HL,BC                       ; +32 -> +22
+ DUP 4
          LDI
  EDUP
- DUP 2
-         DEC L
- EDUP
-
- DUP 2
-         DEC L
- EDUP
- DUP 2
-         LDI
- EDUP
-
-        RES 4,L:CALL LNCRC
+        LD A,L:AND #E0:LD L,A                   ; к началу записи
+        NOP
+        NOP
+; Claude - 2026-09-24 - end
+        CALL LNCRC
 
         EXA
         AND #10
@@ -240,7 +280,9 @@ LNPARS  LD A,(HL)
 ; очередного символа, DE — выход). Выход: CF=1 — все B символов приняты;
 ; CF=0 — отказ UCH с его же Z/NZ (Z — несовпадение, NZ — конец имени), как
 ; ждёт SNMX. B=0 на обоих выходах: ниже BC служит смещением при B=0.
-UCHN    CALL UCH:JR NC,UCHN_STOP
+; С 2026-09-25 — через UCH_BOUNDED: на 255-м знаке поля CGDE имя кончается
+; (повреждённый каталог с LFN длиннее 255 писал за поле вызывающего).
+UCHN    CALL UCH_BOUNDED:JR NC,UCHN_STOP
         DJNZ UCHN
         SCF
         RET
@@ -366,10 +408,24 @@ NXTINI
         LD HL,1
         LD (CGFL),HL
 
-        LD HL,LSTCAT:CALL GIPAG
+; Claude - 2026-09-27 - begin
+        ; Прежде «LD HL,LSTCAT:CALL GIPAG». DIR_LIST_OPEN сначала проверяет
+        ; цепочку каталога (DIR_CHAIN расширения): замкнутая или уходящая за
+        ; том вешала перечисление (Codex R26-02); испорчена — как отказ
+        ; GIPAG (CF=1, ABT=#FE), дальше CALL NC,LOAD512 не читает. Длина та же.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_DIR_LIST_OPEN
+        DS 2,0
+; Claude - 2026-09-27 - end
 
         LD HL,NXTBU,(CGPZ),HL,B,NXTBZ
-        CALL LOAD512
+; Claude - 2026-09-26 - begin
+        ; Недопустимый первый кластер (GIPAG: CF=1, ABT=#FE, EOC=#FF) — не
+        ; читать: LOAD512 обнулил бы ABT, и отказ выглядел бы пустым каталогом
+        ; (Codex R24-01: F5 такого каталога — пустая копия без сообщения).
+        ; Ноль в начале NXTBU — конец перечисления, ABT остаётся. Флаги GIPAG
+        ; команды LD выше не меняют; длина прежняя.
+        CALL NC,LOAD512
+; Claude - 2026-09-26 - end
         LD (HL),0
         RET
 
@@ -634,7 +690,14 @@ STREAM_NEXT_CACHED:
         JR NZ,STREAM_NEXT_MISS
         POP BC
         POP BC
-        JP GIPAG
+; Claude - 2026-09-27 - begin
+        ; Прежде JP GIPAG: нулевая ссылка (свободный кластер) уходила в ветвь
+        ; RDIR — поток шёл по корневому каталогу (Codex R26-03). STREAM_LINK
+        ; расширения отвергает ноль и зовёт GIPAG. 2 байта — из добивки
+        ; перед CURIT.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_LINK
+        RET
+; Claude - 2026-09-27 - end
 STREAM_NEXT_MISS:
         POP HL
         POP DE
@@ -733,8 +796,9 @@ RDIR    LD HL,(BROOTC),DE,(BROOTC+2)
 
 ; Codex - 2026-07-16 - begin
 ; Codex - 2026-07-17 - begin
-; Штатный интерфейс WC завершает цикл COPYF только при A=#0F. Значение #FF
-; зарезервировано расширением для ошибки потока и отличается установленным CF.
+; Первый кластер — маркер конца цепочки: EOC=#0F, NZ, CF=0 (пустая цепочка).
+; Значение #FF зарезервировано расширением для ошибки потока и отличается
+; установленным CF. (Цикл COPYF давно ведёт размер — COPY_CHUNK, не A=#0F.)
 MDC     LD A,#0F
         LD (EOC),A
         OR A
@@ -752,19 +816,45 @@ SVHDFL
         CALL ENTREZ_ANY_TYPE:RET NZ
         LD (CGDE),HL
 
-        LD HL,(LSTCAT),DE,(LSTCAT+2)
-SHDFL   LD (CUHL),HL,(CUDE),DE
-        CALL TOS
+; Claude - 2026-09-27 - begin
+        ; Прежде «LD HL,(LSTCAT),DE,(LSTCAT+2):LD (CUHL),HL,(CUDE),DE:CALL
+        ; TOS». DIR_STREAM_OPEN — то же после проверки цепочки каталога:
+        ; замкнутая цепочка вешала поиск места под запись (Codex R26-02);
+        ; испорчена — отказ носителя до любой записи. Длина та же.
+SHDFL   CALL_WDOS_EXTENSION WDOS_EXT.ID_DIR_STREAM_OPEN
+        JP C,SVHDFL_READ_ERROR
+        DS 10,0
+; Claude - 2026-09-27 - end
+; Claude - 2026-09-26 - begin
+; Отказ чтения сектора каталога (CF=1, EOC=#FF) прежде не проверялся: FIEL
+; искал свободное место в прежнем содержимом LOBU, а FIIL принимал EOC=#FF
+; за конец цепочки и продлевал каталог за текущим кластером — ссылка FAT на
+; остаток каталога затиралась, записи чужих файлов пропадали, а операция
+; сообщала успех; бывало и так, что новая запись ложилась за маркером конца
+; каталога и была не видна (аудит, А.1). Теперь — выход с ошибкой носителя
+; (A=#FF) до любой записи.
+; LOAD512 оставляет в L ноль (HL — за целым сектором), поэтому хватает LD H.
 NXDCL   LD HL,LOBU,B,1:CALL LOAD512
-        LD HL,LOBU,DE,32,B,16
+        JP C,SVHDFL_READ_ERROR
+        LD H,high LOBU
+        LD DE,32,B,16
+; Claude - 2026-09-26 - end
         XOR A
 FIEL    CP (HL):JP Z,FELD
         ADD HL,DE
         DJNZ FIEL
-; Codex - 2026-07-16 - begin
-FIIL    LD A,(EOC):OR A:JR Z,NXDCL
-; Codex - 2026-07-16 - end
-        CALL SRHFCL:JR C,IEL
+; Claude - 2026-09-27 - begin
+; Свободного места нет. Не конец цепочки — читать дальше; конец — продлить
+; каталог (DIR_GROW расширения): не дальше 4096 секторов (65536 записей
+; FAT32) — иначе после записи проверка цепочки (DIR_CHAIN) отвергла бы каталог
+; целиком (Codex R27-01); затем SRHFCL, как прежде. Каталог полон или нет
+; места — A=16, отказ чтения FAT при поиске — A=#FF: выход RET C. Длина
+; прежняя (было «LD A,(EOC):OR A:JR Z,NXDCL:CALL SRHFCL:JR C,IEL»).
+FIIL    CALL_WDOS_EXTENSION WDOS_EXT.ID_DIR_GROW
+        JR Z,NXDCL
+        RET C
+        DS 4,0
+; Claude - 2026-09-27 - end
         LD (BUTS),HL,(BUTS+2),DE
         EXX
         LD A,#FF
@@ -777,43 +867,61 @@ FIIL    LD A,(EOC):OR A:JR Z,NXDCL
         JR NZ,IEL
 ; Codex - 2026-07-16 - end
 
+; Claude - 2026-09-26 - begin
+; Новый кластер уже занят (EOC), но ещё не в цепочке каталога. Прежде он
+; вписывался в цепочку до обнуления: отказ записи нулей оставлял в каталоге
+; прежнее содержимое свободного кластера — обрывки записей удалённых файлов
+; становились живыми, и F8 по такой записи освобождал цепочку чужого файла
+; (аудит, А.2). Теперь сначала обнуление, потом ссылка: отказ до ссылки —
+; каталог прежний, кластер потерян; ссылка легла или нет — кластер пустой.
+; Нули пишутся из LOBU: его всё равно перечитывает NXDCL, а сектор FAT в
+; SECBU затирать незачем. GIPAG меняет CUHL/CUDE, поэтому последний кластер
+; каталога — в стек.
         LD HL,(CUHL),DE,(CUDE)
-        CALL CURIT:JR C,IEL
-        EX DE,HL
-        LD HL,BUTS,BC,4:LDIR
-; Codex - 2026-07-16 - begin
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
-        JR NZ,IEL
-; Codex - 2026-07-16 - end
-
+        PUSH HL,DE
         LD HL,BUTS
-        CALL GIPAG:LD A,255:RET NZ
+        CALL GIPAG
+        JR NZ,SVHDFL_ZERO_IO_ERROR
 
-        LD HL,SECBU,B,0
+        LD HL,LOBU,B,0
  DUP 2
          CALL NOPING
  EDUP
-
-        LD HL,(LTHL),DE,(LTDE)
-        PUSH HL,DE
-; Codex - 2026-07-16 - begin
-        LD HL,SECBU,A,1:CALL SAFE_SDDSE
+        LD HL,LOBU,A,1:CALL SAFE_SDDSE
         JR NZ,SVHDFL_ZERO_IO_ERROR
 
         LD A,(BSECPC)
-        LD HL,SECBU
+        LD HL,LOBU
         CALL_WDOS_EXTENSION WDOS_EXT.ID_ZERO_CLUSTER_TAIL
         JR NZ,SVHDFL_ZERO_IO_ERROR
-        POP DE,HL
-        CALL XPOZI
+
+        POP DE,HL                               ; последний кластер каталога
+        CALL CURIT:JR C,IEL
+        EX DE,HL
+        LD HL,BUTS,BC,4:LDIR
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_SAVE_FAT_SECTOR
+        JR NZ,IEL
+
+        ; Поток — на начало нового кластера. Тот же GIPAG выше уже прошёл для
+        ; этого же кластера, поэтому без проверки.
+        LD HL,BUTS
+        CALL GIPAG
         JP NXDCL
 
 SVHDFL_ZERO_IO_ERROR:
         POP DE,HL
-        JR IEL
-; Codex - 2026-07-16 - end
+SVHDFL_READ_ERROR:
+        LD A,#FF:OR A:RET                       ; отказ носителя
+; Claude - 2026-09-26 - end
 
 IEL     LD A,16:OR A:RET
+; Claude - 2026-09-26 - begin
+        ; Блок сохраняет прежнюю длину: FELD и всё за ней — на прежних
+        ; адресах (старый FILEX.WMF с новым ядром работает по-прежнему).
+        ASSERT $ <= #45FB, SVHDFL не помещается перед FELD
+        DS #45FB-$,0
+        ASSERT $ == #45FB, сдвинулась FELD
+; Claude - 2026-09-26 - end
 
 FELD    EX DE,HL
         LD HL,(CGDE)
@@ -852,7 +960,11 @@ ENTREZ
         LDIR
         POP HL
         LD (CGDE),HL
-        INC HL:CALL ENVAL:LD A,1:RET NZ
+; Claude - 2026-09-26 - begin
+        INC HL
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_VALIDATE_NAME   ; прежде — через ENVAL
+        LD A,1:RET NZ
+; Claude - 2026-09-26 - end
 
         LD HL,(FCTS),(CLSHL),HL
         LD HL,(FCTS+2),(CLSDE),HL
@@ -877,8 +989,23 @@ SNCC    LD A,(HL):OR A:JR Z,LONG
         POP HL:RET NZ
         XOR A
         RET
-LONG    LD DE,ENTRY
+; Claude - 2026-09-26 - begin
+; Имя укладывается в 8.3 и в короткую запись не шло лишь из-за заглавных букв
+; (их сохраняет длинное имя) — короткое имя делается из самого этого имени,
+; заглавными, без «~n», если такого в каталоге нет (PLAIN_ALIAS расширения;
+; так делает и Windows). Прежде у «boot.$C» выходило «BOOTJ$~1.$C», и ПЗУ, что
+; ищет в корне короткое «BOOT    $C», файла не находило. Иначе — «~n», как
+; прежде. CF — каталог не прочитан (как у FIND_ALIAS ниже).
+LONG    CALL_WDOS_EXTENSION WDOS_EXT.ID_PLAIN_ALIAS
+        RET C
+        JP Z,LFN_ENTRIES
+; Claude - 2026-09-26 - end
+        LD DE,ENTRY
 
+; Основа 8.3 — 8 знаков подряд из NXTBU+1 (и за концом короткого имени):
+; недопустимый знак и ноль заменяются случайным допустимым (LD A,R). Хвост
+; NXTBU за концом имени обнулён (VALIDATE_NAME, с 2026-09-25) — прежде сюда
+; попадали остатки прежнего имени из буфера вызывающего («A» → AZPRIV~1).
         LD B,8,HL,NXTBU
 FO      INC HL:LD A,(HL)
 KO      CALL ACS
@@ -902,7 +1029,16 @@ UR      DEC HL:LD A,(HL)
 
 NB      LD B,3
 Nb      INC HL:LD A,(HL)
-        CALL ACS,SNCEN:JR Z,NN
+; Claude - 2026-09-25 - begin
+        ; Прежде CALL ACS,SNCEN: конец имени (0) и управляющие знаки проходили
+        ; в расширение 8.3 — у «README.md» оно было «MD»+#00, у однобуквенного
+        ; ещё и байт буфера за концом имени: недопустимые в DIR_Name байты.
+        ; Теперь расширение на таком знаке кончается. Длина та же — адреса
+        ; дальше не сдвигаются.
+        CALL SFN_EXT_CHAR
+        NOP:NOP:NOP
+; Claude - 2026-09-25 - end
+        JR Z,NN
         LD (DE),A:INC DE:DJNZ Nb
 NN      LD HL,ENTRY,DE,NXTBM,BC,32:LDIR
         LD DE,NXTBM+11,(CGDE),DE
@@ -931,6 +1067,7 @@ SUFFIX_DONE:
         LD HL,NXTBM,DE,ENTRY,BC,12:LDIR
         CALL FIND_ALIAS:RET C:JR NZ,BURA
 
+LFN_ENTRIES:
         LD HL,NXTBM
         CALL LNCRC:LD (CRC+1),A
 
@@ -994,9 +1131,8 @@ OR2     CP #F0:RET NC
         SUB #A0:LD C,A:RET
 ; Codex - 2026-07-16 - begin
 ; Старая процедура отвергала ровно 255 символов. Реализация вынесена в
-; расширение, а размер исходного диапазона сохранён для стабильности адресов.
-ENVAL   CALL_WDOS_EXTENSION WDOS_EXT.ID_VALIDATE_NAME
-        RET
+; расширение (ID_VALIDATE_NAME); с 2026-09-26 его зовёт сам ENTREZ, прокладка
+; ENVAL убрана — её байты ушли под вход PLAIN_ALIAS в LONG.
 ENnvl   LD A,1:OR A:RET
 ; Codex - 2026-09-08 - begin
 ; Создание записи проверяет единое пространство SFN/LFN файлов и каталогов.
@@ -1023,16 +1159,10 @@ FIND_ALIAS:
         LD (HL),0
         LD (CGDE),HL
         JP FNDSN
-; Claude - 2026-09-21 - begin
-; FAT_CACHE_GENERATION — поколение содержимого FAT, общее для всех файловых
-; страниц (лежит в окне #4000). FAT_CACHE_BUMP увеличивает его при записи FAT,
-; монтировании, смене и инициализации драйвера, начале чтения каталога.
-; Страница, чей FATTAG не совпадает, перечитывает сектор FAT. Начало с 1:
-; нулевой FATTAG свежей страницы (после DOS_SWP) никогда не совпадает, а
-; старший байт #FF (метка CURIT_INVALIDATE) недостижим.
-FAT_CACHE_GENERATION:
-        DB 1,0,0,0
-; Claude - 2026-09-21 - end
+; Claude - 2026-09-26 - begin
+; FAT_CACHE_GENERATION (4 байта данных) перенесено отсюда в выравнивание перед
+; NXTETY #413F: здесь эти байты ушли под вход PLAIN_ALIAS в LONG (ENTREZ).
+; Claude - 2026-09-26 - end
         ASSERT $ <= #481F, исправления имён не помещаются перед SNCEN
         DS #481F-$,0
         ASSERT $ == #481F, изменился фиксированный адрес SNCEN
@@ -1159,7 +1289,10 @@ GENFC   LD C,(HL):INC HL
         LD E,(HL):INC HL
         LD D,(HL):INC HL
         PUSH HL
-        LD HL,BC:CALL CURIT:EX DE,HL
+; Claude - 2026-09-25 - begin
+        ; CURIT_CHECKED: при ошибке CURIT выход из BUtoFAT, а не правка SECBU.
+        LD HL,BC:CALL CURIT_CHECKED:EX DE,HL
+; Claude - 2026-09-25 - end
         POP HL
 
 GNFC    LD (UUHL),HL
@@ -1231,6 +1364,10 @@ CURIT_INVALIDATE:
 ; FAT является точной подсказкой; пустая цепочка прежнюю подсказку не меняет.
 ; Устойчивого прикладного значения флагов на выходе код не задаёт, результат
 ; записи определяется драйвером SDDSE.
+; Каждая ссылка — ID_CLASSIFY_DATA: недопустимая, за областью данных тома или
+; кластер корня — ошибка FAT_LINK_ERROR, освобождённое до неё записано
+; (Claude, 2026-09-27: запись файла на кластере корня освобождала корень,
+; Codex R28-01).
 ; Вход DLSG зафиксирован так же, как CURIT и GIPAG: на #49B4 ссылаются уже
 ; собранные плагины и заголовок файла. Компенсация обязана стоять ДО метки —
 ; добивка внутри процедуры восстанавливает только LWT и всё, что ниже.
@@ -1245,7 +1382,7 @@ DLSG
 LWT     LD HL,(LOBU),DE,(LOBU+2)
         LD A,D:OR E,H,L:RET Z
 ; Codex - 2026-07-16 - begin
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_DATA
         RET Z
         JR NC,DLSG_LINK_VALID
         CALL_WDOS_EXTENSION WDOS_EXT.ID_FAT_LINK_ERROR
@@ -1268,7 +1405,7 @@ GOCE    LD DE,LOBU,C,0
 
         LD HL,(LOBU),DE,(LOBU+2)
 ; Codex - 2026-07-16 - begin
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_DATA
         JR Z,Ne
         JR C,DLSG_BAD_LINK
 ; Codex - 2026-07-16 - end
@@ -1316,8 +1453,14 @@ SRHDRN
 ; Codex - 2026-07-16 - end
 
         ASSERT $ == #4A5B, изменился фиксированный адрес FNDSN
-FNDSN   LD HL,LSTCAT,DE,CUHL,BC,4:LDIR
-        CALL TOS
+; Claude - 2026-09-27 - begin
+        ; Прежде «LD HL,LSTCAT,DE,CUHL,BC,4:LDIR:CALL TOS». DIR_STREAM_OPEN — то
+        ; же после проверки цепочки каталога (DIR_CHAIN): замкнутая цепочка
+        ; вешала поиск (Codex R26-02); испорчена — отказ чтения. Длина та же.
+FNDSN   CALL_WDOS_EXTENSION WDOS_EXT.ID_DIR_STREAM_OPEN
+        JP C,FIND_IO_ERROR
+        DS 7,0
+; Claude - 2026-09-27 - end
 
         LD HL,LOBU,B,1:CALL LOAD512
         JP C,FIND_IO_ERROR
@@ -1561,9 +1704,13 @@ Lyo     LD A,#F1:RET
 ; DELETE_ENTRY_WITH_LFN (прежняя STAMP удалена), FCTS получает
 ; первый кластер удаляемого объекта, DLSG изменяет FAT. Проверка пустоты
 ; каталога здесь не выполняется и должна быть сделана вызывающим кодом.
+; Claude - 2026-09-25 - begin
+; Z также при отказе записи каталога (DELEN, A=0) и при отказе освобождения
+; цепочки (DLSG): тело — DELFL_CHECKED перед MKFILE, адреса здесь прежние.
 DELFL
-
-        CALL DELEN:RET Z
+        JP DELFL_CHECKED
+        DS 1,0
+; Claude - 2026-09-25 - end
 DELCHA  PUSH AF:LD HL,FCTS:CALL DLSG
         POP AF
         RET
@@ -1606,30 +1753,61 @@ STREAM_CACHE_SECTOR:
 ; Claude - 2026-09-21 - end
 ; RENAME — создать запись с новым именем и удалить старую.
 ; Вход: HL — [флаг, старое имя, 0], DE — новое имя с нулевым окончанием.
-; Выход: NZ — переименование завершено; Z — старая запись не найдена либо
-; новую запись создать не удалось. Побочные эффекты: FCTS сохраняет кластер,
-; SVHDFL записывает новую запись, DELEN помечает старую запись #E5.
+; Выход: NZ — переименование завершено; Z — нет: старая запись не найдена
+; либо её поиск не прочитал каталог (A=8), новую создать не удалось (A — код
+; SVHDFL), отказ носителя (A=0 или #0F; #FF — исход неизвестен). Побочные
+; эффекты: FCTS сохраняет кластер, SVHDFL записывает новую запись, DELEN
+; помечает старую запись #E5. Если старую удалить не удалось, новая тоже
+; удаляется (без цепочки), чтобы две записи не делили одну цепочку; не
+; удался и откат — A=#FF, обе могут остаться (с 2026-09-25; коды и все ветки
+; — у RENAME_ENTRY расширения).
 RENAME
+; Claude - 2026-09-25 - begin
+        ; Сама последовательность — в расширении (RENAME_ENTRY): там же откат,
+        ; если прежнюю запись удалить не удалось. Адрес входа и выход прежние.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_RENAME
+        RET
 
-        PUSH HL,DE
-        CALL SRHDRN:LD A,8
-        LD (FCTS+0),HL
-        LD (FCTS+2),DE
-        POP HL,DE:RET Z
+; CURIT для BUtoFAT (GENFC). При CF=1 — сектор FAT не прочитан либо кластер
+; за FAT — прежде указатель HL был мусорным: LDIR правил устаревший SECBU, и
+; SAVE_FAT_SECTOR записывал его на место другого сектора FAT, по чужим
+; цепочкам. Теперь BUtoFAT сразу выходит с ошибкой (CF=1, NZ, A=#FF), как при
+; ошибке записи: уже связанная часть цепочки остаётся потерянными кластерами,
+; чужие записи FAT не трогаются.
+CURIT_CHECKED:
+        CALL CURIT
+        RET NC
+        POP HL                          ; возврат в GENFC
+        POP HL                          ; указатель GENBU (PUSH HL в GENFC)
+        LD A,#FF
+        OR A
+        SCF
+        RET                             ; из BUtoFAT
 
-        PUSH DE:CALL SVHDFL
-        POP HL:JR NZ,ZIR
-
+; DELFL: запись удалена (DELEN, NZ), но цепочку освободить не удалось (DLSG
+; вернул NZ) — прежде возвращался «успех», и сбой FAT скрывался. Теперь
+; неудача: Z, A=0, как у отказа записи каталога в DELEN.
+DELFL_CHECKED:
         CALL DELEN:RET Z
-
-        XOR A:INC A:RET
-ZIR     CP A:RET
+        LD HL,FCTS:CALL DLSG
+        LD A,1:JR Z,$+3:DEC A
+        OR A
+        RET
+        DS #4D34-$,0
+        ASSERT $ == #4D34, сдвинулся фиксированный вход MKFILE
+; Claude - 2026-09-25 - end
 ; MKFILE — создать файл и выделить ему цепочку кластеров.
 ; Вход: HL указывает на [атрибут, размер DE:HL в четырёх байтах, имя, 0].
-; Выход: Z — успех; NZ — ошибка выделения или записи каталога.
+; Выход: Z — успех (DE:HL — первый кластер); NZ — ошибка выделения или записи
+; каталога, A — код (#FF — отказ носителя: при записи каталога и при записи
+; FAT во время выделения в MKSG — IO_RESULT расширения отдаёт #FF, FEEM пишет
+; «UNKNOWN ERROR!!»).
 ; Побочные эффекты: размер копируется в SIZIK, имя временно хранится через
 ; CGHL, MKSG изменяет FAT и оставляет новую подсказку в RAM, SVHDFL создаёт
-; ENTRY; при ошибке записи новая цепочка откатывается через DELCHA/DLSG.
+; ENTRY. При отказе SVHDFL — MKFILE_FAIL: по имени или месту цепочка
+; освобождается (DELCHA/DLSG; отказ записи FAT не проверяется — тогда могут
+; остаться потерянные кластеры); при отказе носителя запись могла лечь, и
+; цепочка освобождается, только если повторный поиск её точно не нашёл.
 MKFILE
 
         LD A,(HL),(EFLG),A:INC HL
@@ -1637,66 +1815,156 @@ MKFILE
         LD (CGHL),HL
 
         LD HL,(SIZIK),DE,(SIZIK+2)
-; Codex - 2026-07-16 - begin
+; Claude - 2026-09-27 - begin
+        ; MKSG — здесь, вне шлюза, при прерываниях вызывающего, как в исходном
+        ; WC. С 2026-07-16 его звал ALLOCATE_FILE внутри шлюза, и выделение
+        ; файла в гигабайт (~4900 тактов на кластер) шло при DI минуту и
+        ; дольше (Codex R28-02 — о том же для предобхода F5). Размер 0 — без
+        ; MKSG: DEC в нём сделал бы из счётчика #FFFFFFFF. Итог разбирает
+        ; ALLOCATE_FILE: пустой — FCTS=0, отказ — 16 или #FF (отказ чтения FAT).
+        LD A,H:OR L,D,E
+        CALL NZ,MKSG
         CALL_WDOS_EXTENSION WDOS_EXT.ID_ALLOCATE_FILE
         RET NZ
-; Codex - 2026-07-16 - end
-        LD HL,(CGHL)
-        CALL SVHDFL:JP NZ,DELCHA
-        XOR A
-        RET
+        JP MKFILE_TAIL                          ; SVHDFL — за MKDIR
+        DS #4D5B-$,0
+        ASSERT $ == #4D5B, сдвинулся фиксированный вход MKDIR
+; Claude - 2026-09-27 - end
 
 ; MKDIR — создать каталог.
 ; Вход: HL указывает на имя с нулевым окончанием. Выход: Z — успех; NZ —
-; ошибка выделения или записи записи каталога. Выделяется минимум один сектор,
-; создаются записи «.» и «..», первый сектор каталога записывается из LOBU,
-; остальные секторы кластера зануляются безопасным циклом расширения. Ошибка
-; низкоуровневой записи немедленно возвращается как NZ.
+; ошибка, A — код (16 — нет места, 1–4 — имя, из них 2 — исчерпаны суффиксы
+; ~N короткого имени; #FF — отказ носителя, в том числе при записи FAT в
+; MKSG: IO_RESULT расширения отдаёт #FF, FEEM пишет «UNKNOWN ERROR!!»).
+; Выделяется минимум один сектор, создаются записи «.» и «..», первый сектор
+; каталога записывается из LOBU, остальные секторы кластера зануляются
+; безопасным циклом расширения.
 MKDIR
+; Claude - 2026-09-25 - begin
+        ; Сама процедура — в расширении (MKDIR_ENTRY): тело каталога («.», «..»
+        ; и обнулённый хвост кластера) пишется до записи в родителе; отказ
+        ; тела освобождает цепочку (попытка DELCHA), отказ носителя при
+        ; записи в родителе проверяется повторным поиском (сектор мог лечь).
+        ; Прежде запись публиковалась первой, и отказ записи тела оставлял
+        ; каталог со старым мусором свободного кластера. Адрес входа и выход
+        ; прежние; место прежнего тела занято помощниками ниже (до RFRH,
+        ; #4DE5).
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_MKDIR
+        RET
 
-        LD (CGHL),HL
-        LD HL,0,(SIZIK),HL,(SIZIK+2),HL
-        LD A,#10,(EFLG),A
-        LD DE,0,HL,512
-        CALL MKSG:RET NZ
+; Глубина рекурсивных F5 и F8 (WCFX). Стеки обхода лежат в странице TVBPG
+; окна #C000: у DIRCOPY — индексы по 2 байта на уровень, у DIRTREM — имена
+; (короткий псевдоним и байт длины). Прежде они росли без проверки, и запись
+; за #FFFF уходила в страницу потока #0000; DIRTREM ловил переполнение лишь
+; после записи. Очень глубокое дерево или зацикленный каталог испорченного
+; тома теперь дают «DIR name too long/END of buffer» (код 7), пока до конца
+; страницы остаётся 256 байт.
+DCIN_TAIL:                              ; DIRCOPY: HL — новая вершина стека
+        LD A,H:INC A
+        LD B,7:JP Z,@WCFX.ERMAIN
+        LD (@WCFX.DDIRS+1),HL
+        JP @WCFX.ZANOVOC
+RECBUF_DEPTH:                           ; DIRTREM: перед обходом подкаталогов
+        CALL @WCFX.RECBUF
+        LD A,(@WCFX.DDIRS+2):INC A      ; старший байт вершины стека имён
+        RET NZ
+        POP HL                          ; возврат в DDIRZ
+        LD B,7:JP @WCFX.DTRER0
+
+; Знак расширения короткого имени для длинного (LONG): A — знак имени.
+; Выход: Z — расширение кончается (конец имени, управляющий или недопустимый
+; в 8.3 знак); NZ — A прописной и годен.
+SFN_EXT_CHAR:
+        CALL ACS
+        CALL ENCEN:RET Z
+        JP SNCEN
+
+; UCH для NXTETY2 (LNPARS через UCHN) с пределом длины: имя собирается в поле
+; вызывающего с CGDE, и в нём 255 знаков и ноль. Повреждённый каталог с
+; 20 записями LFN по 13 знаков давал 260 и писал за это поле; теперь на
+; 255-м знаке имя кончается, как на терминаторе UCH (NZ, CF=0).
+UCH_BOUNDED:
+        PUSH HL
+        PUSH DE
+        LD HL,(CGDE)
+        EX DE,HL
+        OR A
+        SBC HL,DE                       ; знаков уже в поле
+        LD DE,255
+        SBC HL,DE                       ; CF=1 — меньше 255
+        POP DE
+        POP HL
+        JP C,UCH
+        XOR A:INC A
+        RET
+
+; Claude - 2026-09-27 - begin
+; Хвост MKFILE (место его входа до MKDIR #4D5B занято вызовом MKSG): запись в
+; каталог. Успех — Z, A=0, как прежде; отказ — в MKFILE_FAIL (A — код).
+; Claude - 2026-09-25: прежде JP NZ,DELCHA — при отказе носителя, после
+; которого запись всё же легла, цепочка освобождалась под живой записью
+; (аудит Codex).
+MKFILE_TAIL:
         LD HL,(CGHL)
-        CALL SVHDFL:JP NZ,DELCHA
-        LD HL,FCTS
-        CALL GIPAG
-
-        LD HL,ENTRY
-        LD (HL),".":INC HL
-        LD (HL),#20:INC HL
-        LD A,32,B,9:CALL NOPING+1
-        LD HL,(CUHL),(CLSHL),HL
-        LD HL,(CUDE),(CLSDE),HL
-        LD HL,ENTRY,DE,LOBU,BC,32:LDIR
-
-        LD HL,ENTRY+1
-        LD (HL),"."
-        LD HL,(LSTCAT),(CLSHL),HL
-        LD HL,(LSTCAT+2),(CLSDE),HL
-        LD HL,ENTRY,BC,32:LDIR
-
-        ; Намеренно обнуляются 513 байт от LOBU+64: исходный ноль и 512 LDIR.
-        ; 65 байт заходят в LOBU2, чтобы ZERO_CLUSTER_TAIL получил непрерывный
-        ; нулевой сектор от LOBU+64 после записей "." и "..".
-        LD HL,DE:INC DE
-        LD BC,512
-        LD (HL),0
-        LDIR
-        LD HL,LOBU
-; Codex - 2026-07-16 - begin
-        LD A,1:CALL SAFE_SDDSE
-        RET NZ
-
-        LD A,(BSECPC)
-        LD HL,LOBU+64
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_ZERO_CLUSTER_TAIL
-        RET NZ
-; Codex - 2026-07-16 - end
+        CALL SVHDFL
+        JR Z,MKFILE_FAIL.ok
+; Claude - 2026-09-27 - end
+; MKFILE: SVHDFL отказал, A — код. Без ошибки носителя (ABT=0) — имя или
+; место, в родителе не писали: освободить цепочку (DELCHA — попытка: при
+; отказе записи FAT могут остаться потерянные кластеры). При ошибке носителя сектор
+; с записью мог лечь: ENTRY_LANDED расширения ищет нормализованный запрос
+; NXTBU. Запись есть с нашим кластером — успех (DE:HL — кластер, как у
+; штатного выхода); записи нет — освободить (A=#FF); неизвестно — цепочку
+; не трогать (потерянные кластеры лучше записи на свободный кластер).
+MKFILE_FAIL:
+        LD B,A
+        LD A,(ABT):OR A
+        LD A,B
+        JR Z,.drop
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_ENTRY_LANDED
+        LD A,#FF
+        JR C,.keep
+        JR Z,.drop
+        LD HL,(FCTS),DE,(FCTS+2)
+.ok:
         XOR A
         RET
+.drop:
+        OR A
+        JP DELCHA
+.keep:
+        OR A
+        RET
+
+; Цикл F5 COPYF (WCFX, SVNG) звал LOAD512 и SAVE512 без проверки: при отказе
+; чтения в копию уходило прежнее содержимое буфера #C000, при отказе записи
+; оставалась недописанная копия полного размера, а F5 сообщал успех. Здесь
+; обёртка чтения (прежде — в конце WCINI; перенесена ради места под сжатое
+; расширение; обёртка записи с 2026-09-27 — WCFX.COPY_SAVE: место ушло под
+; хвост MKFILE). Отказ (CF=1) — @COPY_FAIL в MD20: попытка удалить
+; недописанную копию в каталоге назначения (результат DELFL не проверяется —
+; при его отказе копия может остаться под своим именем либо без имени,
+; потерянными кластерами), окно прогресса закрывается, «UNKNOWN ERROR!!»,
+; выход NZ — как у любой ошибки COPYF (B=255 у DIRCOPY). ABT сбрасывается в
+; обоих контекстах: ошибка уже показана.
+COPY_LOAD:
+        CALL LOAD512                    ; контекст источника
+        RET NC
+        XOR A:LD (ABT),A
+        CALL @WCFX.SWPPAND              ; -> назначение
+        JP @COPY_FAIL
+
+; WCINI.OTHER_REFRESH: каталога соседней панели больше нет — она уходит в
+; корень своего устройства (путь «N:\»), затем показ (@DELRF_SHOW, MD20).
+DELRF_ROOT:
+        LD HL,0
+        LD (@BRRR),HL
+        LD (@BRRR+2),HL
+        CALL @WCINI.RPATH
+        JP @DELRF_SHOW
+        DS #4DE5-$,0
+        ASSERT $ == #4DE5, сдвинулся RFRH за MKDIR
+; Claude - 2026-09-25 - end
 
 ; Codex - 2026-07-16 - begin
 RFRH    CALL_WDOS_EXTENSION WDOS_EXT.ID_RFRH_SAFE
@@ -2268,11 +2536,13 @@ END
         ASSERT END == @PLUGIN_REFRESH_BOTH, изменилось начало резидентного обработчика
 ; Codex - 2026-07-16 - end
         ENT
-; Физический адрес условного перехода используется WC как точка подстановки
-; в генерируемом фрагменте фильтра каталога. Само ядро видит её по #40CD,
-; а внешний код обращается к исходному образу по #C0D9.
-LC069_5 EQU CORE32 + DIR_FILTER_REJECT_BRANCH - START
-        ASSERT LC069_5 == #C0D9, нарушен адрес подстановки фильтра каталога
+; Claude - 2026-09-26 - begin
+; Прежде здесь адрес #C0D9 (#40CD в ядре, JR Z фильтра типа записи в NXTETY2)
+; считался точкой подстановки, которую WC берёт из физического образа. Это
+; ошибка разметки: #C0D9 в WCIF — пара символов рамки «└» и «┘» (строка OMS
+; исторического исходника: LD DE,#C0D9,C,#C4:CALL FLL), к ядру не относится.
+; Привязки к #40CD больше нет.
+; Claude - 2026-09-26 - end
 ; Codex - 2026-07-16 - begin
         ASSERT $ <= #DC00, нарушена физическая граница WildDOS
 ; Codex - 2026-07-16 - end

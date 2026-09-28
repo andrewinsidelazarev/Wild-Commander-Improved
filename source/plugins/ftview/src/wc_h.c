@@ -26,5 +26,5 @@ static const WC_HDR hdr =
   /* +160 0x00               */   "",
   /* +161 Max file size      */   0xFFFFFFFF,
   /* +165 Plugin name        */   "FT812 Viewer",
-  /* +197 Starting condition */   SC_MENU   // also run by extension
+  /* +197 Starting condition */   SC_EXT    // только по расширению: это просмотрщик, в F10 ему делать нечего
 };

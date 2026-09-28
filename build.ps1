@@ -200,6 +200,56 @@ if ($StockDsdzcPackedHash -ne '06742113aff8306b39a1a808ae6042cafc784d7dc9ee6aa0b
 }
 # Codex - 2026-07-17 - end
 
+# Claude - 2026-09-26 - begin
+# Ресурсы запуска — шрифт FONT32L3 (#800) и пара распаковщиков MLZ50F (#E9) и
+# DEHR1M (#117) — нужны только VDAC, который раскладывает их по страницам #01
+# и #09. В boot.$C они лежат HR-потоками (распаковывает тот же DEHR #5AAA, что
+# и расширение): так перед #BF60 свободнее на ~1,2 КиБ. Пара склеивается в
+# порядке назначения — MLZ50F с #FE00, DEHR1M с #FEE9 — и распаковывается одним
+# вызовом. Каждый поток проверяется обратной распаковкой. Упаковка — до
+# символического прохода BOOT: от размера ресурсов зависят адреса всего за WCINI.
+$ResourceStreams = @(
+    @{ Raw = Join-Path $ProjectRoot 'source\FONT32L3.CDB'; RawAscii = 'source/FONT32L3.CDB';
+       Packed = Join-Path $BuildDir 'FONT32L3.CPD'; PackedAscii = 'Build/FONT32L3.CPD' },
+    @{ Raw = Join-Path $BuildDir 'DECODERS.bin'; RawAscii = 'Build/DECODERS.bin';
+       Packed = Join-Path $BuildDir 'DECODERS.CPD'; PackedAscii = 'Build/DECODERS.CPD' }
+)
+[byte[]]$Mlz50f = [IO.File]::ReadAllBytes((Join-Path $ProjectRoot 'source\MLZ50F.CCB'))
+[byte[]]$Dehr1m = [IO.File]::ReadAllBytes((Join-Path $ProjectRoot 'source\DEHR1M.CCB'))
+if ($Mlz50f.Length -ne 0xE9 -or $Dehr1m.Length -ne 0x117) {
+    throw 'MLZ50F.CCB или DEHR1M.CCB не того размера: #E9 и #117 байт.'
+}
+# DEHR берёт длину результата из потока и назначение не ограничивает: шрифт
+# длиннее #800 байт лёг бы за #C7FF страниц #01 и #09 (прежде это ловил ASSERT
+# за INCBIN в BOOT.ASM; аудит Codex, R17-01).
+if ((Get-Item -LiteralPath (Join-Path $ProjectRoot 'source\FONT32L3.CDB')).Length -ne 0x800) {
+    throw 'FONT32L3.CDB не того размера: #800 байт.'
+}
+[IO.File]::WriteAllBytes((Join-Path $BuildDir 'DECODERS.bin'), [byte[]]($Mlz50f + $Dehr1m))
+foreach ($Stream in $ResourceStreams) {
+    $Verify = $Stream.Packed + '.verify'
+    Remove-Item -LiteralPath $Stream.Packed, $Verify -Force -ErrorAction SilentlyContinue
+    Push-Location -LiteralPath $ProjectRootAlias
+    try {
+        & $Mhmt '-hst' '-zxh' "$ProjectRootAscii/$($Stream.RawAscii)" `
+            "$ProjectRootAscii/$($Stream.PackedAscii)"
+        if ($LASTEXITCODE -ne 0) { throw "Не упаковался $($Stream.RawAscii)." }
+        Set-HrustPackedLength -Path $Stream.Packed
+        & $Mhmt '-hst' '-zxh' '-d' "$ProjectRootAscii/$($Stream.PackedAscii)" `
+            "$ProjectRootAscii/$($Stream.PackedAscii).verify"
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Не распаковался для сверки $($Stream.PackedAscii)." }
+    if ((Get-FileHash -LiteralPath $Stream.Raw -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $Verify -Algorithm SHA256).Hash) {
+        throw "$($Stream.PackedAscii) распаковывается не байт в байт."
+    }
+    Remove-Item -LiteralPath $Verify -Force
+}
+$global:LASTEXITCODE = 0
+# Claude - 2026-09-26 - end
+
 # Codex - 2026-07-17 - begin
 # Расширение больше физического нулевого окна boot.$C, но свободно помещается
 # в выделенную страницу #E8. Сначала строится карта CORE32 без runtime, затем отдельный
@@ -231,6 +281,47 @@ if ($LASTEXITCODE -ne 0) { throw 'BOOT.ASM symbol pass failed.' }
     --output $CoreInterface
 if ($LASTEXITCODE -ne 0) { throw 'CORE32 extension interface generation failed.' }
 
+# Claude - 2026-09-27 - begin
+# Код ядра (#4000..DR1) лежит в boot.$C HR-потоком, драйверы DR1..DR4 и DEHR —
+# как есть (BOOT.ASM): так файл короче на ~1,1 КиБ. Байты — из символического
+# прохода, где CORE32 лежит по #C00C как прежде. CORE32_RUNTIME.bin — весь
+# рабочий образ #4000..END (им пользуются тесты).
+$SymbolPassText = [IO.File]::ReadAllText($CoreSymbolMap)
+function Get-SymbolPassAddress([string]$Name) {
+    $match = [regex]::Match($SymbolPassText, "(?m)^$([regex]::Escape($Name)):\s+EQU\s+0x([0-9A-Fa-f]+)")
+    if (-not $match.Success) { throw "$Name not found in boot.symbol-pass.sym." }
+    [Convert]::ToInt32($match.Groups[1].Value, 16)
+}
+$CoreStart = Get-SymbolPassAddress 'WDOS.START'
+$CoreEnd = Get-SymbolPassAddress 'WDOS.END'
+$CoreDr1 = Get-SymbolPassAddress 'WDOS.DR1'
+$CoreOffset = (Get-SymbolPassAddress 'WDOS.CORE32') - 0x6011
+[byte[]]$SymbolPassBytes = [IO.File]::ReadAllBytes($CoreSymbolPayload)
+if ($SymbolPassBytes[$CoreOffset - 12] -ne 0x21) { throw 'CORE32 not found at WDOS.CORE32 in the symbol pass.' }
+[byte[]]$CoreRuntime = $SymbolPassBytes[$CoreOffset..($CoreOffset + $CoreEnd - $CoreStart - 1)]
+[IO.File]::WriteAllBytes((Join-Path $BuildDir 'CORE32_RUNTIME.bin'), $CoreRuntime)
+[IO.File]::WriteAllBytes((Join-Path $BuildDir 'CORE32_CODE.bin'), [byte[]]$CoreRuntime[0..($CoreDr1 - $CoreStart - 1)])
+[IO.File]::WriteAllBytes((Join-Path $BuildDir 'CORE32_RAW.bin'),
+    [byte[]]$CoreRuntime[($CoreDr1 - $CoreStart)..($CoreRuntime.Length - 1)])
+Remove-Item -LiteralPath (Join-Path $BuildDir 'CORE32_CODE.CPD'), (Join-Path $BuildDir 'CORE32_CODE.verify.bin') `
+    -Force -ErrorAction SilentlyContinue
+Push-Location -LiteralPath $ProjectRootAlias
+try {
+    & $Mhmt '-hst' '-zxh' "$ProjectRootAscii/Build/CORE32_CODE.bin" "$ProjectRootAscii/Build/CORE32_CODE.CPD" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'CORE32 code packing failed.' }
+    Set-HrustPackedLength -Path (Join-Path $BuildDir 'CORE32_CODE.CPD')
+    & $Mhmt '-hst' '-zxh' '-d' "$ProjectRootAscii/Build/CORE32_CODE.CPD" "$ProjectRootAscii/Build/CORE32_CODE.verify.bin" | Out-Null
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 code stream verification failed.' }
+if ((Get-FileHash -LiteralPath (Join-Path $BuildDir 'CORE32_CODE.bin') -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath (Join-Path $BuildDir 'CORE32_CODE.verify.bin') -Algorithm SHA256).Hash) {
+    throw 'CORE32 code stream does not unpack byte-for-byte.'
+}
+Remove-Item -LiteralPath (Join-Path $BuildDir 'CORE32_CODE.verify.bin') -Force
+# Claude - 2026-09-27 - end
+
 Push-Location -LiteralPath $ProjectRootAlias
 try {
     & $SjasmPlus '--nologo' '--msg=err' `
@@ -246,29 +337,83 @@ if ((Get-Item -LiteralPath $ExtensionRaw).Length -gt 0x4000) {
     throw 'CORE32 extension exceeds one 16-KiB physical page.'
 }
 
-Push-Location -LiteralPath $ProjectRootAlias
-try {
-    & $Mhmt '-hst' '-zxh' `
-        "$ProjectRootAscii/Build/CORE32_EXT.bin" `
-        "$ProjectRootAscii/Build/CORE32_EXT.CPD"
-    if ($LASTEXITCODE -ne 0) { throw 'CORE32 extension packing failed.' }
-    # Codex - 2026-07-17 - begin
-    Set-HrustPackedLength -Path $ExtensionPacked
-    # Codex - 2026-07-17 - end
-    & $Mhmt '-hst' '-zxh' '-d' `
-        "$ProjectRootAscii/Build/CORE32_EXT.CPD" `
-        "$ProjectRootAscii/Build/CORE32_EXT.verify.bin"
-} finally {
-    Pop-Location
+# Claude - 2026-09-27 - begin
+# Расширение — две части: часть 1 (в boot.$C перед #BF60) и часть 2 (хвост
+# boot.$C за образом ядра). Весь boot.$C — не длиннее 32768 байт: BIOS TS-Conf
+# читает его целыми кластерами с #6000, и при кластере 32 КиБ второй кластер
+# через #FFFF затирал #0000..#5FFF — машина падала до старта WC (BOOT.ASM,
+# стенд combo64). Поэтому граница частей — по месту: проход замера BOOT.ASM
+# без потоков даёт начало потока части 1 и хвоста, а tools/split_extension.py
+# ищет границу, при которой поток части 1 влезает до #BF60, поток части 2 — в
+# хвост до #E000 и на место потока части 1 (туда его переносит установщик), и
+# обе части распаковываются обратно (двоичный поиск и окно вокруг него: длина
+# потока растёт с границей не строго, Codex R37-3; части — от 16 байт, R37-4).
+# Каждая часть затем пакуется и сверяется ещё раз; адрес начала части 2
+# получает BOOT.ASM (Build/CORE32_EXT_PARTS.INC).
+$MeasureSymbols = Join-Path $BuildDir 'boot.measure.sym'
+Remove-Item -LiteralPath $MeasureSymbols, (Join-Path $BuildDir 'boot.measure.bin') `
+    -Force -ErrorAction SilentlyContinue
+& $SjasmPlus '--nologo' '--msg=err' '-DWDOS_MEASURE_PASS=1' `
+    "--raw=$ProjectRootAscii/Build/boot.measure.bin" `
+    "--sym=$ProjectRootAscii/Build/boot.measure.sym" `
+    "$ProjectRootAscii/source/BOOT.ASM"
+if ($LASTEXITCODE -ne 0) { throw 'BOOT.ASM measure pass failed.' }
+$MeasureText = [IO.File]::ReadAllText($MeasureSymbols)
+function Get-MeasuredAddress([string]$Name) {
+    $match = [regex]::Match($MeasureText, "(?m)^$([regex]::Escape($Name)):\s+EQU\s+0x([0-9A-Fa-f]+)")
+    if (-not $match.Success) { throw "$Name not found in boot.measure.sym." }
+    [Convert]::ToInt32($match.Groups[1].Value, 16)
 }
-if ($LASTEXITCODE -ne 0) { throw 'CORE32 packed extension verification failed.' }
-$ExtensionRawHash = (Get-FileHash -LiteralPath $ExtensionRaw -Algorithm SHA256).Hash
-$ExtensionVerifyHash = (Get-FileHash -LiteralPath $ExtensionVerify -Algorithm SHA256).Hash
-if ($ExtensionRawHash -ne $ExtensionVerifyHash) {
-    throw 'CORE32 packed extension does not unpack byte-for-byte.'
+$Part1Room = 0xBF60 - (Get-MeasuredAddress 'WDOS_EXTENSION_PACKED')
+$Part2Room = 0xE000 - (Get-MeasuredAddress 'WDOS_EXTENSION2_PACKED') - 2   # за потоком — метка сборки
+[byte[]]$ExtensionBytes = [IO.File]::ReadAllBytes($ExtensionRaw)
+$SplitText = & python (Join-Path $ProjectRoot 'tools\split_extension.py') `
+    --raw "$ProjectRootAscii/Build/CORE32_EXT.bin" --part1-room $Part1Room --part2-room $Part2Room `
+    --mhmt $Mhmt --work "$ProjectRootAscii/Build"
+if ($LASTEXITCODE -ne 0) {
+    throw ('boot.$C не помещается в 32768 байт: нет границы частей расширения при месте части 1 ' +
+           $Part1Room + ' и хвосте ' + $Part2Room + '.')
 }
-Remove-Item -LiteralPath $ExtensionVerify -Force
+$SplitMatch = [regex]::Match(($SplitText -join "`n"), 'split=(\d+) part1=(\d+) part2=(\d+)')
+if (-not $SplitMatch.Success) { throw "Unexpected split_extension.py output: $SplitText" }
+$Part2Offset = [int]$SplitMatch.Groups[1].Value
+$Part2PackedLength = [int]$SplitMatch.Groups[3].Value
+$Part2Start = 0xC000 + $Part2Offset
+Write-Host ("CORE32 extension split at #{0:X4}: part 2 stream {1} of {2} bytes of tail room" -f `
+    $Part2Start, $Part2PackedLength, $Part2Room)
+[IO.File]::WriteAllBytes((Join-Path $BuildDir 'CORE32_EXT1.bin'), [byte[]]$ExtensionBytes[0..($Part2Offset - 1)])
+[IO.File]::WriteAllBytes((Join-Path $BuildDir 'CORE32_EXT2.bin'),
+    [byte[]]$ExtensionBytes[$Part2Offset..($ExtensionBytes.Length - 1)])
+foreach ($ExtensionPart in @(@('CORE32_EXT1.bin', 'CORE32_EXT.CPD', 'CORE32_EXT1.verify.bin'),
+                              @('CORE32_EXT2.bin', 'CORE32_EXT2.CPD', 'CORE32_EXT2.verify.bin'))) {
+    $PartRaw, $PartPacked, $PartVerify = $ExtensionPart
+    Push-Location -LiteralPath $ProjectRootAlias
+    try {
+        & $Mhmt '-hst' '-zxh' `
+            "$ProjectRootAscii/Build/$PartRaw" `
+            "$ProjectRootAscii/Build/$PartPacked"
+        if ($LASTEXITCODE -ne 0) { throw "CORE32 extension packing failed: $PartRaw" }
+        # Codex - 2026-07-17 - begin
+        Set-HrustPackedLength -Path (Join-Path $BuildDir $PartPacked)
+        # Codex - 2026-07-17 - end
+        & $Mhmt '-hst' '-zxh' '-d' `
+            "$ProjectRootAscii/Build/$PartPacked" `
+            "$ProjectRootAscii/Build/$PartVerify"
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) { throw "CORE32 packed extension verification failed: $PartPacked" }
+    $PartRawHash = (Get-FileHash -LiteralPath (Join-Path $BuildDir $PartRaw) -Algorithm SHA256).Hash
+    $PartVerifyHash = (Get-FileHash -LiteralPath (Join-Path $BuildDir $PartVerify) -Algorithm SHA256).Hash
+    if ($PartRawHash -ne $PartVerifyHash) {
+        throw "CORE32 packed extension does not unpack byte-for-byte: $PartPacked"
+    }
+    Remove-Item -LiteralPath (Join-Path $BuildDir $PartVerify) -Force
+}
+[IO.File]::WriteAllText((Join-Path $BuildDir 'CORE32_EXT_PARTS.INC'),
+    ("; Claude - 2026-09-27: создано build.ps1`nWDOS_EXT_PART2_START EQU 0x{0:X4}`n" -f $Part2Start))
 $global:LASTEXITCODE = 0
+# Claude - 2026-09-27 - end
 
 # API 77 lives in a mandatory one-page type-#06 provider. Its installer is
 # position independent at #8000; the implementation is called at #C010.
@@ -400,6 +545,37 @@ if ($LASTEXITCODE -ne 0) { throw 'FTView Z80/DMA regression tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'FTView General Sound tests failed.' }
 
 # Claude - 2026-09-24 - begin
+# VIDEO_PL (ролики TGV) собирается из исходника. Без правок исходник даёт
+# побайтно эталонный VIDEO_PL.WMF v0.71. v0.77 перед звуком MP3 ищет NeoGS и
+# проверяет, что MP3 влезает в его память (иначе предупреждает и пропускает
+# звуковой блок), а при VDAC2 выводит кадры на FT812. OUTPUT в исходнике —
+# video_pl.wmf в текущем каталоге, поэтому сборка идёт из Build.
+$VideoPlProject = Join-Path $ProjectRoot 'source\plugins\video_pl'
+$VideoPlOutput = Join-Path $BuildDir 'VIDEO_PL.WMF'
+Remove-Item -LiteralPath $VideoPlOutput, (Join-Path $BuildDir 'VIDEO_PL.sym'),
+    (Join-Path $BuildDir 'VIDEO_PL.lst') -Force -ErrorAction SilentlyContinue
+Push-Location -LiteralPath (Join-Path $ProjectRootAlias 'Build')
+try {
+    & $SjasmPlus '--nologo' '--msg=err' `
+        "--sym=$ProjectRootAscii/Build/VIDEO_PL.sym" `
+        "--lst=$ProjectRootAscii/Build/VIDEO_PL.lst" `
+        "$ProjectRootAscii/source/plugins/video_pl/PLUGXX.ASM"
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { throw 'VIDEO_PL assembly failed.' }
+if (-not (Test-Path -LiteralPath $VideoPlOutput -PathType Leaf)) {
+    throw 'VIDEO_PL.WMF was not created.'
+}
+# Код плеера вместе с ПЗУ GS: обычный GS, NeoGS и без GS.
+& python (Join-Path $VideoPlProject 'tests\test_video_pl.py')
+if ($LASTEXITCODE -ne 0) { throw 'VIDEO_PL tests failed.' }
+# Вывод на FT812 (VDAC2): модель FT812 и DMA, график кадров, старт звука.
+& python (Join-Path $VideoPlProject 'tests\test_video_pl_ft.py')
+if ($LASTEXITCODE -ne 0) { throw 'VIDEO_PL FT812 tests failed.' }
+# Claude - 2026-09-24 - end
+
+# Claude - 2026-09-24 - begin
 # PLM — менеджер загрузки плагинов: резидент в одну страницу, который держит
 # плагины на диске и подгружает их при запуске. Он переписывает в RAM пять
 # известных кусков кода WC, поэтому ниже, уже после сборки boot.$C, эталоны
@@ -429,6 +605,30 @@ if (-not (Test-Path -LiteralPath $PlmOutput -PathType Leaf)) {
 if ((Get-Item -LiteralPath $PlmOutput).Length -gt (512 + 0x4000)) {
     throw 'PLM.WMF exceeds one 16-KiB runtime page.'
 }
+
+# SETUP.WMF — настройки WC обычным плагином меню F10 («WC Setup», тип #03):
+# диалога F9 в ядре больше нет. Плагин сам читает и пишет wc.ini, а первой
+# строкой пишет версию из VERSION.ASM — ту же, что показывает заголовок WC.
+$SetupOutput = Join-Path $BuildDir 'SETUP.WMF'
+Remove-Item -LiteralPath $SetupOutput, (Join-Path $BuildDir 'SETUP.sym'),
+    (Join-Path $BuildDir 'SETUP.lst') -Force -ErrorAction SilentlyContinue
+Push-Location -LiteralPath $ProjectRootAlias
+try {
+    & $SjasmPlus '--nologo' '--msg=err' `
+        "--sym=$ProjectRootAscii/Build/SETUP.sym" `
+        "--lst=$ProjectRootAscii/Build/SETUP.lst" `
+        "$ProjectRootAscii/source/plugins/setup/SETUP.ASM"
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) { throw 'SETUP.ASM assembly failed.' }
+if (-not (Test-Path -LiteralPath $SetupOutput -PathType Leaf)) {
+    throw 'SETUP.WMF was not created.'
+}
+# Правка текста wc.ini исполняется настоящим Z80: отметки, флаги, новые
+# строки плагинов, ключи по секциям, строка версии и переполнение буфера.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_setup_plugin.py')
+if ($LASTEXITCODE -ne 0) { throw 'SETUP plugin machine tests failed.' }
 # Claude - 2026-09-24 - end
 
 # Codex - 2026-07-16 - begin
@@ -453,15 +653,74 @@ Remove-Item -LiteralPath $BootOutput -Force -ErrorAction SilentlyContinue
     "--sym=$SymbolsAscii" "--lst=$ListingAscii" $MainSourceAscii
 # Codex - 2026-07-16 - end
 if ($LASTEXITCODE -ne 0) { throw 'BOOT.ASM assembly failed.' }
-if ((Get-Item -LiteralPath $Payload).Length -ne 0x7C00) {
-    throw "Unexpected boot payload size: $((Get-Item -LiteralPath $Payload).Length)"
+# Claude - 2026-09-26 - begin
+# Отрицательный DS у sjasmplus — лишь предупреждение, и адрес уходит назад:
+# ASSERT после такого DS проходит, а в образе оказывается лишний байт.
+if (Select-String -LiteralPath (Join-Path $BuildDir 'boot.lst') -Pattern 'Negative BLOCK' -SimpleMatch -Quiet) {
+    throw 'BOOT.ASM: negative DS (a module outgrew its fixed slot), see Build/boot.lst.'
 }
+# Claude - 2026-09-26 - end
+# Claude - 2026-09-27 - begin
+# За логическим концом (WDOS_BOOT_TAIL_END) sjasmplus дописал сам CORE32.ASM —
+# он там ради символов WDOS.* (BOOT.ASM). Его образ должен совпасть с тем, что
+# взят из символического прохода (CORE32_RUNTIME.bin); затем он отрезается.
+# Payload — до логического конца, последний сектор Hobeta не добивается: весь
+# boot.$C с 17 байтами заголовка — не длиннее 32768 байт (BOOT.ASM: BIOS
+# TS-Conf читает файл целыми кластерами, кластер 32 КиБ).
+$BootSymbolText = [IO.File]::ReadAllText((Join-Path $BuildDir 'boot.sym'))
+$Part2EndMatch = [regex]::Match($BootSymbolText, '(?m)^WDOS_BOOT_TAIL_END:\s+EQU\s+0x([0-9A-Fa-f]+)')
+if (-not $Part2EndMatch.Success) { throw 'WDOS_BOOT_TAIL_END not found in boot.sym.' }
+$BootLogicalLength = [Convert]::ToInt32($Part2EndMatch.Groups[1].Value, 16) - 0x6011
+[byte[]]$PayloadBytes = [IO.File]::ReadAllBytes($Payload)
+$CoreRuntimeBytes = [IO.File]::ReadAllBytes((Join-Path $BuildDir 'CORE32_RUNTIME.bin'))
+$TrailingCore = $BootLogicalLength + 12                  # за заглушкой #C000..#C00B
+if ($PayloadBytes.Length -ne $TrailingCore + $CoreRuntimeBytes.Length) {
+    throw "boot payload tail is not the CORE32 module: $($PayloadBytes.Length) bytes."
+}
+for ($i = 0; $i -lt $CoreRuntimeBytes.Length; $i++) {
+    if ($PayloadBytes[$TrailingCore + $i] -ne $CoreRuntimeBytes[$i]) {
+        throw ("CORE32 of the main pass differs from the symbol pass at +#{0:X4}." -f $i)
+    }
+}
+[IO.File]::WriteAllBytes($Payload, [byte[]]$PayloadBytes[0..($BootLogicalLength - 1)])
+$PayloadLength = (Get-Item -LiteralPath $Payload).Length
+if ($PayloadLength -lt 0x7000 -or $PayloadLength -gt (0x8000 - 17)) {
+    throw "Unexpected boot payload size: $PayloadLength"
+}
+# Claude - 2026-09-27 - end
 
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_fat_allocator_hint.py')
 if ($LASTEXITCODE -ne 0) { throw 'FAT allocator hint machine tests failed.' }
 
+# Claude - 2026-09-24 - begin
+# Время новой записи каталога: GENTRY читает часы CMOS с проверкой BCD и
+# диапазонов; сбитые часы или год раньше 2026 дают 2026-01-01 00:00.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_file_time.py')
+if ($LASTEXITCODE -ne 0) { throw 'File time machine tests failed.' }
+# Claude - 2026-09-24 - end
+
+# Claude - 2026-09-25 - begin
+# USPO (API 46) не виснет на потерянном отпускании клавиши, но ждёт клавишу,
+# которую действительно держат (автоповтор PS/2 отмечает её снова).
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_key_release.py')
+if ($LASTEXITCODE -ne 0) { throw 'Key release machine tests failed.' }
+# RENAME с откатом: прежняя запись не удалилась — только что созданная
+# удаляется, две записи на одной цепочке не остаются.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_rename.py')
+if ($LASTEXITCODE -ne 0) { throw 'RENAME rollback machine tests failed.' }
+# Граница data-кластеров своя у каждого тома (страница потока), а не общая
+# ячейка расширения: панели на разных устройствах не выходят за свой раздел.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_volume_limit.py')
+if ($LASTEXITCODE -ne 0) { throw 'Per-volume data cluster limit machine tests failed.' }
+# Claude - 2026-09-25 - end
+
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_wcfx_copy_bounds.py')
 if ($LASTEXITCODE -ne 0) { throw 'WCFX COPYF bounds machine tests failed.' }
+
+# Окно хода F5 — одно на всю операцию: «Copying started», затем «Copying
+# имя», полоса только растёт (настоящие CP_GO, PBPR и CP_*).
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_copy_window.py')
+if ($LASTEXITCODE -ne 0) { throw 'F5 progress window machine tests failed.' }
 
 # Codex - 2026-07-16 - begin
 # Регрессионный плагин обязан пересобираться вместе с ядром, иначе автономный
@@ -534,8 +793,14 @@ if (Test-Path -LiteralPath $FilexNoSpaceSource -PathType Leaf) {
 }
 # Codex - 2026-07-16 - end
 
-& python (Join-Path $ProjectRoot 'tools\pack_hobeta.py') $Payload $BootOutput
+& python (Join-Path $ProjectRoot 'tools\pack_hobeta.py') $Payload $BootOutput `
+    --length $BootLogicalLength --expected-size $PayloadLength
 if ($LASTEXITCODE -ne 0) { throw 'HoBeta packing failed.' }
+# Claude - 2026-09-27 - begin
+if ((Get-Item -LiteralPath $BootOutput).Length -gt 0x8000) {
+    throw 'boot.$C is longer than 32768 bytes: TS-Conf BIOS would not boot it from 32-KiB clusters.'
+}
+# Claude - 2026-09-27 - end
 
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_lfn_namespace.py')
 if ($LASTEXITCODE -ne 0) { throw 'LFN/SFN namespace machine tests failed.' }
@@ -545,6 +810,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Plugin panel refresh machine tests failed.' }
 
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_wcini_version.py')
 if ($LASTEXITCODE -ne 0) { throw 'WCINI version compatibility tests failed.' }
+
+# Шрифт и распаковщики из HR-потоков образа: настоящие установщик и VDAC.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_boot_resources.py')
+if ($LASTEXITCODE -ne 0) { throw 'Boot resource unpacking tests failed.' }
+
+# Шина SPI (SD и FT812 VDAC2) в покое до первого обращения WC: сброс TS-Config
+# её не нормализует; установщик выполняет SpiBusIdle до FINI.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_spi_idle.py')
+if ($LASTEXITCODE -ne 0) { throw 'SPI idle at start tests failed.' }
 
 # Замороженный ABI: CURIT/GIPAG/DLSG и шлюз FILEX обязаны остаться на своих
 # адресах, иначе уже собранные плагины входят в середину процедуры. Набор
@@ -557,6 +831,37 @@ if ($LASTEXITCODE -ne 0) { throw 'CORE32 boundary/gate/rollback regressions fail
 
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_allocator_wrap.py')
 if ($LASTEXITCODE -ne 0) { throw 'MKSG wrap/count/data preservation tests failed.' }
+
+# Claude - 2026-09-25 - begin
+# Сбои ввода-вывода посреди операций (аудит Codex): BUtoFAT не пишет FAT после
+# отказа CURIT, DELFL сообщает об отказе освобождения цепочки. Нужен готовый
+# exe/boot.$C, поэтому — здесь, рядом с регрессиями ядра.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_io_failures.py')
+if ($LASTEXITCODE -ne 0) { throw 'I/O failure machine tests failed.' }
+# Короткое имя длинного файла (расширение из 1–2 знаков), аварийные пути
+# RENAME и MKDIR — настоящее ядро на носителе в памяти.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_crash_paths.py')
+if ($LASTEXITCODE -ne 0) { throw 'Short name, RENAME and MKDIR crash-path tests failed.' }
+# FILEX MOVE_RENAME каталога: откат записи «..» после неоднозначной записи;
+# отказ удаления источника с LFN — сектор SFN перечитывается по месту.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_move.py')
+if ($LASTEXITCODE -ne 0) { throw 'FILEX MOVE rollback tests failed.' }
+# FILEX SET_EOF32: отказ носителя после обнуления хвоста сектора — сектор
+# возвращается из копии, файл остаётся прежним (с 2026-09-26).
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_truncate.py')
+if ($LASTEXITCODE -ne 0) { throw 'FILEX truncation fault tests failed.' }
+# Даты для программ: API 58 бит 6 (время и дата изменения) и FILEX
+# GET_METADATA — чтение атрибута и времён без записи (с 2026-09-26).
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_dates_api.py')
+if ($LASTEXITCODE -ne 0) { throw 'File date API tests failed.' }
+# Claude - 2026-09-25 - end
+
+# Claude - 2026-09-25 - begin
+# Время изменения при записи внутри файла и усечении через FILEX: настоящие
+# FILEX, ядро и расширение на диске в памяти, порты CMOS отвечают часами.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_time.py')
+if ($LASTEXITCODE -ne 0) { throw 'FILEX modification time tests failed.' }
+# Claude - 2026-09-25 - end
 
 # Claude - 2026-09-21 - begin
 # Кэш сектора FAT потока LOAD512/SAVE512/LOADNON: те же данные и флаги, что
@@ -574,14 +879,21 @@ if ($LASTEXITCODE -ne 0) { throw 'CORE32 FAT stream cache tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'CORE32 file overwrite path tests failed.' }
 # Claude - 2026-09-22 - end
 
+# Claude - 2026-09-26 - begin
+# Короткое имя без «~n» для имени 8.3 с заглавными буквами: ПЗУ ищет boot.$C
+# по «BOOT    $C» и после замены файла иначе его не находило.
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_sfn_alias.py')
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 short-name alias tests failed.' }
+# Claude - 2026-09-26 - end
+
 # Плагины, меню и конфигурация — готовые runtime-файлы.
-# boot.$C собирается выше, а WC_History.txt и WC_todo.txt ведутся самим
-# Improved; остальные неизменяемые файлы берутся из локального эталона.
-# Все они входят в хэш-аудит.
+# boot.$C собирается выше, а WC_History.txt, WC_todo.txt и Help.txt (с
+# 2026-09-27: F9 свободна, Ctrl+F5) ведутся самим Improved; остальные
+# неизменяемые файлы берутся из локального эталона. Все они входят в хэш-аудит.
 $ProjectOwnedRuntime = @(
-    'boot.$C', 'WC_History.txt', 'WC_todo.txt',
+    'boot.$C', 'WC_History.txt', 'WC_todo.txt', 'Help.txt',
     'WC\TXTEDIT.WMF', 'WC\TXTVIEW.WMF', 'WC\TXTVIEW2.WMF', 'WC\TXTVIEW2.LIC',
-    'WC\UNZIP.WMF', 'WC\CHKDSK.WMF', 'WC\FTVIEW.WMF'
+    'WC\UNZIP.WMF', 'WC\CHKDSK.WMF', 'WC\FTVIEW.WMF', 'WC\VIDEO_PL.WMF'
 )
 # Старое имя встречается только в эталоне. Не возвращаем второй просмотрщик
 # в runtime при каждой сборке после переименования в TXTVIEW.WMF.
@@ -607,6 +919,8 @@ $TxtEditRuntime = Join-Path $ExeDir 'WC\TXTEDIT.WMF'
 [IO.File]::Copy($TxtEditOutput, $TxtEditRuntime, $true)
 [IO.File]::Copy($FtViewOutput, (Join-Path $ExeDir 'WC\FTVIEW.WMF'), $true)
 [IO.File]::Copy($FtViewOutput, (Join-Path $FtViewProject 'ftview.wmf'), $true)
+[IO.File]::Copy($VideoPlOutput, (Join-Path $ExeDir 'WC\VIDEO_PL.WMF'), $true)
+[IO.File]::Copy($VideoPlOutput, (Join-Path $VideoPlProject 'video_pl.wmf'), $true)
 [IO.File]::Copy($TxtHexOutput, (Join-Path $ExeDir 'WC\TXTVIEW.WMF'), $true)
 [IO.File]::Copy($TxtHexVdac2Output, (Join-Path $ExeDir 'WC\TXTVIEW2.WMF'), $true)
 [IO.File]::Copy((Join-Path $TxtHexVdac2Project 'fonts\OFL.txt'),
@@ -630,11 +944,20 @@ $ViewerIniText = [regex]::Replace($ViewerIniText,
     '(?im)(^|[\r\n])([ \t]*)RE\.WMF(?=[ \t;\r\n]|$)', '$1$2TXTVIEW.WMF')
 # Эталон содержит историческую версию 1.1, а уже собранный exe — версию
 # прошлого выпуска. Поставляемый INI должен совпадать с заголовком Improved и
-# результатом сохранения настроек по F9, поэтому первая строка приводится к
-# текущей версии в обоих случаях; OEM-байты комментариев и одиночные CR
-# остаются как есть.
+# с тем, что пишет SETUP.WMF при сохранении, поэтому первая строка приводится
+# к версии из VERSION.ASM; OEM-байты комментариев и одиночные CR остаются как
+# есть.
+$VersionMatch = [regex]::Match(
+    [IO.File]::ReadAllText((Join-Path $ProjectRoot 'source\VERSION.ASM')),
+    'DEFINE\s+WC_VERSION\s+"([^"]+)"')
+if (-not $VersionMatch.Success) { throw 'WC_VERSION not found in VERSION.ASM.' }
 $ViewerIniText = [regex]::Replace($ViewerIniText,
-    '\AWild Commander v1\.1[0-9]*i?(?=\r|\n|$)', 'Wild Commander v1.11i')
+    '\AWild Commander v1\.1[0-9]*i?(?=\r|\n|$)', $VersionMatch.Groups[1].Value)
+# Сортировка панели по дате изменения (CSORT=4, Ctrl+F5) — в подсказке к ключу.
+$ViewerIniText = $ViewerIniText.Replace('3 - by size)', '3 - by size, 4 - by date)')
+# Строка информации (размер, дата и время изменения) под обеими панелями
+# включена по умолчанию; подсказка к ключу остаётся из эталона.
+$ViewerIniText = $ViewerIniText.Replace("`rINFO=0;", "`rINFO=1;")
 [IO.File]::WriteAllBytes($ViewerIniPath, $ViewerByteEncoding.GetBytes($ViewerIniText))
 
 # UNZIP запускается по Enter на расширении ZIP и располагается сразу после
@@ -663,11 +986,26 @@ if ($LASTEXITCODE -ne 0) { throw 'CHKDSK runtime installation failed.' }
     --plugin $PlmOutput `
     --wc-dir (Join-Path $ExeDir 'WC')
 if ($LASTEXITCODE -ne 0) { throw 'PLM runtime installation failed.' }
+# Плагин настроек — третьей строкой, за менеджером: в том же порядке ядро
+# перечисляет плагины, если wc.ini нет, — тогда оно подсказывает открыть
+# «WC Setup» из F10, и F2 в нём создаёт файл.
+& python (Join-Path $ProjectRoot 'tools\install_setup_runtime.py') `
+    --plugin $SetupOutput `
+    --wc-dir (Join-Path $ExeDir 'WC')
+if ($LASTEXITCODE -ne 0) { throw 'SETUP runtime installation failed.' }
 # Эталоны перехватов сверяются с собранным boot.$C, а рабочие подпрограммы
 # исполняются настоящим Z80 на модели страниц TS-Conf.
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_plugin_manager.py')
 if ($LASTEXITCODE -ne 0) { throw 'Plugin manager machine tests failed.' }
 # Claude - 2026-09-24 - end
+
+# Claude - 2026-09-25 - begin
+# Собственный набор UNZIP (Z80-модель плагина, Deflate, контракт WMF и
+# wc.ini) прежде в сборку не входил и незаметно устарел. Здесь wc.ini уже
+# окончательный. Плагин только что собран — повторно не собираем.
+& (Join-Path $UnzipProject 'test.ps1') -SkipPluginBuild
+if ($LASTEXITCODE -ne 0) { throw 'UNZIP plugin tests failed.' }
+# Claude - 2026-09-25 - end
 
 $HashReport = Join-Path $BuildDir 'hash-report.tsv'
 & python (Join-Path $ProjectRoot 'tools\verify_hashes.py') `
@@ -683,10 +1021,11 @@ if ($HashExitCode -ne 0) {
             Where-Object { $_.status -ne 'MATCH' }
     )
     $ExpectedMismatchPaths = @(
-        'boot.$C', 'WC_History.txt', 'WC_todo.txt',
+        'boot.$C', 'WC_History.txt', 'WC_todo.txt', 'Help.txt',
         'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/RE.WMF', 'WC/TXTVIEW.WMF',
         'WC/TXTVIEW2.WMF', 'WC/TXTVIEW2.LIC', 'WC/UNZIP.WMF',
-        'WC/CHKDSK.WMF', 'WC/FTVIEW.WMF', 'WC/PLM.WMF', 'WC/wc.ini'
+        'WC/CHKDSK.WMF', 'WC/FTVIEW.WMF', 'WC/VIDEO_PL.WMF', 'WC/PLM.WMF', 'WC/SETUP.WMF',
+        'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -705,13 +1044,14 @@ if ($HashExitCode -ne 0) {
             'WC/TXTVIEW2.WMF' { 'EXTRA_ACTUAL' }
             'WC/TXTVIEW2.LIC' { 'EXTRA_ACTUAL' }
             'WC/PLM.WMF' { 'EXTRA_ACTUAL' }
+            'WC/SETUP.WMF' { 'EXTRA_ACTUAL' }
             default { $null }
         }
         if ($ExpectedStatus -and $Mismatch.status -ne $ExpectedStatus) {
             throw "Unexpected audit status for $($Mismatch.path): $($Mismatch.status)"
         }
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, PLM plugin manager, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, VIDEO_PL, PLM plugin manager, SETUP settings plugin, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.

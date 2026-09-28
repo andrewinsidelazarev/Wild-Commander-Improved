@@ -1,4 +1,5 @@
-;Video Player v0.71
+;Video Player v0.77 (v0.71 + проверка NeoGS и размера MP3, вывод на FT812,
+;звук вместе с первым кадром)
 ;(C) BUDDER/MGN/2024
 ;---------------------------------------
         OUTPUT "video_pl.wmf"
@@ -54,7 +55,7 @@ Vfm     EQU #15AF
 ;-------
         DW #FFFF,#FFFF; MAX SIZE
 ;-------
-        DB "Video Player v0.71              "
+        DB "Video Player v0.77              "
 ;-------
         DB 0
 ;---------------------------------------
@@ -89,15 +90,12 @@ PLUGIN  LD (DAHL),HL,(DADE),DE
         XOR A
         LD (SC),A
         LD (ESTAT),A
+        LD (SNDGO),A
 
         CALL DEVCHE:RET Z
 
-        LD IX,PLWND:CALL PRWOW
-
-        LD HL,TXT0,DE,#000B,BC,12:CALL PRSRW
-        LD A,%11110111:CALL PRIAT
-        LD HL,TXT00,DE,#010A,BC,14:CALL PRSRW
-        LD A,%01110000:CALL PRIAT
+        CALL WNDPL
+        CALL FTBOOT;         есть VDAC2 — FT812 запускается до звука
 
         CALL CLEAR
         CALL HEADER
@@ -110,6 +108,8 @@ PLUGIN  LD (DAHL),HL,(DADE),DE
 
         EI:HALT
         LD HL,I_N_T,A,#FF:CALL INT_PL
+; Есть VDAC2 — кадры идут на FT812 (FT812PL.ASM), иначе — прежний путь.
+        CALL FTSTART:JP NC,MAINFT
 ;-------
 MAIN    CALL LSHOW:JR Z,NXFL
         LD A,1,(I_N_T+1),A
@@ -164,7 +164,7 @@ JPS
  .32     LDI
         DEC A:JR NZ,JPS
         XOR A:LD BC,Vfm:OUT (C),A
-        RET
+        JP SNDST;            первый кадр на экране — пустить звук
 ;---------------------------------------
 HEADER  LD HL,LOBU,B,1:CALL LOAD512
 
@@ -202,7 +202,8 @@ NAG     CALL BLKZ
 YA      LD A,1:OR A
         RET
 ;---------------------------------------
-BLKZ    LD A,(PGNA):CALL MNGCVPL
+BLKZ    CALL FTPOLL;         смена кадра FT812 между порциями чтения
+        LD A,(PGNA):CALL MNGCVPL
         LD HL,PGNA:INC (HL)
 
         LD A,(LINES)
@@ -260,14 +261,55 @@ YUHU    LD A,(PGNA):CALL MNGCVPL
 ;***************************************
 LOADMP3 LD A,(GSENA):INC A:CALL Z,GSFET
         LD A,(GSENA):OR A:JR NZ,NONGS
+; Драйвер кладёт MP3 в GS целиком, по 64 сектора (32 КБ) на страницу. Не
+; влезает в GSPGS страниц — без звука: иначе заливка уходит за край памяти.
+        PUSH HL
+        EX DE,HL
+        LD A,(GSPGS):LD L,A:LD H,0
+        DUP 6
+        ADD HL,HL
+        EDUP
+        OR A:SBC HL,DE
+        POP HL
+        JR C,NOMEM
 
         PUSH HL:CALL PBSHW,MP3HAND
         POP HL
         CALL ZALIV
+        LD A,1:LD (SNDGO),A;   MP3 в GS: ждёт первого кадра
         RET
 ;-------
-NONGS   CALL PBSHW,EZALIV
+; Без NeoGS звук MP3 играть нечем, а слишком длинный MP3 не влезает в его
+; память: предупредить и пропустить звуковой блок, не отправляя в GS.
+; Сообщение (по центру, на всю ширину) встаёт в окне плеера на место
+; «Please Wait...», под ним подсказка. После любой клавиши (ждём и её
+; отпускания, чтобы нажатие не дошло до плеера) окно рисуется заново.
+NONGS   PUSH HL
+        LD HL,TXTNG
+        JR WARN
+NOMEM   PUSH HL
+        LD HL,TXTNM
+WARN    CALL SHOWMSG
+        POP HL
+        CALL PBSHW,EZALIV
         RET
+; Сообщение HL (32 знака) в окне плеера, подсказка, любая клавиша, окно
+; заново с «Please Wait...».
+SHOWMSG LD IX,PLWND
+        LD DE,#0101,BC,32:CALL PRSRW
+        LD A,%01110010:CALL PRIAT
+        LD HL,TXTKEY,DE,#0209,BC,16:CALL PRSRW
+        LD A,%01110000:CALL PRIAT
+        CALL USPO,NUSP,USPO
+        CALL RRESB
+        JP WNDPL
+;-------
+; Окно плеера: заголовок и «Please Wait...» по центру.
+WNDPL   LD IX,PLWND:CALL PRWOW
+        LD HL,TXT0,DE,#000B,BC,12:CALL PRSRW
+        LD A,%11110111:CALL PRIAT
+        LD HL,TXT00,DE,#010A,BC,14:CALL PRSRW
+        LD A,%01110000:JP PRIAT
 ;---------------------------------------
 EZALIV  PUSH HL
         CALL PBPR
@@ -281,7 +323,9 @@ ZALIV   PUSH HL:CALL GSLOAD,PBPR
         DEC HL:LD A,H:OR L:JP NZ,ZALIV
         RET
 ;---------------------------------------
-MP3HAND LD (MP3TOGS+4),HL
+; Драйвер лежит в странице плагина сразу за END; метка MP3TOGS — его адрес
+; внутри GS (#4000), поэтому здесь нужен адрес на стороне ZX.
+MP3HAND LD (END+4),HL
 
         XOR A
         OUT (#B3),A
@@ -297,7 +341,7 @@ MP3HAND LD (MP3TOGS+4),HL
         LD A,#00:CALL SENDDAT
         LD A,#40:CALL SENDDAT
 
-        LD HL,MP3TOGS,BC,#0400
+        LD HL,END,BC,#0400
 
 WAV2    PUSH BC
         LD A,(HL):CALL SENDDAT:INC HL
@@ -346,6 +390,11 @@ GETDAT  IN A,(#BB):RLCA:JR NC,GETDAT
         RET
 ;---------------------------------------
 STOPM   LD A,#FE:CALL SNDCOM:RET
+; Пустить звук MP3 вместе с первым кадром: драйвер в GS после заливки ждёт
+; команду #01 (WAITGO). Один раз за ролик; без звука в GS — ничего.
+SNDST   LD A,(SNDGO):OR A:RET Z
+        XOR A:LD (SNDGO),A
+        LD A,1:JP SNDCOM
 ;---------------------------------------
 GSFET   LD A,#80:OUT (#33),A
         EI
@@ -353,6 +402,14 @@ GSFET   LD A,#80:OUT (#33),A
         LD A,#F3:OUT (#BB),A
 
         CALL DYK:JR Z,WSE
+; MP3 играет только NeoGS (чип VS1001). Его порт конфигурации GSCFG0 (#0F)
+; читается командой ПЗУ #11; у обычного GS этот порт не занят и даёт #FF.
+; Так NeoGS ищет и прошивальщик NedoPC (flasher.a80, FINDNGS). Без проверки
+; обычный GS 1 МБ принимал MP3 целиком и зависал на середине заливки.
+        LD A,#0F:OUT (#B3),A
+        LD A,#11:OUT (#BB),A
+        CALL DYK:JR Z,WSE
+        IN A,(#B3):INC A:JR Z,WSE
 
         LD A,#23:OUT (#BB),A
         LD BC,#0F00
@@ -361,6 +418,11 @@ DIK     DEC BC:LD A,B:OR C:JR Z,WSE
         RRCA
         JR C,DIK
         IN A,(#B3):CP 3:JR C,WSE
+; #23 — число страниц по 32 КБ со 2-й (у NeoGS 2 МБ — 62, 4 МБ — 126).
+; Воспроизведение драйвера ходит по кольцу страниц 2..MXPG2-1 (MXPG2 = 64),
+; поэтому MP3 отдаётся не больше 62 страниц.
+        CP 63:JR C,$+4:LD A,62
+        LD (GSPGS),A
 WNE     LD A,1:OUT (#B3),A
         LD A,#6A:CALL SENDCOM
         XOR A:OUT (#B3),A
@@ -426,7 +488,10 @@ DOL
         RET
 ;---------------------------------------
 DEL32
- .5      SRL D:RR E,H,L
+; ALASM повторял ".5" всю строку из четырёх команд, SjASMPlus — только первую.
+        DUP 5
+        SRL D:RR E,H,L
+        EDUP
         RET
 ;-------
 DELIT4P LD IX,0-1
@@ -455,7 +520,8 @@ DEVCHE  LD A,(IX+29):CP 2:RET NZ
         CALL GEDPL
 
         LD IX,ERWND:CALL PRWOW
-        LD HL,TXTER,DE,#0103,BC,26:CALL PRSRW
+; Окно 34 колонки с рамкой: 26 знаков с колонки 4 — по 3 пробела с боков.
+        LD HL,TXTER,DE,#0104,BC,26:CALL PRSRW
 
         CALL USPO
         CALL NUSP
@@ -510,6 +576,11 @@ TXT0    DB "Video Player"
 TXT00   DB "Please Wait..."
 
 TXTER   DB "CAN'T PLAY FROM SD(NGS)!!!"
+; Строки окна плеера: 32 знака — вся ширина внутри рамки, текст по центру.
+TXTNG   DB "   NeoGS not found. No sound.   "
+TXTNM   DB "    MP3 too large. No sound.    "
+TXTFT   DB "    FT812 is not responding.    "
+TXTKEY  DB "Press any key..."
 ;---------------------------------------
 PBNOW   DS 4
 
@@ -524,8 +595,15 @@ SC      NOP
 PGNA    NOP
 
 GSENA   DB #FF
+GSPGS   NOP;     страниц GS под MP3 (из GSFET)
+SNDGO   NOP;     1 — MP3 в GS ждёт команды «играть»
 ESTAT   NOP
+;---------------------------------------
+        INCLUDE "FT812PL.ASM"
 END
+; Драйвер MP3 (1 КБ с END) отправляется в GS из загруженного кода плагина:
+; заголовок грузит 8 секторов (#8000..#8FFF).
+        ASSERT END+#400 <= #9000
 ;---------------------------------------
 ;---------------------------------------
 ;--------------MP3 Driver---------------
@@ -579,9 +657,16 @@ LDE2    LD HL,PAGR2+1:INC (HL):LD A,(HL)
         EXX:LD HL,#8000
         EXX
 ;-------
-        EI
         LD BC,#02
-WAITNGS IN A,(#01):OR A:JR NZ,EXIT2
+; Звук — по команде ZX: #01 «играть» плеер шлёт вместе с первым кадром, чтобы
+; звук и картинка начинались разом. Любая другая ненулевая команда (#FE при
+; выходе, #F3 перед новой заливкой) — выход в ПЗУ, как было в WAITNGS. До
+; команды прерывания выключены, и VS1001 данных не получает.
+WAITGO  IN A,(#01):CP 1:JR Z,GOSND
+        OR A:JR Z,WAITGO
+        JR EXIT2
+GOSND   EI
+WAITNGS IN A,(#01):CP 2:JR NC,EXIT2
         IN A,(#04)
         RLCA:JR NC,WAITNGS
         JP WAITNGS
@@ -794,4 +879,6 @@ MP3READ LD BC,MC_READ,A,#FF
 ;=======================================
 MXPG2   DB 64
 MXP2    DB 4
+; Плеер отдаёт в GS ровно 1 КБ драйвера (#4000..#43FF).
+        ASSERT $ <= #4400
 ;---------------------------------------

@@ -49,7 +49,8 @@ class Volume:
         self.mem[self.core('FATFLAGS')] = 0
         ext = self.pages[0xE8]
         put = lambda name, value: p.h.put32(ext, self.ext(name) - 0xC000, value)
-        put('FAT_DATA_CLUSTER_LIMIT', self.limit)
+        # Граница data-кластеров с 2026-09-25 — в странице потока (RECCAT).
+        p.h.put32(self.mem, self.ext('FAT_DATA_CLUSTER_LIMIT'), self.limit)
         put('APPEND_DIRECTORY_LBA', self.data_start)
         p.h.put16(ext, self.ext('APPEND_DIRECTORY_OFFSET') - 0xC000, 0)
         offset = self.ext('APPEND_ENTRY') - 0xC000

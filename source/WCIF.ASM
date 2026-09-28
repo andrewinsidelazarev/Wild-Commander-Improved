@@ -321,7 +321,7 @@ L7828_25:
         JR      NZ,L7828_24
 
 L7828_26:
-        LD      DE,DIR_FILTER_PATCH
+        LD      DE,FRAME_BOTTOM_CHARS           ; «└» и «┘», заполнение «─»
         LD      C,#C4
         CALL    L7828_28
         JP      L7828_11

@@ -302,24 +302,6 @@ const WC_TX_WINDOW err_size =
   // окна высотой 7; код 0E вычисляет горизонтальный центр по длине строки.
   "\x0C\x02\x0E" "Image too large"
 };
-
-const WC_TX_WINDOW win_about =
-{
-  /* window with header and text   */  WC_WIND_HDR_TXT,
-  /* cursor color mask             */  0,
-  /* X,Y (position)                */  22, 10,
-  /* W,H (size)                    */  36, 5,
-  /* paper/ink (window color)      */  0x4F,
-  /* -reserved-                    */  0,
-  /* window restore buffer address */  0,
-  /* separators                    */  0, 0,
-  /* header text                   */  "\x0E" " About ",
-  /* footer text                   */  "",
-  // Отметка сборки (build.py считает её по исходникам): по ней видно, какая
-  // версия плагина стоит на карте.
-  /* window text                   */  "\x0E\x0C\x01" "FT812 Viewer v1.21, (C)2026 INSiDE\r"
-                                       "\x0E\x0C\x02" "Build " BUILD_ID
-};
 #endif
 
 // --- FT812 --------------------------------
@@ -901,10 +883,8 @@ void main_dispatch()
       main_start();
     break;
 
-    case WC_CALL_MENU:
-      show_window(&win_about);
-    break;
-
+    // Из меню F10 плагин больше не зовётся (тип +197 — только по
+    // расширению); окно About с версией убрано вместе с этим вызовом.
     default:
       wc_exit(WC_EXIT);
   }

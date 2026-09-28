@@ -223,16 +223,24 @@ ERHD    DB #0E,#09,"ERROR:",0
 ERSL    DB #0E,#09,"press any key",0
 
 ; Окно индикатора прогресса.
+; Claude - 2026-09-26 - begin
+; С 2026-09-26 — одно окно хода на всю операцию F5 и F8 (WCINI.CP_*):
+; заголовок (+12) и строку 2 (+16, через #0D) ставит CP_GO/DL_GO —
+; «COPY»/«DELETE», «Copying started...»/«Deleting started...», затем
+; «Copying имя»/«Deleting имя»; строка 3 — «<n of M>»; строка 5 — полоса;
+; строки 1 и 4 пустые. С 2026-09-28 — CP_W+2 на 7 (прежде 66×5 без пустых
+; строк, до 2026-09-26 — 66×4 без текста, на каждый файл F5).
 PBWND   DB 4+128,0
         DB 255,255
-        DB 64+2,2+2
+        DB WCINI.CP_W+2,5+2
         DB %01011111
         DB 0
         DW #0000
         DB 0,0
+        DW TXT8
         DW 0
-        DW 0
-        DW 0
+        DW WCINI.CP_STARTED
+; Claude - 2026-09-26 - end
 
 ; Диалог создания каталога и переименования.
 MDWND   DB 3+16+128,0
@@ -380,10 +388,10 @@ EXTZ    DB "SPG":DW RUNSPG
         NOP
 TXT6    DB #0E,#09,"Make Directory",0
 TXT7    DB #0E,#09,"ReName",0
-TXT8    DB #0E,#09,"Copy",0
+TXT8    DB #0E,#09,"COPY",0                ; заголовок диалога F5 и окна хода
 TXT9    DB "Copy ",#FE:DW TXTD7:NOP
 TXT10   DB #0E,"<0000 of 0000>",0
-TXTB    DB #0E,#09,"Delete",0
+TXTB    DB #0E,#09,"DELETE",0              ; заголовок диалога F8 и окна хода
 TXTD    DB #0E,"Delete "
 TXTD7   DB "     files/dirs?",0
 TXTE    DB 2,#0E
@@ -410,8 +418,13 @@ TER2C   DB #0E
         DB "Short Name index FATALITY",0
 TER2D   DB #0E
         DB "Name already exists!",0
-TER2F   DB #0E,"DIR with same name "
-        DB "already exists!",0
+; Claude - 2026-09-25 - begin
+; F7 называет причину отказа MKDIR через FEEM, прежний общий текст «DIR with
+; same name already exists!» не нужен. Его место занял отказ F5 каталога в
+; собственный подкаталог; длина прежняя (36 байт), WCVLS не сдвигается.
+TERIN   DB #0E,"Can't copy DIR into itself!",0
+        DS 7,0
+; Claude - 2026-09-25 - end
 TER30   DB #0E,"DIR is not empty!",0
 ; Codex - 2026-07-17 - begin
 ; Один избыточный восклицательный знак освобождает байт для суффикса версии,
@@ -464,7 +477,7 @@ WND_H   DB 36
 TXT1    DB #0E,5,5
 TXTC
 ; Codex - 2026-07-17 - begin
-        DB "Wild Commander v1.11i",0
+        DB WC_VERSION,0                 ; VERSION.ASM
 ; Codex - 2026-07-17 - end
 TXT2    DB 7,7,"F1",6,1,"Help  "
         DB 7,7,"F2",8,1
@@ -476,7 +489,7 @@ F4TXT   DB "      "
         DB 7,7,"F6",8,1,"ReName"
         DB 7,7,"F7",6,1,"MkDir "
         DB 7,7,"F8",8,1,"Delete"
-        DB 7,7,"F9",6,1,"SetUP "
+        DB 7,7,"F9",6,1,"      "      ; F9 свободна: настройки — WC Setup в F10
         DB 7,7,"10",8,1,"Plugin"
         DB 7,7,32,6,1,"KOSHI/MGN"
         NOP

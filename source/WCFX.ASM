@@ -33,6 +33,7 @@ F1      EQU #749E
 F2      EQU #74A2
 F3      EQU #74A6
 F4      EQU #74AA
+F5      EQU #74AE
 F6      EQU #74B2
 ESC     EQU #749A
 CURSER  EQU #7CF2
@@ -73,7 +74,11 @@ NXTETY2 EQU #405A
 ;---------------------------------------
 F36     CALL F3:LD A,1:JR NZ,SBN
         CALL F4:LD A,2:JR NZ,SBN
-        CALL F6:LD A,3:JR NZ,SBN
+; Claude - 2026-09-24 - begin
+        JP F36_MORE                     ; Ctrl+F6 и новый Ctrl+F5 — за STATUS
+        DS 4,0                          ; адреса дальше в WCFX зафиксированы
+F36_KEYS
+; Claude - 2026-09-24 - end
         CALL CLAVA:JR Z,F36E
         CP "r":CALL Z,SEXY
         CP "a":CALL Z,MarkALL
@@ -267,46 +272,69 @@ STATUS  XOR A:LD HL,STUS:CP (HL):RET Z
         POP HL
         LD C,3:LDIR
         LD A," ",(DE),A:INC DE
-        EXA
+; Claude - 2026-09-24 - begin
+; Дальше строки — размер или <DIR>, дата и время изменения — собирает функция
+; расширения WildDOS (STATUS_TAIL). HL стоит на элементе+4: время и дата
+; элемента лежат на +8..+11, и их надо положить за строку, пока страница
+; списка ещё видна в окне #C000 — шлюз расширения её на время подменит.
+STATUS_TAIL_START
+        LD BC,8:ADD HL,BC
+        LD DE,LOBU+44,C,4:LDIR
+        EXA                                     ; Z — каталог
+        CALL @WDOS.EXTENSION_GATE
+        DB @WDOS_EXT.ID_STATUS_TAIL
 
-        LD HL,SDIR:JR Z,$+5:LD HL,SFIL
-        LD C,5:LDIR
-
-        LD A,32
-        LD (DE),A:INC DE
-        LD (DE),A:INC DE
-        LD (DE),A:INC DE
-        LD (DE),A:INC DE
-        LD (DE),A:INC DE
-        LD (DE),A:INC DE
-        LD (DE),A:INC DE
-
-        EXX
-        LD HL,(ARRR),DE,(ARRR+2)
-        PUSH IX
-        CALL DECZON4
-        POP IX
-
-        DEC DE
-        LD HL,DE,BC,0-9:ADD HL,BC
-
-        LD B,10,A,#30
-DZF     CP (HL):JR NZ,DzF
-        LD (HL),32:INC HL
-        DJNZ DZF
-DzF     LD HL,DE
- .3      INC DE
-        LD A,32
-        LD BC,3:LDDR
-        LD (DE),A:DEC DE
-        LD C,3:LDDR
-        LD (DE),A:DEC DE
-        LD C,3:LDDR
-        LD (DE),A:DEC DE
-        LD A,(HL),(DE),A
-
+        LD A,(IX+4):SUB 2:LD C,A                ; во всю панель: 38 или 43 знака
         LD A,(IX+5):SUB 2
-        LD HL,LOBU,D,A,E,1,BC,38:JP PRSRW
+        LD HL,LOBU,D,A,E,1,B,0:JP PRSRW
+
+; Сортировка панели: Ctrl+F6 — по размеру, Ctrl+F5 — по дате изменения,
+; новые сверху, как в Norton Commander (Ctrl+F3/F4 — в самой F36).
+F36_MORE
+        CALL F6:LD A,3:JP NZ,SBN
+        CALL F5:LD A,4:JP NZ,SBN
+        JP F36_KEYS
+
+; Claude - 2026-09-25 - begin
+; Начало DIRCOPY: как прежде, запомнить каталог панели назначения в ERRR, затем
+; проверить, не лежит ли он внутри копируемого каталога (WCINI.DIRCOPY_INSIDE).
+; Панели на разных устройствах — разные тома, копия в себя там невозможна.
+; Выход: CF=1 — отказ, сообщение уже показано; CF=0 — копировать. Активна
+; снова панель-источник, каталоги обеих панелей прежние.
+DIRCOPY_GUARD
+        CALL SWPPAND
+        LD DE,ERRR:CALL TLSTCAT
+        LD A,(WINDOW+#1D):LD HL,WINDO2+#1D
+        XOR (HL)                                ; Z — тот же том; CF=0
+        LD C,A                                  ; при Z — 0: предел шагов
+        CALL Z,WCINI.DIRCOPY_INSIDE
+        PUSH AF:CALL SWPPAND:POP AF
+        RET NC
+        LD HL,TERIN:CALL ERR0
+        SCF
+        RET
+; Claude - 2026-09-25 - end
+
+; Claude - 2026-09-27 - begin
+; FC_LOOP (из WCINI.CP_SOURCE, F5 файла): цепочка источника проверяется
+; порциями (ID_FILE_CHAIN). CF=1 — проверена очередная порция (до 1024): шлюз
+; вернул прерывания, EI:HALT отдаёт кадр обработчику IM2 (клавиши, таймер,
+; часы), A=1 — продолжить (Codex R28-02: обход файла в гигабайт шёл десятки
+; секунд одним вызовом при DI). Z — цепочка цела, GFILE; иначе — порча
+; (WCINI.CP_BAD: «UNKNOWN ERROR!!»).
+FC_WAIT EI:HALT
+FC_LOOP CALL @WDOS.EXTENSION_GATE
+        DB @WDOS_EXT.ID_FILE_CHAIN
+        JR C,FC_WAIT
+        JP Z,GFILE
+        JP WCINI.CP_BAD
+; Claude - 2026-09-27 - end
+
+        ; Прежний перевод размера и разделители тысяч занимали здесь больше:
+        ; адреса дальше в WCFX зафиксированы, поэтому место остаётся свободным.
+        DS STATUS_TAIL_START+108-$,0
+        ASSERT $ == STATUS_TAIL_START+108, хвост STATUS сдвинул WCFX
+; Claude - 2026-09-24 - end
 ;-------
 R2B2    CALL ENKE:JP NZ,WCVW.EXTZEL
         CALL F3:JP NZ,WCVW.EXTZEL
@@ -458,10 +486,18 @@ CPet    CALL RRESB
         POP IX
         RET
 ;-------
-CPGO    LD A,#FF:CALL YN:JR NZ,CPet
+; Claude - 2026-09-26 - begin
+; Выбрана [OK]: диалог F5 закрывается, открывается одно окно хода на всю
+; операцию — «Copying started...» (WCINI.CP_GO). Длина та же.
+CPGO    CALL WCINI.CP_GO:JR NZ,CPet
+; Claude - 2026-09-26 - end
         POP IX
-
-        LD HL,0
+; Claude - 2026-09-27 - begin
+        ; Файлы операции — заранее (WCINI.CP_COUNT, выход HL=0): окно хода
+        ; ведёт «<n of M>» по файлам, а не по объектам панели. Длина та же.
+        CALL WCINI.CP_COUNT
+        DS 2,0
+; Claude - 2026-09-27 - end
 LENIN   PUSH HL
         CALL GETen
         EXA:LD A,H:OR L:JR Z,CPgo
@@ -473,7 +509,10 @@ LENIN   PUSH HL
 
 CPgo    POP HL
         PUSH IX
-        LD IX,F5WND:CALL RRESB
+; Claude - 2026-09-26 - begin
+        CALL WCINI.CP_CLOSE                     ; окно хода (диалог закрыл CP_GO)
+        DS 4,0
+; Claude - 2026-09-26 - end
         POP IX
 
         JP WLIT
@@ -482,7 +521,10 @@ FLOF    CALL NAMEBG
 
         XOR A
         LD DE,LOBU+512
-        LD BC,#26FF
+; Claude - 2026-09-26 - begin
+        ; Имя — до 56 знаков: в окне хода оно идёт за «Copying » (WCINI.CP_NAME).
+        LD BC,#38FF
+; Claude - 2026-09-26 - end
 FLOf    LDI:CP (HL):JR Z,$+4:DJNZ FLOf
         LD A,B:OR A
         EX DE,HL:CALL NZ,NOPING
@@ -494,7 +536,12 @@ FLOf    LDI:CP (HL):JR Z,$+4:DJNZ FLOf
         LD DE,TXT10+2:CALL DECZ2
         LD HL,(MRCT)
         LD DE,TXT10+8+2:CALL DECZ2
-        LD HL,TXTBU,B,32
+; Claude - 2026-09-26 - begin
+        ; F5 и F8 — имя и «<i of N>» в окно хода (WCINI.CP_FLOF, выход NZ).
+        ; Окна хода нет — как прежде в диалог F5WND: CP_FLOF вернула Z и
+        ; HL=TXTBU, B=32 для очистки строки 2. Длина прежняя.
+        CALL WCINI.CP_FLOF:JR NZ,FLOF_SHOWN
+; Claude - 2026-09-26 - end
         PUSH HL:CALL NOPING
         POP HL:LD DE,#0201,BC,32:CALL PRSRW
         LD HL,TXT10,DE,#0200:CALL TXTPR
@@ -502,6 +549,7 @@ FLOf    LDI:CP (HL):JR Z,$+4:DJNZ FLOf
         LD HL,LOBU+512
         LD DE,#0101,BC,#26:CALL PRSRW
         LD A,%01110000:CALL PRIAT
+FLOF_SHOWN
         POP IX
 
         LD A,(ABT):OR A
@@ -538,14 +586,22 @@ CEX     XOR A:INC A
 COPYF   OR A:JP Z,DIRCOPY
         CALL FLOF,NZ,ABME:JR NZ,CEX
         LD HL,0,A,3
-COPYFD  LD (PBWND+5),A
-        LD (PBWND+16),HL
+; Claude - 2026-09-26 - begin
+; Окно хода открыто на всю операцию (WCINI.CP_GO), описатель PBWND больше не
+; меняется: A=4 — файл копируемого каталога, его имя (HL) — в окно (CP_FILE).
+COPYFD  CALL WCINI.CP_FILE
+        DS 3,0
+; Claude - 2026-09-26 - end
         LD HL,LOBU+4
         CALL FENTRY:JR Z,CE1
         LD A,(LOBU+4),(LOBU),A
         LD (LOBU+1),HL
         LD (LOBU+3),DE
-        CALL GFILE
+; Claude - 2026-09-27 - begin
+        ; Прежде «CALL GFILE»: цепочка источника до создания копии проверяется
+        ; целиком (WCINI.CP_SOURCE, ID_FILE_CHAIN). Длина та же.
+        CALL WCINI.CP_SOURCE
+; Claude - 2026-09-27 - end
 
         CALL SWPPAND
 
@@ -556,7 +612,9 @@ COPYFD  LD (PBWND+5),A
         PUSH IX
         LD A,(PGC)
         PUSH AF
-        LD IX,PBWND:CALL PRWOW
+; Claude - 2026-09-26 - begin
+        DS 7,0                                  ; прежде PRWOW(PBWND) на каждый файл
+; Claude - 2026-09-26 - end
         LD HL,(ENTRY+28)
         LD DE,(ENTRY+30)
         CALL DEL64
@@ -573,23 +631,37 @@ SVNG    CALL COPY_CHUNK
         CALL SWPPAND
         LD HL,#C000
         POP BC:PUSH BC
-        CALL LOAD512
+; Claude - 2026-09-25 - begin
+        ; Обёртки проверяют CF: отказ чтения или записи прерывает COPYF и
+        ; пытается удалить недописанную копию (WDOS.COPY_LOAD, COPY_SAVE,
+        ; отказ — COPY_FAIL).
+        CALL @WDOS.COPY_LOAD
 
         CALL SWPPAND
         LD HL,#C000
         POP BC:PUSH BC
-        CALL SAVE512
+        CALL COPY_SAVE
+; Claude - 2026-09-25 - end
         POP BC
         LD A,C:OR A:JR Z,SVNG
 
 COPYF_DATA_DONE
-        PUSH IX
-        LD IX,PBWND:CALL RRESB
-        POP IX
-
+; Claude - 2026-09-26 - begin
+        CALL WCINI.CP_DONE                      ; доля файла полная, окно не закрывать
+; Claude - 2026-09-26 - end
         CALL SWPPAND
         XOR A
         RET
+; Claude - 2026-09-27 - begin
+; COPY_SAVE — обёртка SAVE512 цикла F5 (прежде WDOS.COPY_SAVE в ядре: то место
+; ушло под хвост MKFILE, MKSG вне шлюза). Отказ (CF=1) — @COPY_FAIL в MD20.
+; Стоит на месте прежних восьми пустых байт после CP_DONE: длина COPYF та же.
+COPY_SAVE
+        CALL @WDOS.SAVE512                      ; контекст назначения
+        RET NC
+        JP @COPY_FAIL
+        DS 1,0
+; Claude - 2026-09-27 - end
 
 ; Выбрать следующий логический фрагмент COPYF. LOBU+1 хранит оставшиеся
 ; байты исходного файла: B=1..32 — число секторов текущего прохода,
@@ -658,9 +730,13 @@ ERSKIPO XOR A:INC A
 DIRCOPY CALL FLOF
 
         CALL SAVECD
-        CALL SWPPAND
-        LD DE,ERRR:CALL TLSTCAT
-        CALL SWPPAND
+; Claude - 2026-09-25 - begin
+        ; Каталог назначения — в ERRR, как прежде; копия каталога в собственный
+        ; подкаталог отклоняется, сообщение DIRCOPY_GUARD уже показал (B=255).
+        CALL DIRCOPY_GUARD
+        LD B,255:JP C,ERMAIN
+        DS 4,0                                  ; NOP: адреса дальше прежние
+; Claude - 2026-09-25 - end
 
         LD HL,#C000,(DDIRS+1),HL
 ;!!!
@@ -670,7 +746,11 @@ ZANOVOC CALL RECBUF
         LD (HL),D
 
         LD HL,LOBU+4
-        CALL FENTRY:LD B,1:JP Z,ERMAIN
+; Claude - 2026-09-27 - begin
+        ; Прежде «CALL FENTRY»: каталог с первым кластером 0 GDIR открывал как
+        ; корень (WCINI.CP_ENTER — отказ). Длина та же.
+        CALL WCINI.CP_ENTER:LD B,1:JP Z,ERMAIN
+; Claude - 2026-09-27 - end
         CALL GDIR
 
         CALL SWPPAND
@@ -697,7 +777,13 @@ IDXLOOP CALL RECBUF
 
         CALL CLPG
         LD DE,LOBU+4
-        XOR A:CALL NXTETY2,CLONOFF
+; Claude - 2026-09-26 - begin
+        ; Прежде «CALL NXTETY2,CLONOFF»: Z бывал и при отказе чтения — дерево
+        ; копировалось не целиком молча (Codex R23-01); WCINI.CP_NEXT отличает
+        ; отказ: сообщение и ERMAIN. Длина та же.
+        XOR A:CALL WCINI.CP_NEXT
+        DS 3,0
+; Claude - 2026-09-26 - end
         JR Z,DCUPP
 
         LD HL,LOBU+4
@@ -716,8 +802,12 @@ IDXLOOP CALL RECBUF
         JR IDXLOOP
 
 DCIN    LD HL,(DDIRS+1):INC HL,HL
-        LD (DDIRS+1),HL
-        JP ZANOVOC
+; Claude - 2026-09-25 - begin
+        ; Глубина проверяется до записи в стек индексов (WDOS.DCIN_TAIL):
+        ; за #FFFF он ушёл бы в страницу потока. Адреса дальше прежние.
+        JP @WDOS.DCIN_TAIL
+        DS 3,0
+; Claude - 2026-09-25 - end
 
 DCUPP   LD HL,(DDIRS+1)
         LD A,L:OR A:JR NZ,TEKK
@@ -795,7 +885,12 @@ BMKD    LD HL,0
 
         LD HL,LOBU:CALL MKdir:JR Z,DMKD
 
-        LD HL,TER2F:CALL ERR0
+; Claude - 2026-09-25 - begin
+        ; Причина отказа — по коду MKDIR, как у F5 (нет места, имя занято, имя
+        ; недопустимо). Прежде любая неудача называлась «DIR with same name
+        ; already exists!», в том числе нехватка места.
+        CALL FEEM:CALL ERR0
+; Claude - 2026-09-25 - end
 
 DMKD    CALL RRESB
         POP IX
@@ -899,13 +994,21 @@ DelFl   CALL CURSER
 
         CALL DLDI:RET Z
 
-        LD DE,BRRR:CALL TLSTCAT
-        CALL PANELI:JP FOLD
+; Claude - 2026-09-25 - begin
+        ; Перечитать свою панель и соседнюю: та могла стоять в удалённом
+        ; каталоге (WCINI.DEL_REFRESH). Адреса дальше в WCFX прежние.
+        JP WCINI.DEL_REFRESH
+        DS 9,0
+; Claude - 2026-09-25 - end
 
 DELDIR  CALL SAVECD
 
         LD HL,LOBU+4
-        CALL FENTRY:JP Z,DER0
+; Claude - 2026-09-26 - begin
+        ; Каталог не нашёлся (отказ чтения) — «UNKNOWN ERROR!!» и NZ, а не
+        ; молчаливая остановка F8 (DER0; Codex R22-02).
+        CALL FENTRY:JP Z,WCINI.DL_FAIL
+; Claude - 2026-09-26 - end
         CALL GDIR
 
         LD DE,LOBU+1024
@@ -913,15 +1016,18 @@ DELDIR  CALL SAVECD
         CALL NXTETY:JR Z,NED
         CALL NXTETY:JR NZ,NED
 
-        CALL LOADCD
-        LD HL,LOBU+4:CALL FNDELFL
-        XOR A
-        RET
+; Claude - 2026-09-26 - begin
+        ; Каталог пуст — LOADCD и удаление (WCINI.DL_EMPTY, DL_DELETE). Прежде
+        ; «CALL FNDELFL:XOR A:RET» — отказ удаления не проверялся (R21-02). Z
+        ; перечисления бывает и при отказе чтения — тогда сообщение и NZ, а
+        ; не удаление; NED — так же, вместо «DIR is not empty!» (WCINI.DL_NED,
+        ; Codex R23-01). Длина и адрес NED прежние.
+        JP WCINI.DL_EMPTY
+        DS 8,0
 
-NED     LD HL,TER30:CALL ERR0
-        CALL LOADCD
-        XOR A
-        RET
+NED     JP WCINI.DL_NED
+        DS 8,0
+; Claude - 2026-09-26 - end
 
 DLDI    PUSH IX
         CALL USPO
@@ -945,10 +1051,25 @@ DLet    CALL RRESB
         XOR A
         RET
 ;-------
-DLGO    LD A,#FF:CALL YN:JR NZ,DLet
-        LD HL,TXTE,DE,#0400:CALL TXTPR
+; Claude - 2026-09-26 - begin
+; Выбрана [OK]: диалог закрывается, открывается одно окно хода на всю
+; операцию — «Deleting started...» (WCINI.DL_GO); прежняя строка «Deleting is
+; in Progress!» в диалоге больше не нужна. Длина та же.
+DLGO    CALL WCINI.DL_GO:JR NZ,DLet
+; Claude - 2026-09-26 - end
+; Claude - 2026-09-27 - begin
+        ; До первого удаления: отмеченные не делят кластеров с неотмеченными
+        ; записями того же каталога (WCINI.DL_ALIAS, Codex R27-04). Нарушение
+        ; — сообщение показано, F8 ничего не удаляет: окно хода закрывается,
+        ; как в конце (DLgo). Длина прежняя.
         POP IX
-
+        CALL WCINI.DL_ALIAS
+        JR Z,DLALOK
+        PUSH HL                          ; для POP HL в DLgo
+        JR DLgo
+        DS 3,0
+DLALOK
+; Claude - 2026-09-27 - end
         LD HL,0
 LENIN2  PUSH HL
         CALL GETen
@@ -961,7 +1082,10 @@ LENIN2  PUSH HL
 
 DLgo    POP HL
         PUSH IX
-        LD IX,F5WND:CALL RRESB
+; Claude - 2026-09-26 - begin
+        CALL WCINI.DL_CLOSE                     ; окно хода (диалог закрыл DL_GO)
+        DS 4,0
+; Claude - 2026-09-26 - end
         POP IX
 
 DER0    XOR A:INC A
@@ -971,7 +1095,9 @@ DELF    OR A:JR Z,DIRTREM
         CALL FLOF,NZ,ABME:JR NZ,DER0
 
         LD HL,LOBU+4
-        CALL DELFL:JR Z,DER0
+; Claude - 2026-09-26 - begin
+        CALL WCINI.DL_DELFILE:JR NZ,DER0        ; n+1; отказ — «UNKNOWN ERROR!!»
+; Claude - 2026-09-26 - end
 
         XOR A
         RET
@@ -984,24 +1110,39 @@ DIRTREM ; Полностью удалить дерево каталогов.
         LD HL,#C000,(DDIRS+1),HL
 ;!!!
         LD HL,LOBU+4
-ZANOVO  CALL FENTRY:LD B,1:JP Z,DTRER0
+; Claude - 2026-09-27 - begin
+        ; Прежде «CALL FENTRY»: каталог с первым кластером 0 GDIR открывал как
+        ; корень, и F8 удалял файлы корня (WCINI.DL_ENTER — отказ). Длина та же.
+ZANOVO  CALL WCINI.DL_ENTER:LD B,1:JP Z,DTRER0
+; Claude - 2026-09-27 - end
         CALL GDIR
         CALL CLONEZ
 
 DFILES  CALL CLPG
         LD DE,LOBU+1024
-        LD A,1:CALL NXTETY2,CLONOFF
+; Claude - 2026-09-26 - begin
+        ; Прежде «CALL NXTETY2,CLONOFF»: Z бывал и при отказе чтения — F8 брал
+        ; его за конец файлов и удалял подкаталог с непройденными (Codex
+        ; R23-01); WCINI.DL_NEXT отличает отказ: сообщение и DTRER0. Длина та же.
+        LD A,1:CALL WCINI.DL_NEXT
+        DS 3,0
+; Claude - 2026-09-26 - end
         JR Z,DDIRZ
         LD HL,LOBU+1024
         LD A,(HL):AND #10:LD (HL),A
-        CALL DELFL:LD B,8:JR Z,DTRER0
+; Claude - 2026-09-26 - begin
+        CALL WCINI.DL_INNER:LD B,8:JR Z,DTRER0  ; DELFL, имя и ступень полосы
+; Claude - 2026-09-26 - end
         LD A,(ABT)
         OR A:CALL NZ,ABME
         LD B,254:JR NZ,DTRER0
         JR DFILES
 
 DDIRZ
-        CALL RECBUF
+; Claude - 2026-09-25 - begin
+        ; RECBUF и проверка места в стеке имён до NXTETY2 (WDOS.RECBUF_DEPTH).
+        CALL @WDOS.RECBUF_DEPTH
+; Claude - 2026-09-25 - end
 DDIRS   LD DE,0
 
         LD A,2
@@ -1024,10 +1165,19 @@ DDIRS   LD DE,0
         LD (DDIRS+1),BC
 
         EX DE,HL
-        LD A,(HL):AND #10:LD (HL),A
-        JR ZANOVO
+; Имя подкаталога лежит в стеке имён — странице в окне #C000, а поиск ядра
+; заходит в расширение, и шлюз на это время ставит в #C000 свою страницу.
+; Переходник в MD20 копирует запись в LOBU+768 и ищет оттуда; байты здесь
+; те же по счёту: граница WCFX проверяется точно.
+        JP @DIRTREM_SUBDIR
+        DS 3,0
 
-NODIRS  LD HL,UPDIR
+NODIRS
+; Claude - 2026-09-26 - begin
+        ; Z перечисления подкаталогов — не отказ ли чтения (R23-01); нет —
+        ; HL=UPDIR, как прежнее «LD HL,UPDIR». Длина та же.
+        CALL WCINI.DL_UP
+; Claude - 2026-09-26 - end
         CALL FENTRY:LD B,4:JR Z,DTRER0
         CALL GDIR
 
@@ -1039,7 +1189,8 @@ NDR     DEC HL
         OR A:SBC HL,BC
         LD (DDIRS+1),HL
 
-        CALL FNDELFL:LD B,3:JR Z,DTRER0
+DDIRS_DELETE
+        CALL WCINI.DL_DIRDEL:LD B,3:JR Z,DTRER0 ; имя — из стека в #C000 (DIRTREM_DELETE)
         JR DDIRS
 ;!!!
 DDIREX  CALL LOADCD
@@ -1080,41 +1231,61 @@ DLME    PUSH IX
         POP BC,DE,HL:CALL TXTPR
         JR MMEN
 ;---------------------------------------
-PBPR    PUSH IX
-        LD A,(PGC)
-        PUSH AF
-        XOR A:CALL MNGC
-
-        LD HL,(PBNOW)
-        LD DE,(PBNOW+2)
+; Claude - 2026-09-26 - begin
+; Перед каждой порцией (до 16 КиБ) цикла SVNG: доля файла в 64-х — сколько
+; раз размер/64 (PBSTL/PBSTH) укладывается в PBNOW до этой порции, то есть в
+; уже переданное (Codex R22-01: прежде считалась и начатая порция — полоса
+; бывала полной до отказа передачи), не больше 64 (вычитанием: прежний
+; DELIT4P у файла в сотню байт делал 16384 шагов); затем PBNOW += 16384;
+; затем «Copying имя» вместо «Copying started...» (WCINI.CP_ACTIVE) и общая
+; полоса (CP_PART: до конца файла доля не больше 63, файл короче 64 байт — 0;
+; Codex R23-02). Страница в #C000 (буфер порции) возвращается. Место прежнего
+; тела (96 байт) — ещё под деление для полосы; ERR0 не сдвигается.
+PBPR    LD A,(PGC):PUSH AF
+        LD HL,(PBNOW),DE,(PBNOW+2)
+        PUSH DE:PUSH HL                         ; доля — по уже переданному
         LD BC,16384
-        ADD HL,BC:JR NC,$+3:INC DE
-        LD (PBNOW),HL
-        LD (PBNOW+2),DE
-
-        CALL DLT4PCH
-
-        LD HL,TXTBU
-        LD A,C,C,64
-        OR A:JR NZ,$+5:LD A,C:JR DoL
-        CP C:JR C,$+3:LD A,C
-        LD B,A
-        LD A,C:SUB B
-
-        LD C,#DB
-        LD (HL),C:INC HL:DJNZ $-2
-
-        OR A:JR Z,DOL
-DoL     LD B,A,C,#B1
-        LD (HL),C:INC HL:DJNZ $-2
-DOL
-        LD IX,PBWND
-        LD HL,TXTBU
-        LD A,(IX+5):SUB 2
-        LD D,A,E,#01,BC,64:CALL PRSRW
+        ADD HL,BC:JR NC,PBPR_KEEP
+        INC DE
+        LD A,D:OR E:JR NZ,PBPR_KEEP
+        DEC DE:LD H,D:LD L,E                    ; не за #FFFFFFFF: у файла ~4 ГиБ
+PBPR_KEEP                                       ; счёт не обнуляется, полоса не идёт назад
+        LD (PBNOW),HL:LD (PBNOW+2),DE
+        POP HL:POP DE
+        XOR A                                   ; A=0, CF=0
+PBPR_PART
+        LD BC,(PBSTL+1):SBC HL,BC               ; CF здесь всегда 0
+        EX DE,HL
+        LD BC,(PBSTH+1):SBC HL,BC
+        EX DE,HL
+        JR C,PBPR_BAR                           ; остаток меньше размера/64
+        INC A:BIT 6,A:JR Z,PBPR_PART            ; до 64; BIT не трогает CF
+PBPR_BAR
+        PUSH AF                                 ; сначала имя, потом полоса:
+        CALL WCINI.CP_ACTIVE                    ; строка 1 не отстаёт от полосы
         POP AF
-        POP IX
-        JP MNGC
+        CALL WCINI.CP_PART
+        POP AF:JP MNGC
+
+; A = 64·HL/DE (HL ≤ DE; при DE=0 — A=0): 24-битное вычитание. Не больше
+; 64 шагов и A не больше 64 при любых входах (Codex R20-01: при HL > DE
+; прежде считала секундами и отдавала до 255). Для полосы окна хода
+; (WCINI.CP_TOTAL, CP_ZENO).
+CP_MUL64DIV
+        LD A,D:OR E:RET Z
+        LD C,0:LD B,6
+CP_MD_SHIFT
+        ADD HL,HL:RL C:DJNZ CP_MD_SHIFT
+        XOR A
+CP_MD_SUB
+        OR A:SBC HL,DE:JR NC,CP_MD_FIT
+        DEC C:RET M                             ; остаток меньше DE — A готово
+CP_MD_FIT
+        INC A:CP 64:RET Z
+        JR CP_MD_SUB
+        ASSERT $ <= PBPR+96, PBPR и деление полосы длиннее прежнего PBPR
+        DS PBPR+96-$,0
+; Claude - 2026-09-26 - end
 ;-------
 ERR0    ; Вход: HL — адрес текста сообщения.
 

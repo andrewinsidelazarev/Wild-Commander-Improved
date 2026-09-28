@@ -7,7 +7,8 @@
 
 - поток читает и пишет те же секторы данных, что независимая модель цепочки
   FAT, и возвращает прежние A/CF/HL (конец цепочки, повреждённая ссылка,
-  ссылка 0 на корень, ошибка I/O данных);
+  ссылка 0 — с 2026-09-27 тоже ошибка, а не переход к корню, ошибка I/O
+  данных);
 - сектор FAT читается один раз на сектор FAT, а не на каждый кластер;
 - кэш сбрасывают: запись FAT со страницы-клона WC, CURIT с правкой SECBU без
   записи, DEVINI, DOS_SWP, HDD и начало чтения каталога NXTINI;
@@ -24,6 +25,7 @@ import re
 import unittest
 from pathlib import Path
 
+import runtime_image
 import z80
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -69,8 +71,12 @@ class Machine:
         image = boot.read_bytes()
         self.cpu.set_memory_block(0x6000, image)
         end = self.core('END')
-        self.cpu.set_memory_block(0x4000, image[0x600C:0x600C + end - 0x4000])
+        core = Path(os.environ.get('WC_CORE', BUILD / 'CORE32_RUNTIME.bin')).read_bytes()
+        assert len(core) == end - 0x4000, (len(core), end)
+        self.cpu.set_memory_block(0x4000, core)
         self.cpu.set_memory_block(0xC000, ext.read_bytes())
+        # Как установщик: драйверы ядра — в #E8, резидентный блок — на их место.
+        runtime_image.apply(self.mem, self.ext)
         # Окно #0000..#3FFF — файловая страница WC. Остальные страницы живут
         # здесь и подставляются switch(), как это делает MNG0/DMA-клон WC.
         self.pages: dict[str, bytearray] = {}
@@ -84,6 +90,8 @@ class Machine:
         self.log: list[tuple[str, int]] = []
         self.fail_lbas: set[int] = set()
         self.fail_writes: set[int] = set()
+        # Неоднозначный исход: сектор лёг на носитель, а драйвер вернул ошибку.
+        self.ambiguous_writes: set[int] = set()
         self.seldev: list[int] = []
         self.devini = 0
         self.ticks = 0
@@ -211,6 +219,10 @@ class Machine:
             self.log.append(('W' if write else 'R', lba))
             if write:
                 self.sectors[lba] = bytes(self.mem[address:address + 512])
+                if lba in self.ambiguous_writes:
+                    self.mem[self.core('ABT')] = 1
+                    self._ret()
+                    return
             else:
                 self.mem[address:address + 512] = self.read_sector(lba)
             address += 512
@@ -288,9 +300,9 @@ class ChainModel:
 
     def follow(self) -> None:
         raw = self.m.fat(self.cluster)
-        if raw == 0:
-            self.cluster, self.sector = 2, 0          # исторический переход к корню
-            return
+        # Ноль — свободный кластер: с 2026-09-27 порча ссылки (STREAM_LINK), а
+        # прежде GIPAG понимал его как корень и поток шёл по корневому
+        # каталогу (Codex R26-03).
         link = raw & 0x0FFFFFFF
         if link < 2 or 0x0FFFFFF0 <= link < 0x0FFFFFF8:
             self.state = 0xFF
@@ -405,11 +417,18 @@ class StreamTests(unittest.TestCase):
                     self.assertEqual(m.mem[m.core('ABT')], 0xFE)
                     self.assertEqual(m.mem[m.core('EOC')], 0xFF)
                 self.assertEqual(m.fat_reads(), 1)
-        # Ссылка 0 внутри кэшированного сектора: как и прежде, переход к корню.
-        m = Machine(spc=1)
-        m.make_chain([10, 11, 12])
-        m.set_fat(12, 0)
-        self.check_stream(m, [10, 11, 12], [('load', 5)])
+        # Ссылка 0 (свободный кластер) и на попадании кэша, и на промахе: ошибка,
+        # а не переход к корню (Codex R26-03; прежде поток читал корень).
+        for spc, chain in ((1, [10, 11, 12]), (2, [10, 11, 12]), (1, [10, 300])):
+            with self.subTest(spc=spc, chain=chain):
+                m = Machine(spc=spc)
+                m.make_chain(chain)
+                m.set_fat(chain[-1], 0)
+                model = self.check_stream(m, chain, [('load', 8)])
+                self.assertEqual(model.state, 0xFF)
+                self.assertEqual(m.mem[m.core('ABT')], 0xFE)
+                root = m.cluster_lba(2)
+                self.assertNotIn(root, [lba for kind, lba in m.log if kind == 'R'], 'читался корень')
         # Ошибка I/O данных после попаданий в кэш.
         m = Machine(spc=1)
         m.make_chain(list(range(10, 30)))

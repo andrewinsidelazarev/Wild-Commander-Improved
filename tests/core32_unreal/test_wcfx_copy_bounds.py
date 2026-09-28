@@ -50,13 +50,13 @@ class BootHarness:
         self.machine = z80.Z80Machine()
         self.memory = self.machine.memory
         self.machine.set_memory_block(PAYLOAD_BASE, PAYLOAD.read_bytes())
-        core_source = self.symbols["WDOS.CORE32"]
+        # С 2026-09-27 код ядра в boot.$C — HR-потоком: рабочий образ берётся
+        # из сборки (CORE32_RUNTIME.bin, из символического прохода).
         core_start = self.symbols["WDOS.START"]
         core_length = self.symbols["WDOS.END"] - core_start
-        self.machine.set_memory_block(
-            core_start,
-            bytes(self.memory[core_source : core_source + core_length]),
-        )
+        core = (PROJECT_ROOT / "Build" / "CORE32_RUNTIME.bin").read_bytes()
+        assert len(core) == core_length, (len(core), core_length)
+        self.machine.set_memory_block(core_start, core)
         self.machine.set_breakpoint(RETURN_SENTINEL)
 
     def address(self, name: str) -> int:
@@ -184,10 +184,15 @@ def test_copy_loop_uses_chunk_counts() -> None:
         # стек и BC нетронутыми, а реальные LOAD512/SAVE512 перехватываются.
         harness.memory[harness.address("PBPR")] = 0xC9
         harness.memory[harness.address("SWPPAND")] = 0xC9
-        load512 = harness.address("LOAD512")
-        save512 = harness.address("SAVE512")
+        # Конец файла рисует полосу окна хода (WCINI.CP_DONE, с 2026-09-26
+        # вместо RRESB на каждый файл) — к выбору длины не относится.
+        harness.memory[harness.symbols["WCINI.CP_DONE"]] = 0xC9
+        # Обёртки COPY_LOAD/COPY_SAVE (ядро, 2026-09-25) зовут LOAD512/SAVE512
+        # ядра прямо, мимо входов #4015/#4018: перехватываются обе пары.
+        load512 = (harness.address("LOAD512"), harness.wdos_address("LOAD512"))
+        save512 = (harness.address("SAVE512"), harness.wdos_address("SAVE512"))
         rresb = harness.address("RRESB")
-        for address in (load512, save512, rresb, RETURN_SENTINEL):
+        for address in (*load512, *save512, rresb, RETURN_SENTINEL):
             harness.machine.set_breakpoint(address)
 
         loads: list[int] = []
@@ -207,9 +212,9 @@ def test_copy_loop_uses_chunk_counts() -> None:
                 )
             if harness.machine.pc == RETURN_SENTINEL:
                 break
-            if harness.machine.pc == load512:
+            if harness.machine.pc in load512:
                 loads.append(harness.machine.b)
-            elif harness.machine.pc == save512:
+            elif harness.machine.pc in save512:
                 saves.append(harness.machine.b)
             elif harness.machine.pc != rresb:
                 raise AssertionError(
@@ -362,6 +367,7 @@ def main() -> int:
         "WCFX.LOAD512",
         "WCFX.SAVE512",
         "WCFX.RRESB",
+        "WCINI.CP_DONE",
         "WCFX.LOBU",
         "WDOS.CORE32",
         "WDOS.START",

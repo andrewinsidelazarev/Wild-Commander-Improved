@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Pack a sector-aligned payload into a HoBeta file.
+"""Pack a payload into a HoBeta file.
 
 The defaults reproduce the 17-byte header of the reference Wild Commander
 ``boot.$C``.  The input is expected to contain the complete 0x7C00-byte
 sector payload, including any bytes after the logical file length.
+
+Since 2026-09-27 the payload may end inside its last sector: the header keeps
+the whole number of sectors, the file stops at the payload end.  WC's
+``boot.$C`` must stay within 32768 bytes (the TS-Conf BIOS reads it in whole
+clusters from 0x6000; a second 32-KiB cluster wraps through 0xFFFF), and 128
+full sectors with the header would be 32785 bytes.
 """
 
 from __future__ import annotations
@@ -74,8 +80,11 @@ def build_header(
         if not 0 <= value <= 0xFFFF:
             raise ValueError(f"{field} must fit in 16 bits")
 
-    if payload_size == 0 or payload_size % 0x100:
-        raise ValueError("payload size must be a non-zero multiple of 256 bytes")
+    if payload_size == 0:
+        raise ValueError("payload size must be non-zero")
+    payload_size = (payload_size + 0xFF) & ~0xFF       # whole sectors in the header
+    if payload_size > 0xFFFF:
+        raise ValueError("payload size must fit in 16 bits")
     if logical_length > payload_size:
         raise ValueError("logical length cannot exceed the sector payload size")
 
@@ -153,6 +162,12 @@ def run_self_test() -> None:
         pass
     else:
         raise AssertionError("short payload was accepted")
+
+    partial = bytes(range(256)) * 127 + bytes(190)
+    packed = pack_payload(partial, logical_length=len(partial), expected_payload_size=len(partial))
+    assert len(packed) == 17 + len(partial), "partial last sector was padded"
+    assert packed[13:15] == bytes((0, 128)), "header does not count the partial sector"
+    assert struct.unpack_from("<H", packed, 11)[0] == len(partial)
 
 
 def build_parser() -> argparse.ArgumentParser:

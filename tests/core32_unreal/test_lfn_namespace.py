@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+import runtime_image
 import z80
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,13 +60,20 @@ class Harness:
         self.ram = self.cpu.memory
         boot = (ROOT / 'exe' / 'boot.$C').read_bytes()
         length = self.addr('END') - 0x4000
-        self.cpu.set_memory_block(0x4000, boot[0x600C:0x600C+length])
+        core = (BUILD / 'CORE32_RUNTIME.bin').read_bytes()
+        assert len(core) == length, (len(core), length)
+        self.cpu.set_memory_block(0x4000, core)
         self.cpu.set_memory_block(0xC000, (BUILD / 'CORE32_EXT.bin').read_bytes())
+        # Как установщик: драйверы ядра — в #E8, резидентный блок — на их место.
+        runtime_image.apply(self.ram, symbols(BUILD / 'CORE32_EXT.sym'))
         self.directory = directory + bytes(512 - len(directory) % 512)
         self.fail_read = fail_read
         self.cursor = 0
         self.reads = 0
-        for address in (STOP, self.addr('TOS'), self.addr('LOAD512')):
+        # Поиск и создание с 2026-09-27 сначала проверяют цепочку каталога
+        # (DIR_CHAIN): корень — кластер 2, его запись FAT — конец цепочки.
+        self.ram[self.addr('BROOTC'):self.addr('BROOTC') + 4] = (2).to_bytes(4, 'little')
+        for address in (STOP, self.addr('TOS'), self.addr('LOAD512'), self.addr('CURIT')):
             self.cpu.set_breakpoint(address)
 
     def addr(self, name: str) -> int:
@@ -86,7 +94,12 @@ class Harness:
                 continue
             if self.cpu.pc == STOP:
                 return self.cpu.a, bool(self.cpu.f & 64), bool(self.cpu.f & 1)
-            if self.cpu.pc == self.addr('TOS'):
+            if self.cpu.pc == self.addr('CURIT'):
+                eoc = self.addr('SECBU')                     # запись FAT корня
+                self.ram[eoc:eoc + 4] = (0x0FFFFFFF).to_bytes(4, 'little')
+                self.cpu.hl, self.cpu.f = eoc, 0
+                self.ret()
+            elif self.cpu.pc == self.addr('TOS'):
                 self.cursor = 0
                 self.ram[self.addr('EOC')] = self.ram[self.addr('NSDC')] = 0
                 self.cpu.a, self.cpu.f = 0, 64

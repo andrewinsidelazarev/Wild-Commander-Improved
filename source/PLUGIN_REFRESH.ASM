@@ -12,7 +12,9 @@ PLUGIN_REFRESH_TEMPLATE:
         DISP #5BF2
 PLUGIN_REFRESH_BOTH:
         CALL WCFX.SEXY
-        CALL WCFX.TERM
+        ; Соседняя панель — через проверку каталога (WCINI.OTHER_REFRESH, как
+        ; после F8): плагин мог удалить её каталог через API 75. Claude, 2026-09-25.
+        CALL WCINI.OTHER_REFRESH
         XOR A
         RET
 PLUGIN_REFRESH_END:

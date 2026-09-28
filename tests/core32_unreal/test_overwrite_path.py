@@ -111,8 +111,10 @@ class Volume(Machine):
 
         Имя длинное, если перед короткой записью лежит исправная цепочка LFN
         (порядок без пропусков и контрольная сумма короткого имени), иначе 8.3.
-        Ядро пишет LFN всему, что не является строчным именем 8.3; короткое имя
-        в этом случае мангленное (FTVIEW~1WMF).
+        Ядро пишет LFN всему, что не является строчным именем 8.3. Короткое имя
+        при этом — само имя заглавными, если оно укладывается в 8.3 и такого
+        короткого в каталоге нет (FTVIEW.WMF → FTVIEW  WMF, с 2026-09-26),
+        иначе с «~n» (VeryLongName.txt → VERYLO~1TXT).
         """
         result = []
         data = self.directory()
@@ -288,6 +290,30 @@ class OverwriteTests(unittest.TestCase):
         self.assertEqual(volume.delete('ftview.wmf'), (0, True), 'ошибка записи не сообщена')
         volume.fail_writes = set()
         self.assertEqual(self.check_file(volume, 'ftview.wmf', data), chain)
+
+    def test_ambiguous_directory_write_keeps_entry_and_chain_together(self):
+        # Запись нового размера в каталог легла на носитель, а драйвер вернул
+        # ошибку. Прежде откат отцеплял и освобождал новую цепочку, а каталог
+        # уже показывал новый размер: цепочка короче размера, у файла, пустого
+        # до дозаписи, первый кластер — свободный. Запись и цепочка обязаны
+        # сходиться: прежний размер с прежней цепочкой или новый — с новой.
+        for old_size in (3000, 0):
+            with self.subTest(old=old_size):
+                volume = Volume(spc=1, fat_sectors=4)
+                old = payload(11, old_size)
+                self.create(volume, 'ftview.wmf', old)
+                self.assertIsNotNone(volume.find('ftview.wmf'))
+                extra = payload(12, 2000)                   # через границу кластера
+                volume.ambiguous_writes = {volume.cluster_lba(DIR_CLUSTER)}
+                volume.append(extra)
+                volume.ambiguous_writes = set()
+                (entry,) = [e for e in volume.entries() if same_name(e[0], 'ftview.wmf')]
+                _, cluster, size = entry
+                self.assertIn(size, (old_size, old_size + len(extra)))
+                data = old if size == old_size else old + extra
+                chain = self.check_file(volume, 'ftview.wmf', data)
+                self.assertEqual(volume.allocated(), {DIR_CLUSTER, *chain},
+                                 'потерянные кластеры или ссылка на свободный')
 
 
 def sfn_name(raw: bytes) -> str:

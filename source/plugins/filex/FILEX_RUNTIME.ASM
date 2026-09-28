@@ -44,12 +44,19 @@ FILEX_ENTRY:
         DEC A:JP Z,FILEX_GET_FS_INFO
         DEC A:JP Z,FILEX_MOVE_RENAME
         DEC A:JP Z,FILEX_SET_METADATA
-        JP FILEX_READ_FAT
+; Claude - 2026-09-26 - begin
+        DEC A:JP Z,FILEX_READ_FAT
+        JP FILEX_GET_METADATA
+; Claude - 2026-09-26 - end
 
 FILEX_QUERY_CAPS:
         LD A,(IY+FILEX_P_FLAGS):OR A:JP NZ,FILEX_BAD_BLOCK
         LD A,FILEX_CAP_READ_AT|FILEX_CAP_WRITE_AT|FILEX_CAP_SET_EOF32|FILEX_CAP_GET_FS_INFO|FILEX_CAP_MOVE_RENAME|FILEX_CAP_SET_METADATA|FILEX_CAP_MOVE_CURRENT_DIR|FILEX_CAP_READ_FAT
         LD (FILEX_RESULT),A
+; Claude - 2026-09-26 - begin
+        LD A,FILEX_CAP2_GET_METADATA            ; второй байт возможностей
+        LD (FILEX_RESULT+1),A
+; Claude - 2026-09-26 - end
         LD A,FILEX_API_VERSION
         LD (FILEX_RESULT_FLAGS),A
         XOR A
@@ -350,6 +357,18 @@ FILEX_REPOSITION_CURRENT:
         LD DE,(FILEX_CURRENT_LBA+2)
         JP @WDOS.PROZ
 
+; Claude - 2026-09-25 - begin
+; Содержимое изменилось в обход APPEND (запись внутри файла, усечение): время
+; и дата изменения и дата доступа локальной ENTRY — из часов ядра, с той же
+; проверкой, что при создании. Время создания не трогается.
+FILEX_STAMP_MODIFIED:
+        FILEX_CALL_EXTENSION ID_CLOCK_NOW       ; HL — время, DE — дата
+        LD (FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+22),HL
+        LD (FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+24),DE
+        LD (FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+18),DE
+        RET
+; Claude - 2026-09-25 - end
+
 ; Записать изменённую локальную ENTRY в уже проверенный сектор каталога и
 ; только после успешной записи обновить глобальный контекст FENTRY/APPEND.
 FILEX_COMMIT_CONTEXT_ENTRY:
@@ -363,6 +382,11 @@ FILEX_COMMIT_CONTEXT_ENTRY:
         LD HL,@WDOS.LOBU
         CALL FILEX_WRITE_ONE
         RET NZ
+; Claude - 2026-09-26 - begin
+; Запись легла: ENTRY ядра и контекст APPEND — по новой записи. Отдельный вход
+; — для случая, когда отказ записи оказался легшей записью (SET_EOF32).
+FILEX_COMMIT_CONTEXT_DONE:
+; Claude - 2026-09-26 - end
         LD HL,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY
         LD DE,@WDOS.ENTRY
         LD BC,32
@@ -838,6 +862,9 @@ FILEX_MAP_APPEND_ERROR:
 ; Усечение публикует меньший размер до отсоединения хвоста. Поэтому сбой FAT
 ; после commit не оставляет запись, указывающую за короткую цепочку: максимум
 ; остаётся лишняя, но уже недоступная цепочка и код COMMITTED_CLEANUP.
+; Хвост последнего сохраняемого сектора обнуляется ещё до публикации; любой
+; отказ до неё (запись обнуления, чтение FAT, ENTRY) возвращает сектор из
+; копии FILEX_SECTOR_BACKUP, не удался и возврат — ROLLBACK (с 2026-09-26).
 FILEX_SHRINK_TO_TARGET:
         ; Компенсация не должна трогать уже исходный размер (особенно size=0).
         LD HL,(FILEX_TARGET_SIZE+2)
@@ -908,11 +935,16 @@ FILEX_SHRINK_TO_TARGET:
         INC HL
         DEC BC
         LD A,B:OR C:JR NZ,.zero_tail_loop
+; Claude - 2026-09-26 - begin
+        ; Признак ставится до записи: отказ записи, после которой сектор всё
+        ; же лёг, — тоже повод вернуть сектор из копии (прежде RET NZ оставлял
+        ; нули за новым концом при прежнем размере; аудит Codex).
+        LD A,1:LD (FILEX_TAIL_ZEROED),A
         CALL FILEX_REPOSITION_CURRENT
         LD HL,@WDOS.LOBU
         CALL FILEX_WRITE_ONE
-        RET NZ
-        LD A,1:LD (FILEX_TAIL_ZEROED),A
+        JP NZ,.restore_tail_before_return
+; Claude - 2026-09-26 - end
 .tail_zero_ready:
         ; Сохранить прежнюю ссылку хвоста до публикации нового размера.
         XOR A:LD (@WDOS.ABT),A
@@ -959,8 +991,25 @@ FILEX_SHRINK_TO_TARGET:
         LD (FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+26),A
         LD (FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+27),A
 .write_entry:
+; Claude - 2026-09-25 - begin
+        CALL FILEX_STAMP_MODIFIED               ; усечение — изменение содержимого
+; Claude - 2026-09-25 - end
         CALL FILEX_COMMIT_CONTEXT_ENTRY
-        JR NZ,.restore_tail_before_return
+; Claude - 2026-09-26 - begin
+        ; Отказ записи ENTRY неоднозначен: сектор мог лечь. Прежде — сразу
+        ; возврат хвоста и MEDIA, хотя на диске мог быть уже новый размер при
+        ; неотсоединённом хвосте цепочки, а при размере 0 — цепочка без
+        ; ссылок (аудит, А.5). Теперь сектор перечитывается: на диске новая
+        ; ENTRY — усечение доводится как обычно; прежняя или сектор не
+        ; читается — возврат хвоста сектора, MEDIA.
+        JR Z,.entry_committed
+        LD (FILEX_SAVED_STATUS),A
+        CALL FILEX_VERIFY_CONTEXT
+        LD A,(FILEX_SAVED_STATUS)
+        JP NZ,.restore_tail_before_return
+        CALL FILEX_COMMIT_CONTEXT_DONE
+.entry_committed:
+; Claude - 2026-09-26 - end
         CALL FILEX_TARGET_TO_RESULT
 
         LD HL,(FILEX_TARGET_SIZE)
@@ -1018,13 +1067,17 @@ FILEX_SHRINK_TO_TARGET:
         LD A,FILEX_STATUS_ROLLBACK
         OR A
         RET
+; Claude - 2026-09-26 - begin
+; Отказ чтения FAT или испорченная ссылка хвоста — уже после обнуления хвоста
+; сектора (если оно было): прежде RET оставлял нули за новым концом при
+; прежнем размере. Теперь выход — через возврат сектора из копии.
 .fat_lookup_failed:
         LD A,(@WDOS.ABT):OR A
-        LD A,FILEX_STATUS_MEDIA:RET NZ
+        LD A,FILEX_STATUS_MEDIA:JR NZ,.restore_tail_before_return
 .fat_error:
         LD A,FILEX_STATUS_FAT
-        OR A
-        RET
+        JR .restore_tail_before_return
+; Claude - 2026-09-26 - end
 .committed_cleanup:
         LD A,FILEX_STATUS_COMMITTED_CLEANUP
         OR A
@@ -1167,14 +1220,27 @@ FILEX_WRITE_AT:
         CALL FILEX_WRITE_EXISTING
         JP NZ,FILEX_FINISH
         LD HL,(FILEX_WRITE_TAIL_COUNT)
-        LD A,H:OR L:JR Z,.success
+        LD A,H:OR L:JR Z,.stamp_in_place
         LD (FILEX_REMAINING),HL
-        CALL FILEX_APPEND_REMAINING
+        CALL FILEX_APPEND_REMAINING             ; хвост за концом: время ставит APPEND
         JP NZ,FILEX_FINISH
 
 .success:
         XOR A
         JP FILEX_FINISH
+
+; Claude - 2026-09-25 - begin
+; Запись целиком внутри файла через APPEND не проходила, и время изменения
+; оставалось прежним. ENTRY перечитывается (дисковые чтения затёрли сектор
+; каталога), получает время и публикуется.
+.stamp_in_place:
+        CALL FILEX_LOAD_CONTEXT
+        JP NZ,FILEX_FINISH
+        CALL FILEX_STAMP_MODIFIED
+        CALL FILEX_COMMIT_CONTEXT_ENTRY
+        JP NZ,FILEX_FINISH
+        JR .success
+; Claude - 2026-09-25 - end
 .overflow:
         LD A,FILEX_STATUS_SIZE_OVERFLOW
         JP FILEX_FINISH
@@ -1286,6 +1352,8 @@ FILEX_WRITE_EXISTING:
 ; ссылка, затем удаляется старая. При replace существующая SFN назначения
 ; перенаправляется на исходную цепочку одной секторной записью; её старая
 ; цепочка освобождается только после успешного удаления исходной ссылки.
+; Имя с пробелом или точкой в конце (в том числе «.» и «..») в любом из двух
+; запросов — INVALID_NAME до каких-либо изменений (FILEX_VALIDATE_QUERY).
 FILEX_MOVE_RENAME:
         LD A,(IY+FILEX_P_FLAGS)
         AND ~(FILEX_FLAG_REPLACE|FILEX_FLAG_CURRENT_DIR):JP NZ,.bad_block
@@ -1337,7 +1405,9 @@ FILEX_MOVE_RENAME:
         LD A,FILEX_STATUS_BAD_BLOCK
         JP FILEX_FINISH
 
-; Проверить границы и нулевой терминатор запроса [#00/#10, имя, 0].
+; Проверить границы и нулевой терминатор запроса [#00/#10, имя, 0] и что имя
+; не кончается пробелом или точкой. Выход: Z — годен, NZ и A=INVALID_NAME —
+; нет (либо код FILEX_VALIDATE_BUFFER). Зовёт только MOVE_RENAME.
 FILEX_VALIDATE_QUERY:
         PUSH HL,BC
         CALL FILEX_VALIDATE_BUFFER
@@ -1364,6 +1434,17 @@ FILEX_VALIDATE_QUERY:
         OR A
         RET
 .ok:
+; Claude - 2026-09-25 - begin
+; Имя с пробелом или точкой в конце: SVHDFL записывает его усечённым («NEW »
+; → NEW), а поиск и откат MOVE шли по исходному тексту и записи не находили:
+; на каталог оставались две ссылки даже без сбоя носителя, и удаление
+; источника освобождало живую цепочку (аудит Codex). Такое имя FAT не
+; допускает — отказ INVALID_NAME.
+        DEC HL                                  ; последний знак имени
+        LD A,(HL)
+        CP " ":JR Z,.bad
+        CP ".":JR Z,.bad
+; Claude - 2026-09-25 - end
         XOR A
         RET
 
@@ -1573,10 +1654,18 @@ FILEX_VALIDATE_MOVE_ANCESTRY:
         LD A,FILEX_STATUS_INVALID_MOVE:OR A:RET
 
 ; Создать ссылку назначения, точно перенести метаданные, поправить «..» и
-; лишь затем удалить старую ссылку. Любая ранняя ошибка удаляет новую ссылку.
+; лишь затем удалить старую ссылку. Любая ранняя ошибка — откат
+; (.rollback_new): вернуть «..» и удалить новую ссылку; не удался сам откат —
+; FILEX_STATUS_ROLLBACK, и на объект могут остаться обе ссылки.
 FILEX_MOVE_CREATE:
         CALL FILEX_CREATE_DESTINATION_LINK
-        RET NZ
+; Claude - 2026-09-25 - begin
+        ; Прежде RET NZ: запись ссылки назначения легла, а драйвер вернул
+        ; отказ — на цепочке оставались обе ссылки (аудит Codex). Откат
+        ; попытается удалить её по имени: до MOVE назначения с этим именем не
+        ; было (MOVE_WORKER).
+        JR NZ,.rollback_new
+; Claude - 2026-09-25 - end
         CALL FILEX_FIND_AND_CAPTURE_DESTINATION
         JR NZ,.rollback_new
         CALL FILEX_COPY_DEST_TO_CURRENT
@@ -1590,16 +1679,24 @@ FILEX_MOVE_CREATE:
         CALL FILEX_DELETE_SOURCE_ENTRY
         JR Z,.committed
         CP FILEX_STATUS_COMMITTED_CLEANUP:JR Z,.committed_cleanup
-        LD (FILEX_SAVED_STATUS),A
-        CALL FILEX_RESTORE_DOTDOT
-        CALL FILEX_DELETE_DESTINATION_LINK
-        JR NZ,.rollback_error
-        LD A,(FILEX_SAVED_STATUS):OR A:RET
+; Claude - 2026-09-25 - begin
+; Откат: сначала вернуть «..» (без изменения — ничего не пишет), и только
+; если это удалось — удалить новую ссылку. Прежде результат возврата «..»
+; отбрасывался, и после удаления ссылки назначения каталог оставался с «..»
+; на новый родитель. Возврат «..» отказал — ссылка назначения не удаляется;
+; не удалось удалить саму ссылку назначения — тоже. Выход
+; FILEX_STATUS_ROLLBACK значит одно: откат не подтверждён. Сколько живых
+; ссылок осталось (обычно две — из прежнего родителя и из нового; но если
+; удаление источника легло, а его сектор не перечитался, — одна или ни
+; одной) и куда смотрит «..», по статусу не узнать.
 .rollback_new:
         LD (FILEX_SAVED_STATUS),A
+        CALL FILEX_RESTORE_DOTDOT
+        JR NZ,.rollback_error
         CALL FILEX_DELETE_DESTINATION_LINK
         JR NZ,.rollback_error
         LD A,(FILEX_SAVED_STATUS):OR A:RET
+; Claude - 2026-09-25 - end
 .rollback_error:
         LD A,FILEX_STATUS_ROLLBACK:OR A:RET
 .committed:
@@ -1669,6 +1766,16 @@ FILEX_PATCH_CURRENT_FROM_SOURCE:
 ; Удалить только каталоговую ссылку источника, не вызывая DLSG. Если запись
 ; после неоднозначной ошибки уже исчезла, новая ссылка сохраняется и операция
 ; считается зафиксированной с предупреждением cleanup.
+; Claude - 2026-09-25 - begin
+; «Исчезла» прежде проверялось поиском по имени, а он тут не довод:
+; DELETE_ENTRY_WITH_LFN пишет секторы LFN раньше сектора SFN — при отказе
+; последнего длинное имя уже стёрто, а короткая запись жива, и поиск её не
+; находит; ошибка чтения при поиске тоже давала «не найдено». Тогда MOVE
+; фиксировался (COMMITTED_CLEANUP) с двумя живыми ссылками на одну цепочку.
+; Теперь, как у RENAME ядра, сектор SFN источника перечитывается по месту из
+; FILEX_SOURCE_CONTEXT (до трёх попыток): #E5 — удаление легло; жива или не
+; читается — MEDIA и откат (потерянная цепочка лучше общей).
+; Claude - 2026-09-25 - end
 FILEX_DELETE_SOURCE_ENTRY:
         CALL FILEX_SET_SOURCE_DIRECTORY
         LD HL,(FILEX_SOURCE_QUERY)
@@ -1677,12 +1784,29 @@ FILEX_DELETE_SOURCE_ENTRY:
         JR Z,.not_found
         FILEX_CALL_EXTENSION ID_DELETE_ENTRY_WITH_LFN
         RET Z
-        CALL FILEX_SET_SOURCE_DIRECTORY
-        LD HL,(FILEX_SOURCE_QUERY)
-        XOR A:LD (@WDOS.ABT),A
-        CALL @WDOS.SRHDRN
-        JR Z,.ambiguous_commit
-        LD A,FILEX_STATUS_MEDIA:OR A:RET
+; Claude - 2026-09-25 - begin
+        LD C,3                                  ; попытки чтения
+.reread:
+        PUSH BC
+        LD HL,(FILEX_SOURCE_CONTEXT+FILEX_CONTEXT_LBA)
+        LD DE,(FILEX_SOURCE_CONTEXT+FILEX_CONTEXT_LBA+2)
+        CALL @WDOS.PROZ
+        LD HL,@WDOS.LOBU
+        CALL FILEX_READ_ONE
+        POP BC
+        JR Z,.reread_done
+        DEC C
+        JR NZ,.reread
+        OR A                                    ; A=MEDIA; DEC C оставил Z
+        RET                                     ; не читается: NZ
+.reread_done:
+        LD HL,(FILEX_SOURCE_CONTEXT+FILEX_CONTEXT_OFFSET)
+        LD DE,@WDOS.LOBU
+        ADD HL,DE
+        LD A,(HL):CP #E5
+        JR Z,.ambiguous_commit                  ; удаление легло
+        LD A,FILEX_STATUS_MEDIA:OR A:RET        ; жива — откат
+; Claude - 2026-09-25 - end
 .not_found:
         LD A,FILEX_STATUS_ENTRY_CHANGED:OR A:RET
 .ambiguous_commit:
@@ -1720,22 +1844,30 @@ FILEX_MOVE_REPLACE:
         RET NZ
         CALL FILEX_PATCH_CURRENT_FROM_SOURCE
         CALL FILEX_COMMIT_CONTEXT_ENTRY
-        RET NZ
+; Claude - 2026-09-26 - begin
+        ; Прежде RET NZ: запись назначения, перенаправленная на цепочку
+        ; источника, легла, а драйвер вернул отказ, — MEDIA, на цепочку
+        ; смотрели обе записи, а старая цепочка назначения терялась (аудит,
+        ; А.3). Теперь откат: прежняя запись назначения возвращается, если на
+        ; диске новая; если запись не легла — возвращать нечего.
+        JR NZ,.restore_destination
+; Claude - 2026-09-26 - end
         CALL FILEX_UPDATE_DOTDOT_IF_NEEDED
         JR NZ,.restore_destination
         CALL FILEX_DELETE_SOURCE_ENTRY
         JR Z,.committed
         CP FILEX_STATUS_COMMITTED_CLEANUP:JR Z,.committed_cleanup
-        LD (FILEX_SAVED_STATUS),A
-        CALL FILEX_RESTORE_DOTDOT
-        CALL FILEX_RESTORE_DESTINATION_ENTRY
-        JR NZ,.rollback_error
-        LD A,(FILEX_SAVED_STATUS):OR A:RET
+; Claude - 2026-09-25 - begin
+; Как у MOVE_CREATE: «..» возвращается и после отказа его собственной записи
+; (признак ставится до неё), а не вернулся — запись назначения не трогаем.
 .restore_destination:
         LD (FILEX_SAVED_STATUS),A
+        CALL FILEX_RESTORE_DOTDOT
+        JR NZ,.rollback_error
         CALL FILEX_RESTORE_DESTINATION_ENTRY
         JR NZ,.rollback_error
         LD A,(FILEX_SAVED_STATUS):OR A:RET
+; Claude - 2026-09-25 - end
 .rollback_error:
         LD A,FILEX_STATUS_ROLLBACK:OR A:RET
 .committed:
@@ -1761,12 +1893,24 @@ FILEX_SAVE_OLD_DEST_CLUSTER:
 FILEX_RESTORE_DESTINATION_ENTRY:
         ; FILEX_CONTEXT описывает ожидаемую новую запись на диске.
         CALL FILEX_VERIFY_CONTEXT
-        RET NZ
+; Claude - 2026-09-26 - begin
+        ; На диске не новая запись: после отказа её собственной записи это
+        ; может быть прежняя (запись не легла) — тогда возвращать нечего, Z.
+        ; Не читается или там что-то третье — NZ: откат не подтверждён.
+        JR Z,.restore
+        CP FILEX_STATUS_ENTRY_CHANGED:RET NZ
+        CALL .old_to_context
+        JP FILEX_VERIFY_CONTEXT
+.restore:
+        CALL .old_to_context
+        JP FILEX_COMMIT_CONTEXT_ENTRY
+.old_to_context:
+; Claude - 2026-09-26 - end
         LD HL,FILEX_DEST_CONTEXT+FILEX_CONTEXT_ENTRY
         LD DE,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY
         LD BC,32
         LDIR
-        JP FILEX_COMMIT_CONTEXT_ENTRY
+        RET
 
 FILEX_RELEASE_OLD_DESTINATION:
         LD HL,(FILEX_OLD_DEST_CLUSTER)
@@ -1934,10 +2078,16 @@ FILEX_UPDATE_DOTDOT_IF_NEEDED:
         LD (@WDOS.LOBU+52),DE
         LD HL,(FILEX_DOTDOT_LBA),DE,(FILEX_DOTDOT_LBA+2)
         CALL @WDOS.PROZ
+; Claude - 2026-09-25 - begin
+        ; Признак — до записи: сектор мог лечь, хоть драйвер и вернул отказ.
+        ; Прежде откат тогда удалял новую ссылку, не вернув «..»: каталог
+        ; оставался в прежнем родителе с «..» на новый — обход вверх (F8)
+        ; искал бы имя в чужом каталоге. Вернуть неизменённый «..» безвредно.
+        LD A,1:LD (FILEX_DOTDOT_CHANGED),A
+; Claude - 2026-09-25 - end
         LD HL,@WDOS.LOBU
         CALL FILEX_WRITE_ONE
         RET NZ
-        LD A,1:LD (FILEX_DOTDOT_CHANGED),A
         XOR A
         RET
 .fat_error:
@@ -2284,8 +2434,8 @@ FILEX_SET_METADATA:
 
         LD A,(FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+11)
         BIT 0,A:JR Z,.read_only_ok
-        LD A,(FILEX_META_ATTR_MASK):BIT 0,A:JR Z,.read_only
-        LD A,(FILEX_META_ATTR_VALUE):BIT 0,A:JR NZ,.read_only
+        LD A,(FILEX_META_ATTR_MASK):BIT 0,A:JP Z,.read_only
+        LD A,(FILEX_META_ATTR_VALUE):BIT 0,A:JP NZ,.read_only
 .read_only_ok:
         LD A,(FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+11)
         LD B,A
@@ -2320,10 +2470,32 @@ FILEX_SET_METADATA:
 .write_time:
         INC HL:INC HL
 .write_mask:
-        LD A,(FILEX_META_TIME_MASK):BIT 2,A:JR Z,.commit
+        LD A,(FILEX_META_TIME_MASK):BIT 2,A:JR Z,.stamps
         LD DE,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+22
         LD BC,4
         LDIR
+; Claude - 2026-09-26 - begin
+; Штамп программы, которого нет в календаре (месяц, день месяца, часы,
+; минуты, секунды), на диск не пишется: вместо него — текущий по часам ядра
+; (как у копии с неверной датой источника); доли секунды создания при этом —
+; 0, их больше 199 — тоже 0. Структура программы не меняется.
+.stamps:
+        LD A,(FILEX_META_TIME_MASK):BIT 0,A:JR Z,.access_stamp
+        LD HL,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+14
+        LD A,1
+        CALL FILEX_FIX_STAMP
+        CALL FILEX_FIX_TENTH
+.access_stamp:
+        LD A,(FILEX_META_TIME_MASK):BIT 1,A:JR Z,.write_stamp
+        LD HL,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+18
+        LD A,1
+        CALL FILEX_FIX_DATE
+.write_stamp:
+        LD A,(FILEX_META_TIME_MASK):BIT 2,A:JR Z,.commit
+        LD HL,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+22
+        LD A,1
+        CALL FILEX_FIX_STAMP
+; Claude - 2026-09-26 - end
 .commit:
         CALL FILEX_COMMIT_CONTEXT_ENTRY
         JP NZ,FILEX_FINISH
@@ -2344,6 +2516,127 @@ FILEX_SET_METADATA:
 .bad_block:
         LD A,FILEX_STATUS_BAD_BLOCK
         JP FILEX_FINISH
+
+; Claude - 2026-09-26 - begin
+; GET_METADATA (операция 8): атрибут и времена последнего FENTRY — та же
+; 16-байтовая структура, что у SET_METADATA, но ничего не пишется ни в запись,
+; ни на диск. Контекст сверяется с диском, как у прочих операций (FENTRY
+; другого объекта или изменение записи — ENTRY_CHANGED). Выход в buffer (не
+; короче FILEX_META_SIZE): SIZE=16; ATTR_MASK=FILEX_META_ALLOWED_ATTRS и
+; TIME_MASK=%111 — чтобы структуру можно было без правки отдать в
+; SET_METADATA; ATTR_VALUE и APPLIED_ATTR — атрибут записи (+11); времена —
+; поля записи: создание +13/+14/+16, доступ +18, изменение +22/+24. Штамп,
+; которого нет в календаре (месяц, день месяца, часы, минуты, секунды),
+; программа получает как 2026-01-01 00:00 (доли секунды создания тогда — 0,
+; их больше 199 — тоже 0); сама запись не меняется.
+; result_count=16, result_flags — атрибут.
+FILEX_GET_METADATA:
+        LD A,(IY+FILEX_P_FLAGS):OR A:JP NZ,FILEX_BAD_BLOCK
+        CALL FILEX_LOAD_CONTEXT
+        JP NZ,FILEX_FINISH
+        LD L,(IY+FILEX_P_LENGTH+0)
+        LD H,(IY+FILEX_P_LENGTH+1)
+        LD DE,FILEX_META_SIZE
+        OR A:SBC HL,DE:JR C,.bad_length
+        LD BC,FILEX_META_SIZE
+        LD L,(IY+FILEX_P_BUFFER+0)
+        LD H,(IY+FILEX_P_BUFFER+1)
+        CALL FILEX_VALIDATE_BUFFER
+        JP NZ,FILEX_FINISH
+        LD (FILEX_META_POINTER),HL
+        EX DE,HL                                ; DE — структура
+        LD A,FILEX_META_SIZE:LD (DE),A:INC DE   ; +0 SIZE
+        LD A,FILEX_META_ALLOWED_ATTRS
+        LD (DE),A:INC DE                        ; +1 ATTR_MASK
+        LD A,(FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+11)
+        LD (FILEX_RESULT_FLAGS),A
+        LD (DE),A:INC DE                        ; +2 ATTR_VALUE
+        LD A,%00000111:LD (DE),A:INC DE         ; +3 TIME_MASK
+        LD HL,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+13
+        LD BC,5:LDIR                            ; +4..+8 создание: доли, время, дата
+        LD HL,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+18
+        LD C,2:LDIR                             ; +9..+10 дата доступа
+        LD HL,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+22
+        LD C,4:LDIR                             ; +11..+14 изменение: время, дата
+        LD A,(FILEX_RESULT_FLAGS):LD (DE),A     ; +15 APPLIED_ATTR
+        LD HL,(FILEX_META_POINTER)
+        LD BC,5:ADD HL,BC                       ; +5 время создания
+        XOR A
+        CALL FILEX_FIX_STAMP
+        CALL FILEX_FIX_TENTH                    ; +4
+        LD BC,4:ADD HL,BC                       ; +9 дата доступа
+        XOR A
+        CALL FILEX_FIX_DATE
+        INC HL:INC HL                           ; +11 изменение
+        XOR A
+        CALL FILEX_FIX_STAMP
+        LD HL,FILEX_META_SIZE:LD (FILEX_RESULT),HL
+        XOR A
+        JP FILEX_FINISH
+.bad_length:
+        LD A,FILEX_STATUS_BAD_LENGTH
+        JP FILEX_FINISH
+
+; Штамп FAT на месте: HL — время, за ним дата. Штампа нет в календаре
+; (CHECK_STAMP расширения: месяц, день месяца, часы, минуты, секунды) — вместо
+; него при A=0 2026-01-01 00:00 (так штамп с носителя отдаётся программе), при
+; A≠0 — текущий штамп часов ядра (так штамп программы пишется на диск).
+; Выход: HL сохраняется; Z — штамп прежний, NZ — заменён. Портит A, BC, DE.
+FILEX_FIX_STAMP:
+        LD (FILEX_STAMP_MODE),A
+        PUSH HL
+        LD C,(HL):INC HL:LD B,(HL):INC HL
+        LD E,(HL):INC HL:LD D,(HL)
+        LD H,B:LD L,C                           ; HL — время, DE — дата
+        FILEX_CALL_EXTENSION ID_CHECK_STAMP     ; нет: CF, HL=0, DE — 2026-01-01
+        JR NC,.kept
+        LD A,(FILEX_STAMP_MODE):OR A
+        JR Z,.store
+        FILEX_CALL_EXTENSION ID_CLOCK_NOW
+.store:
+        LD B,H:LD C,L
+        POP HL
+        LD (HL),C:INC HL:LD (HL),B:INC HL
+        LD (HL),E:INC HL:LD (HL),D
+        DEC HL:DEC HL:DEC HL
+        OR 1                                    ; NZ — заменён
+        RET
+.kept:
+        POP HL
+        XOR A                                   ; Z — прежний
+        RET
+
+; Дата FAT на месте (дата доступа): HL — дата; A и выход — как у
+; FILEX_FIX_STAMP. Время для проверки — 00:00:00, оно в календаре есть.
+FILEX_FIX_DATE:
+        LD (FILEX_STAMP_MODE),A
+        PUSH HL
+        LD E,(HL):INC HL:LD D,(HL)
+        LD HL,0
+        FILEX_CALL_EXTENSION ID_CHECK_STAMP
+        JR NC,FILEX_FIX_STAMP.kept
+        LD A,(FILEX_STAMP_MODE):OR A
+        JR Z,.store
+        FILEX_CALL_EXTENSION ID_CLOCK_NOW
+.store:
+        POP HL
+        LD (HL),E:INC HL:LD (HL),D:DEC HL
+        OR 1
+        RET
+
+; Доли секунды создания — байт перед временем создания (HL): после замены
+; штампа (NZ от FILEX_FIX_STAMP) или если их больше 199 (больше 1,99 с не
+; бывает) — 0. HL сохраняется.
+FILEX_FIX_TENTH:
+        DEC HL
+        JR NZ,.zero
+        LD A,(HL):CP 200:JR C,.done
+.zero:
+        LD (HL),0
+.done:
+        INC HL
+        RET
+; Claude - 2026-09-26 - end
 
 ; Рабочее состояние одной сериализованной операции.
 FILEX_RESULT:               DS 4
@@ -2402,6 +2695,7 @@ FILEX_META_ATTR_MASK:       DS 1
 FILEX_META_ATTR_VALUE:      DS 1
 FILEX_META_TIME_MASK:       DS 1
 FILEX_META_APPLIED:         DS 1
+FILEX_STAMP_MODE:           DS 1
 FILEX_SOURCE_QUERY:         DS 2
 FILEX_DEST_QUERY:           DS 2
 FILEX_SOURCE_DIR:           DS 4

@@ -385,21 +385,30 @@ def main() -> int:
 
     harness.configure_volume(0xFFFFFFFF)
     harness.invoke("LOAD_FREE_HINT")
-    harness.mock_mksg_hint = 7_001
+    # С 2026-09-27 MKSG зовёт сам MKFILE ядра, вне шлюза (Codex R28-02), а
+    # ALLOCATE_FILE разбирает его итог: Z и CF=1 — цепочка записана (MKSG
+    # оставил подсказку 7001), Z и CF=0 — размер 0. Сам MKSG здесь не зовётся.
     harness.read_sector = make_fsinfo(0xFFFFFFFF)
     harness.written_sectors.clear()
+    put32(memory, core["FSTFRC"], 7_001)
+    put32(memory, core["FCTS"], 0x1234)
     harness.machine.hl = 541
     harness.machine.de = 0
+    harness.machine.f = ZERO_FLAG | 1
     harness.invoke("ALLOCATE_FILE")
     expect("MKFILE allocation не пишет FSInfo", len(harness.written_sectors), 0)
     expect("MKFILE allocation сохраняет RAM-подсказку", get32(memory, core["FSTFRC"]), 7_001)
+    expect("MKFILE allocation: Z", bool(harness.machine.f & ZERO_FLAG), True)
+    expect("MKFILE allocation: первый кластер от MKSG", get32(memory, core["FCTS"]), 0x1234)
 
     harness.written_sectors.clear()
     harness.machine.hl = 0
     harness.machine.de = 0
+    harness.machine.f = ZERO_FLAG
     harness.invoke("ALLOCATE_FILE")
     expect("пустой MKFILE не пишет FSInfo", len(harness.written_sectors), 0)
     expect("пустой MKFILE не получает кластер", get32(memory, core["FCTS"]), 0)
+    expect("пустой MKFILE: Z", bool(harness.machine.f & ZERO_FLAG), True)
 
     filex = FilexHarness()
     expect("до wrap кластер уникален", filex.unique(start=100, cursor=100, cluster=110, wrapped=0), (True, 0))

@@ -86,9 +86,10 @@ def main() -> int:
     table = boot["PLUGIN_API_TABLE"]
     expect("API 55 сохранил FEX", word(payload, table + 55 * 2), boot["FEX"])
     expect("API 77 указывает XFILEX", word(payload, table + 77 * 2), boot["XFILEX"])
+    # С 2026-09-27 код ядра в boot.$C — HR-потоком: слот — в рабочем образе.
     expect(
         "внутренний слот #402D",
-        payload_slice(payload, 0xC00C + 0x2D, 3),
+        (BUILD / "CORE32_RUNTIME.bin").read_bytes()[0x2D:0x30],
         bytes((0xC3, 0x47, 0x6A)),
     )
     expect(
@@ -111,7 +112,9 @@ def main() -> int:
     for symbol, expected in (
         ("FILEX_API_VERSION", 1),
         ("FILEX_BLOCK_SIZE", 32),
-        ("FILEX_OP_COUNT", 8),
+        ("FILEX_OP_COUNT", 9),                  # с 2026-09-26: GET_METADATA = 8
+        ("FILEX_OP_GET_METADATA", 8),
+        ("FILEX_CAP2_GET_METADATA", 0x01),
         ("FILEX_CAP_MOVE_CURRENT_DIR", 0x40),
         ("FILEX_CAP_READ_FAT", 0x80),
         ("FILEX_FLAG_CURRENT_DIR", 0x02),
@@ -126,7 +129,8 @@ def main() -> int:
 
     print(
         "FILEX ABI PASS: API77=#6AFD, gate=#6A47, provider=#06, "
-        "FILEXT=#03, FILEXNST=#06, block=32, operations=8, caps=#FF, "
+        "FILEXT=#03, FILEXNST=#06, block=32, operations=9 (8 — GET_METADATA), "
+        "caps=#FF + caps2=#01, "
         "18 fixed CORE32 addresses"
     )
     return 0

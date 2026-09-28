@@ -63,7 +63,11 @@ class WmfContractTests(unittest.TestCase):
         lines = wc_root.joinpath("wc.ini").read_bytes().splitlines()
         plugins = lines.index(b"[PLUGINS]")
         self.assertEqual(lines[plugins + 1].strip().upper(), b"FILEX.WMF")
-        self.assertEqual(lines[plugins + 2].strip().upper(), b"UNZIP.WMF")
+        # Сразу за FILEX сборка ставит менеджер плагинов (PLM) и WC Setup
+        # (2026-09-24): UNZIP — ниже них, но в том же разделе.
+        section = [line.strip().upper() for line in lines[plugins + 1:]]
+        section = section[:next((i for i, s in enumerate(section) if s.startswith(b"[")), len(section))]
+        self.assertIn(b"UNZIP.WMF", section)
         self.assertEqual(
             sum(line.strip().upper().startswith(b"UNZIP.WMF") for line in lines),
             1,
