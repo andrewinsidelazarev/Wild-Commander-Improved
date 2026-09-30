@@ -484,8 +484,9 @@ CR = bytes([13])
 
 
 class Groups(unittest.TestCase):
-    """Группа из заголовка: просмотрщик со своими расширениями — «file», даже
-    когда тип #03 ставит его и в меню F10; заставка (#02) — своя группа."""
+    """Группа из заголовка — по типу, как меню F10 в PLM: всё, что заявило
+    F10, — «F10», даже со своими расширениями (Mounter, TRDump); только по
+    файлу — «file»; заставка (#02) — своя группа."""
 
     def group(self, name, kind, first_ext=0):
         p = Plugin(INI)
@@ -498,10 +499,15 @@ class Groups(unittest.TestCase):
         return p.cpu.memory[record + S['PGROUP']]
 
     def test_group_by_header(self):
-        cases = (('FTVIEW.WMF', 0x03, ord('J'), 'GROUP_FILE'),
-                 ('MOUNTER.WMF', 0x03, ord('T'), 'GROUP_FILE'),
-                 ('TRDUMP.WMF', 0x05, ord('T'), 'GROUP_FILE'),
-                 ('TXTEDIT.WMF', 0x15, 0, 'GROUP_FILE'),
+        cases = (('FTVIEW.WMF', 0x00, ord('J'), 'GROUP_FILE'),
+                 ('TXTVIEW.WMF', 0x04, ord('T'), 'GROUP_FILE'),
+                 ('WPLAYER.WMF', 0x04, ord('C'), 'GROUP_FILE'),
+                 ('F2ONLY.WMF', 0x12, 0, 'GROUP_FILE'),
+                 ('F4ONLY.WMF', 0x14, 0, 'GROUP_FILE'),
+                 ('MOUNTER.WMF', 0x03, ord('T'), 'GROUP_MENU'),
+                 ('TRDUMP.WMF', 0x05, ord('T'), 'GROUP_MENU'),
+                 ('TXTEDIT.WMF', 0x15, 0, 'GROUP_MENU'),
+                 ('F4MENU.WMF', 0x13, 0, 'GROUP_MENU'),
                  ('BMPV.WMF', 0x00, ord('B'), 'GROUP_FILE'),
                  ('CHKDSK.WMF', 0x03, 0, 'GROUP_MENU'),
                  ('FILE_CR.WMF', 0x11, 0, 'GROUP_MENU'),
@@ -524,7 +530,8 @@ class Savers(unittest.TestCase):
         self.plugin = p = Plugin(INI)
         p.add_plugins(self.ALL)
         for name in self.ALL:
-            group = 'GROUP_SAVER' if name in self.SAVERS else 'GROUP_FILE'
+            group = ('GROUP_SAVER' if name in self.SAVERS else
+                     'GROUP_MENU' if name == 'MOUNTER.WMF' else 'GROUP_FILE')
             p.poke(p.record(name) + S['PGROUP'], S[group])
         p.poke(S['SHOWN'], 0)                   # без перерисовки окна
         p.poke(S['TOP'], 0)
@@ -569,7 +576,7 @@ class Savers(unittest.TestCase):
             rows[name] = bytes(p.cpu.memory[S['ROWBUF']:S['ROWBUF'] + 20]).rstrip()
         self.assertEqual(rows['CLOCK.WMF'], b'(*) saver CLOCK')
         self.assertEqual(rows['PLASMATW.WMF'], b'( ) saver PLASMATW')
-        self.assertEqual(rows['MOUNTER.WMF'], b'[ ] file  MOUNTER')
+        self.assertEqual(rows['MOUNTER.WMF'], b'[ ] F10   MOUNTER')
 
 
 class SaveResult(unittest.TestCase):

@@ -271,7 +271,7 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual(raw[34:36], b"\x01\0")
         self.assertEqual(raw[63], 3)
         self.assertEqual(raw[161:165], b"\xFF" * 4)
-        self.assertEqual(raw[197], 5)
+        self.assertEqual(raw[197], 4, "только меню просмотрщиков, не F10")
         self.assertIn(b"NFO", raw[64:160])
         self.assertLessEqual(0x8000 + len(raw) - 512, 0xA800)
         self.assertEqual(len(raw), 512 + raw[37] * 512)

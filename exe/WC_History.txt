@@ -1,5 +1,11 @@
 ﻿WildCommander History.
 
+v1.11i 2026-09-30 (WildCommander Improved):
+.обязательно обновить WC/PLM.WMF, WC/SETUP.WMF, WC/TXTVIEW.WMF и WC/TXTVIEW2.WMF вместе; boot.$C и остальные файлы — как в v1.11i 2026-09-28
+.меню F10: все плагины, которые заявляют запуск из меню, по алфавиту; вернулись TR-DOS Mounter (Mount RS-232, Dismount Drive), TRDump (снять дискету в TRD), TRDispatcher (новый пустой TRD.trd) и TXT Editor (новый файл notepad.txt)
+.Text/HEX Viewer и TXT/HEX VDAC2 в F10 не показываются: без файла им нечего открыть; запуск по файлу и из меню просмотрщиков (Shift+F3)
+.WC Setup: группа F10 совпадает с меню F10 — TR-DOS Mounter, TRDump, TRDispatcher и TXT Editor перешли в неё из группы file
+
 v1.11i 2026-09-28 (WildCommander Improved):
 .обязательно обновить boot.$C, WC/FILEX.WMF и WC/PLM.WMF вместе и добавить WC/SETUP.WMF; свой wc.ini сохранить, но строки PLM.WMF и SETUP.WMF поставить в [PLUGINS] сразу за FILEX.WMF
 .настройки перенесены из ядра в плагин WC Setup (SETUP.WMF, пункт меню F10); диалога по F9 больше нет, клавиша F9 свободна

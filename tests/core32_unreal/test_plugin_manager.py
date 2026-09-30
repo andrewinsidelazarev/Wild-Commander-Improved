@@ -300,20 +300,28 @@ MIXED = [
     dict(name='MaxiClock', type=0x02, pages=6),
 ]
 # Что видит пользователь в F10: то же, что WC Setup называет «F10» и «saver»,
-# по алфавиту — без учёта регистра и ведущих пробелов.
+# по алфавиту — без учёта регистра и ведущих пробелов. Решает тип: всё, что
+# заявило F10, даже со своими расширениями (у Mounter, TRDump, TRDispatcher и
+# TXT Editor из F10 свой интерфейс); только по файлу — нет.
 F10_SET = [
     dict(name='WC Setup v0.1', type=0x03),
-    dict(name='FT812 Viewer', type=0x03, ext=b'FTV'),      # тип #03, но просмотрщик
+    dict(name='FT812 Viewer', type=0x00, ext=b'JPG'),
     dict(name='SCREEEN SAVER', type=0x02),
     dict(name='TR-DOS Mounter v1.59', type=0x03, ext=b'TRD'),
     dict(name='ChkDsk FAT32', type=0x03),
-    dict(name='Text&HEX Viewer', type=0x05),
+    dict(name='Text&HEX Viewer', type=0x04, ext=b'TXT'),
     dict(name='  Create File', type=0x11),
     dict(name='TXT Editor', type=0x15),
+    dict(name='TRDump v0.83', type=0x05, ext=b'TRD'),
     dict(name='setime v0.1', type=0x03),
+    dict(name='F4 only', type=0x14),
     dict(name='ZIP unpacker', type=0x00),
+    dict(name='F2 and menu', type=0x11, ext=b'ZZZ'),
+    dict(name='F4 and menu', type=0x13),
 ]
-F10_SHOWN = ['ChkDsk FAT32', 'Create File', 'SCREEEN SAVER', 'setime v0.1', 'WC Setup v0.1']
+F10_SHOWN = ['ChkDsk FAT32', 'Create File', 'F2 and menu', 'F4 and menu', 'SCREEEN SAVER',
+             'setime v0.1', 'TR-DOS Mounter v1.59', 'TRDump v0.83', 'TXT Editor',
+             'WC Setup v0.1']
 
 
 class Menu(unittest.TestCase):
@@ -330,7 +338,7 @@ class Menu(unittest.TestCase):
         return [bytes(self.page[start + i:start + i + 32]).decode('cp866').strip()
                 for i in range(0, count, 32)]
 
-    def test_no_viewers_and_file_handlers(self):
+    def test_everything_declaring_f10_and_nothing_else(self):
         self.assertEqual(self.names(), F10_SHOWN)
 
     def test_line_table_follows_the_sorted_names(self):

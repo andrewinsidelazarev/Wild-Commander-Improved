@@ -19,7 +19,7 @@
 HeaderName:
         DB "TXT/HEX VDAC2 v0.26"
         DS 32-($-HeaderName)," "
-        DB 5
+        DB 4                            ; меню просмотрщиков; в F10 без файла открыть нечего
         DS 6,0
 MenuName:
         DB "TXT / HEX - VDAC2"
