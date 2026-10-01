@@ -631,6 +631,37 @@ if (-not (Test-Path -LiteralPath $SetupOutput -PathType Leaf)) {
 if ($LASTEXITCODE -ne 0) { throw 'SETUP plugin machine tests failed.' }
 # Claude - 2026-09-24 - end
 
+# Claude - 2026-10-01 - begin
+# FDI2FDD.WMF — файловый плагин (тип #00, расширение FDI): запись образа FDI
+# на настоящую дискету через ВГ93. Собирается своим build.ps1 в каталоге
+# плагина; его набор исполняет собранный код на модели ВГ93 и дисковода и
+# сверяет записанный диск с тремя настоящими образами (IS-DOS, смешанные
+# разметки, защитный сектор).
+$Fdi2FddProject = Join-Path $ProjectRoot 'source\plugins\FDI2FDD'
+$Fdi2FddOutput = Join-Path $Fdi2FddProject 'build\FDI2FDD.WMF'
+Remove-Item -LiteralPath $Fdi2FddOutput -Force -ErrorAction SilentlyContinue
+& (Join-Path $Fdi2FddProject 'build.ps1') -SjasmPlus $SjasmPlus
+if (-not (Test-Path -LiteralPath $Fdi2FddOutput -PathType Leaf)) {
+    throw 'FDI2FDD.WMF was not created.'
+}
+# Набор идёт семь-восемь минут; при работе над другой частью проекта его можно
+# пропустить переменной окружения — в выпускной сборке она не задаётся.
+# Образы дискет для набора — чужие программы и в репозиторий не входят
+# (.gitignore): без них набор пропускается с предупреждением, плагин собран.
+$Fdi2FddImages = @('IS_BASE.FDI', 'ISDOS.ZIP', 'voron1\voron1.fdi', 'voron1\voron2.fdi')
+$Fdi2FddMissing = @($Fdi2FddImages | Where-Object {
+    -not (Test-Path -LiteralPath (Join-Path $Fdi2FddProject $_) -PathType Leaf) })
+if ($env:WC_SKIP_FDI2FDD_TESTS -eq '1') {
+    Write-Warning 'FDI2FDD machine tests skipped (WC_SKIP_FDI2FDD_TESTS=1).'
+} elseif ($Fdi2FddMissing.Count -gt 0) {
+    Write-Warning ('FDI2FDD machine tests skipped: test disk images are not in the repository (' +
+        ($Fdi2FddMissing -join ', ') + ').')
+} else {
+    & python -B (Join-Path $Fdi2FddProject 'tests\run.py')
+    if ($LASTEXITCODE -ne 0) { throw 'FDI2FDD machine tests failed.' }
+}
+# Claude - 2026-10-01 - end
+
 # Codex - 2026-07-16 - begin
 $MainSourceAscii = "$ProjectRootAscii/source/BOOT.ASM"
 $PayloadAscii = "$ProjectRootAscii/Build/boot.payload.bin"
@@ -993,6 +1024,11 @@ if ($LASTEXITCODE -ne 0) { throw 'PLM runtime installation failed.' }
     --plugin $SetupOutput `
     --wc-dir (Join-Path $ExeDir 'WC')
 if ($LASTEXITCODE -ne 0) { throw 'SETUP runtime installation failed.' }
+# Запись FDI на дискету — обычный файловый плагин, строка рядом с TRDUMP.WMF.
+& python (Join-Path $ProjectRoot 'tools\install_fdi2fdd_runtime.py') `
+    --plugin $Fdi2FddOutput `
+    --wc-dir (Join-Path $ExeDir 'WC')
+if ($LASTEXITCODE -ne 0) { throw 'FDI2FDD runtime installation failed.' }
 # Эталоны перехватов сверяются с собранным boot.$C, а рабочие подпрограммы
 # исполняются настоящим Z80 на модели страниц TS-Conf.
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_plugin_manager.py')
@@ -1025,7 +1061,7 @@ if ($HashExitCode -ne 0) {
         'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/RE.WMF', 'WC/TXTVIEW.WMF',
         'WC/TXTVIEW2.WMF', 'WC/TXTVIEW2.LIC', 'WC/UNZIP.WMF',
         'WC/CHKDSK.WMF', 'WC/FTVIEW.WMF', 'WC/VIDEO_PL.WMF', 'WC/PLM.WMF', 'WC/SETUP.WMF',
-        'WC/wc.ini'
+        'WC/FDI2FDD.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -1045,13 +1081,14 @@ if ($HashExitCode -ne 0) {
             'WC/TXTVIEW2.LIC' { 'EXTRA_ACTUAL' }
             'WC/PLM.WMF' { 'EXTRA_ACTUAL' }
             'WC/SETUP.WMF' { 'EXTRA_ACTUAL' }
+            'WC/FDI2FDD.WMF' { 'EXTRA_ACTUAL' }
             default { $null }
         }
         if ($ExpectedStatus -and $Mismatch.status -ne $ExpectedStatus) {
             throw "Unexpected audit status for $($Mismatch.path): $($Mismatch.status)"
         }
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, VIDEO_PL, PLM plugin manager, SETUP settings plugin, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, VIDEO_PL, PLM plugin manager, SETUP settings plugin, FDI2FDD floppy writer, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.

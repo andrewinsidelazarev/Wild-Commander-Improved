@@ -25,6 +25,7 @@ MTXPG   EQU #00
 DBPG    EQU #F4
 D5PG    EQU #F5
 D2PG    EQU #F6
+DEPG    EQU #F3                         ; временная для блока SPG страницы #E8
 MLZ4    EQU #FE00
 DEHR1   EQU #FEE9
 
@@ -343,6 +344,13 @@ KOVR    LD A,(IX):INC IX
         LD A,(IX):INC IX
         CP #02:JR NZ,$+4:LD A,D2PG
         CP #05:JR NZ,$+4:LD A,D5PG
+; Claude - 2026-10-01 - begin
+; Страница #E8 занята расширением ядра (CORE32_EXT), через него идёт чтение
+; файла: блок SPG для неё грузится во временную DEPG и переносится в конце,
+; как блоки страниц 2 и 5. Иначе загрузка затирала расширение на ходу, и
+; программа с данными в #E8 не запускалась (tmntf_v1.2.spg).
+        CP @WC_PHYS_CORE32_EXT_PAGE:JR NZ,$+4:LD A,DEPG
+; Claude - 2026-10-01 - end
         CALL MNGC
 
         LD A,(IX-2)
@@ -361,35 +369,44 @@ PKDE    POP IX,BC
         DJNZ KOVR
         JR ARBLKZ
 ;-------
-SPGPKD  DEC A:JR Z,SPGMLZ
-SPGHRS  PUSH HL:LD HL,#8000:CALL LOAD512
+; Claude - 2026-10-01 - begin
+; Общее начало двух распаковщиков (чтение блока в #8000, DI, сохранение SP)
+; сведено в одно: освободившиеся байты ушли на перенос страницы #E8.
+SPGPKD  PUSH AF
+        PUSH HL:LD HL,#8000:CALL LOAD512
         POP DE
+        POP AF
         DI
         LD (SPBU),SP
-        LD IX,#8000
+        DEC A:JR Z,SPGMLZ
+SPGHRS  LD IX,#8000
         CALL HRSP
 SPGPE   LD SP,(SPBU)
         JR PKDE
 
-SPGMLZ  PUSH HL:LD HL,#8000:CALL LOAD512
-        POP DE
-        DI
-        LD (SPBU),SP
-        LD HL,#8000
+SPGMLZ  LD HL,#8000
         CALL MLZP
         JR SPGPE
 ;-------
-ARBLKZ  LD A,D2PG:CALL MNG8
-        LD A,2:CALL MNGC
+; A — страница-источник (в окно #8000), E — страница назначения (в #C000).
+CPG     CALL MNG8
+        LD A,E:CALL MNGC
         LD HL,#8000,DE,#C000
         LD BC,#4000:LDIR
+        RET
+; Перенос временных страниц на места. Прерывания закрыты с самого начала:
+; после переноса в #E8 расширения ядра уже нет. Стек — в странице загрузчика
+; (копия таблицы блоков больше не нужна): после переноса страницы 5 прежний
+; стек WC затёрт, а возврат из CPG ещё нужен.
+ARBLKZ  DI
+        LD SP,LOB3+1024
+        LD A,D2PG,E,2:CALL CPG-SPGRZ+K
+        LD A,DEPG,E,@WC_PHYS_CORE32_EXT_PAGE:CALL CPG-SPGRZ+K
 
-        DI:CALL TURBOof
+        CALL TURBOof
 
-        LD A,D5PG:CALL MNG8
-        LD A,5:CALL MNGC
-        LD HL,#8000,DE,#C000
-        LD BC,#4000:LDIR
+        LD A,D5PG,E,5:CALL CPG-SPGRZ+K
+; Claude - 2026-10-01 - end
 
         LD BC,Vpag,A,5:OUT (C),A
         LD BC,Vmod:XOR A:OUT (C),A
@@ -416,6 +433,12 @@ SPGRZD  LD BC,PE0,A,%00000001:OUT (C),A
 SPG_IT  DI
         JP (HL)
 Y
+; Claude - 2026-10-01 - begin
+; Загрузчик стал короче; RUNSPG обязан остаться на #957B — этот адрес записан
+; числом в таблице расширений WCVLS (EXTZ).
+        DS #957B-$,0
+        ASSERT $ == #957B, RUNSPG сдвинулся с #957B
+; Claude - 2026-10-01 - end
 ;---------------------------------------
 PAGER   EQU #5300
 LOB2    EQU #B000

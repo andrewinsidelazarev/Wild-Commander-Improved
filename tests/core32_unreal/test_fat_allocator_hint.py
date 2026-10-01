@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import runtime_image
 import z80
 
 
@@ -68,9 +69,11 @@ class ExtensionHarness:
         self.core = load_symbols(BUILD / "CORE32_WDOS_SYMBOLS.INC", CORE_SYMBOL_RE)
         self.machine = z80.Z80Machine()
         self.memory = self.machine.memory
-        self.machine.set_memory_block(
-            EXTENSION_BASE, (BUILD / "CORE32_EXT.bin").read_bytes()
-        )
+        extension = (BUILD / "CORE32_EXT.bin").read_bytes()
+        self.machine.set_memory_block(EXTENSION_BASE, extension)
+        # Claude - 2026-10-01: проверка ссылки FAT (CLASSIFY_*) живёт в
+        # резидентном блоке страницы ядра — ставим его, как установщик.
+        runtime_image.apply(self.memory, self.ext, extension)
         self.read_sector = make_fsinfo(2)
         self.sector_overrides: dict[int, bytes] = {}
         self.position = 0

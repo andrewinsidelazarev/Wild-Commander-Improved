@@ -512,13 +512,21 @@ SDD
 ; Codex - 2026-07-16 - end
 
 ; Codex - 2026-07-16 - begin
+; Claude - 2026-10-01 - begin
+; Прежде оба входа шли через шлюз расширения, то есть весь проход LOAD512 —
+; при DI: около половины кадра на вызов, а кадровое прерывание TS-Conf —
+; короткий импульс. Плеер TGV без VDAC2 терял прерывания, кадры не сменялись
+; (в исходном WC чтение идёт при разрешённых прерываниях). Подмена обработчика
+; теперь в резидентном блоке страницы ядра — без шлюза, при прерываниях
+; вызывающего. Длина обоих входов прежняя (по 8 байт).
 LOADNON LD DE,Z0
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_WITH_HANDLER
-        RET
+        JP WDOS_EXT.STREAM_RESIDENT
+        DS 2,0
 
 LOAD256 LD DE,RDD256
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_WITH_HANDLER
-        RET
+        JP WDOS_EXT.STREAM_RESIDENT
+        DS 2,0
+; Claude - 2026-10-01 - end
 
 ; SAVE512 — потоково записать B блоков по 512 байт из памяти с адреса HL.
 ; Вход и выход соответствуют LOAD512. На время вызова подменяет цель NW0 на
@@ -695,8 +703,11 @@ STREAM_NEXT_CACHED:
         ; RDIR — поток шёл по корневому каталогу (Codex R26-03). STREAM_LINK
         ; расширения отвергает ноль и зовёт GIPAG. 2 байта — из добивки
         ; перед CURIT.
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_STREAM_LINK
-        RET
+; Claude - 2026-10-01 - begin
+        ; С 2026-10-01 та же проверка — в резидентном блоке, без шлюза.
+        JP WDOS_EXT.STREAM_LINK_RESIDENT
+        DS 2,0
+; Claude - 2026-10-01 - end
 ; Claude - 2026-09-27 - end
 STREAM_NEXT_MISS:
         POP HL
@@ -770,7 +781,12 @@ GIPAG
 
 ; Codex - 2026-07-16 - begin
         EX DE,HL
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+; Claude - 2026-10-01 - begin
+        ; Прежде — через шлюз (DI на каждом переходе потока к кластеру);
+        ; проверка ссылки теперь в резидентном блоке. Длина та же.
+        CALL WDOS_EXT.CLASSIFY_RESIDENT
+        NOP
+; Claude - 2026-10-01 - end
         JR NC,GIPAG_LINK_VALID
         CALL_WDOS_EXTENSION WDOS_EXT.ID_FAT_LINK_ERROR
         RET
@@ -2014,7 +2030,10 @@ GIPP
         LD H,(HL),L,A:OR H,E,D:RET Z
 ; Codex - 2026-07-16 - begin
         EX DE,HL
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_CLASSIFY_FAT_LINK
+; Claude - 2026-10-01 - begin
+        CALL WDOS_EXT.CLASSIFY_RESIDENT ; без шлюза, длина та же
+        NOP
+; Claude - 2026-10-01 - end
         JR C,GIPP_BAD_LINK
         RET Z
 ; Codex - 2026-07-16 - end

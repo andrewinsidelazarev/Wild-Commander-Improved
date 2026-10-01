@@ -13,9 +13,10 @@ SPG и WMF. Плагины добавляют работу с архивами, 
 В репозитории находятся исходники, готовый комплект для запуска,
 скрипт сборки, тесты и документация.
 
-**Текущий выпуск:** [v1.11i от 30 сентября 2026 года](https://github.com/andrewinsidelazarev/Wild-Commander-Improved/releases/tag/v1.11i-2026-09-30).
+**Текущий выпуск:** [v1.11i от 1 октября 2026 года](https://github.com/andrewinsidelazarev/Wild-Commander-Improved/releases/tag/v1.11i-2026-10-01).
 
 **Быстрые ссылки:** [готовый `boot.$C`](exe/boot.$C) ·
+[FDI2FDD — запись FDI на дискету](source/plugins/FDI2FDD/README.md) ·
 [TXTEDIT.WMF](exe/WC/TXTEDIT.WMF) ·
 [Text/HEX Viewer](source/plugins/txthex_viewer/README.md) ·
 [TXT/HEX VDAC2](source/plugins/txthex_viewer_VDAC2/README.md) ·
@@ -25,6 +26,19 @@ SPG и WMF. Плагины добавляют работу с архивами, 
 [аудит и ограничения](source/CORE32_audit.md).
 
 ## Зачем обновляться
+
+В выпуске **v1.11i от 2026-10-01**:
+
+- новый плагин **FDI2FDD** (`FDI2FDD.WMF`): Enter на файле `.FDI` записывает
+  образ на настоящую дискету через ВГ93 — с любой разметкой (IS-DOS 5×1024,
+  смешанные и защитные дорожки), со сверкой каждой дорожки после записи;
+- SPG-программа может занимать страницу памяти `#E8`;
+- во время чтения файла прерывания разрешены: плагин, который считает кадры
+  по прерываниям (Video Player на экране TS-Conf, без VDAC2), их не теряет.
+
+**Обязательно обновить** `boot.$C` и добавить `WC/FDI2FDD.WMF`; в `[PLUGINS]`
+своего `wc.ini` дописать строку `FDI2FDD.WMF`. Остальные файлы — как в выпуске
+от 2026-09-30. [Изменения выпуска](docs/releases/v1.11i-2026-10-01.md).
 
 В выпуске **v1.11i от 2026-09-30** в меню F10 вернулись плагины со своим окном
 при запуске из меню: TR-DOS Mounter, TRDump, TRDispatcher и TXT Editor — в
@@ -180,6 +194,9 @@ Up/Down собирают только новую строку; на `nedoos.txt`
 5. Для проверки FAT32 скопируйте [CHKDSK.WMF](exe/WC/CHKDSK.WMF) в каталог
    `WC` и добавьте `CHKDSK.WMF` в секцию `[PLUGINS]`. В комплектном
    [wc.ini](exe/WC/wc.ini) эта строка уже стоит после `UNZIP.WMF`.
+   Для записи образов FDI на настоящую дискету — так же
+   [FDI2FDD.WMF](exe/WC/FDI2FDD.WMF) и строка `FDI2FDD.WMF` (в комплектном
+   `wc.ini` — после `TRDUMP.WMF`).
 6. После запуска убедитесь, что заголовок показывает `Wild Commander v1.11i`,
    затем проверьте копирование и удаление ненужного тестового файла.
 7. Для отката запишите сохранённые старые `boot.$C` и каталог `WC`: миграции
@@ -189,7 +206,7 @@ Up/Down собирают только новую строку; на `nedoos.txt`
 Намеренно отличаются `boot.$C`, `Help.txt`, `WC/wc.ini`, `WC/FTVIEW.WMF`,
 `WC/TXTEDIT.WMF`, `WC/VIDEO_PL.WMF`, `WC_History.txt`, `WC_todo.txt`; новые —
 `WC/FILEX.WMF`, `WC/PLM.WMF`, `WC/SETUP.WMF`, `WC/UNZIP.WMF`, `WC/CHKDSK.WMF`,
-`WC/TXTVIEW.WMF`, `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`; прежний `WC/RE.WMF`
+`WC/FDI2FDD.WMF`, `WC/TXTVIEW.WMF`, `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`; прежний `WC/RE.WMF`
 заменён на `WC/TXTVIEW.WMF`. `Build/CORE32_EXT.bin`,
 `Build/CORE32_EXT.CPD`, `CORE32T.WMF`, `FILEXT.WMF` и `FILEXNST.WMF` на носитель
 копировать не нужно: это встроенные части или тестовые артефакты.
@@ -357,8 +374,8 @@ F7. После выхода тестового плагина с кодом `3` 
 - намеренно изменены `boot.$C`, `Help.txt`, `WC/wc.ini`, `WC/FTVIEW.WMF`,
   `WC/TXTEDIT.WMF`, `WC/VIDEO_PL.WMF`, `WC_History.txt`, `WC_todo.txt`;
 - новые `WC/FILEX.WMF`, `WC/PLM.WMF`, `WC/SETUP.WMF`, `WC/TXTVIEW.WMF`,
-  `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`, `WC/UNZIP.WMF` и `WC/CHKDSK.WMF`
-  отмечены как `EXTRA_ACTUAL`; прежний `WC/RE.WMF` — как `MISSING_ACTUAL` после
+  `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`, `WC/UNZIP.WMF`, `WC/CHKDSK.WMF` и
+  `WC/FDI2FDD.WMF` отмечены как `EXTRA_ACTUAL`; прежний `WC/RE.WMF` — как `MISSING_ACTUAL` после
   переименования.
 
 Рабочие исследованные файлы имеют синтаксис SJASMPlus, кодировку UTF-8 без BOM

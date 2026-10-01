@@ -140,7 +140,7 @@ def make_html() -> str:
 </head>
 <body>
   <section class="cover">
-    <div class="cover-kicker">Wild Commander Improved v1.11i 2026-09-30</div>
+    <div class="cover-kicker">Wild Commander Improved v1.11i 2026-10-01</div>
     <h1>Руководство<br>программиста</h1>
     <div class="cover-subtitle">
       Полный API, панельный менеджер, плагины, драйверы,

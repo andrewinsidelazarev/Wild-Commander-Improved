@@ -6,3 +6,12 @@ __pycache__/
 /Build/
 # Сборка FTViewConvert: exe ~105 МБ (больше предела GitHub) и архив ffmpeg.
 /FTViewConvert/build/
+# FDI2FDD: выход сборки плагина и журналы прогонов тестов.
+/source/plugins/FDI2FDD/build/
+# FDI2FDD: настоящие образы дискет для тестов плагина — чужие программы, в
+# репозиторий не кладутся; без них build.ps1 пропускает набор тестов плагина.
+/source/plugins/FDI2FDD/IS_BASE.FDI
+/source/plugins/FDI2FDD/ISDOS.ZIP
+/source/plugins/FDI2FDD/voron1/
+# Ролики TGV — большие файлы, в репозиторий не кладутся.
+*.tgv

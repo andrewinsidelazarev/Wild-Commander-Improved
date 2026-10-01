@@ -177,5 +177,13 @@ ID_COUNT                      EQU 56
 ; Резидентный блок расширения живёт в странице ядра #05 на месте упакованных
 ; драйверов DR1..DR4 (#5176..#5AA9); драйверы установщик переносит в #E8.
 RESIDENT_BASE                 EQU #5176
+; Claude - 2026-10-01 - begin
+; Входы резидентного кода для ядра (за OUTER_PAGE/OUTER_IFF), по три байта:
+; подмена обработчика потока LOAD256/LOADNON, проверка ссылки FAT (GIPAG,
+; GIPP), переход потока по записи FAT из кэша (STREAM_NEXT_CACHED).
+STREAM_RESIDENT               EQU RESIDENT_BASE+2
+CLASSIFY_RESIDENT             EQU RESIDENT_BASE+5
+STREAM_LINK_RESIDENT          EQU RESIDENT_BASE+8
+; Claude - 2026-10-01 - end
 ; Claude - 2026-09-27 - end
 ; Codex - 2026-07-17 - end

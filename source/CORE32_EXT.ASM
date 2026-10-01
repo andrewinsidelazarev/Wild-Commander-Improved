@@ -2066,33 +2066,10 @@ ZERO_CLUSTER_BUFFER_LOAD:
         LD A,B
         JR ZERO_CLUSTER_TAIL_NEXT
 
-; Нормализовать и классифицировать значение FAT32 в DE:HL.
-; Старшие четыре служебных бита отбрасываются. Обычный кластер возвращает
-; NZ/CF=0, EOC #0FFFFFF8..#0FFFFFFF — Z/CF=0, недопустимые 0, 1,
-; #0FFFFFF0..#0FFFFFF7 — NZ/CF=1.
-CLASSIFY_FAT_LINK:
-        LD A,D:AND #0F:LD D,A
-        OR E:OR H
-        JR NZ,CLASSIFY_HIGH
-
-CLASSIFY_LOW:
-        LD A,L:CP 2:JR C,CLASSIFY_INVALID
-        JR CLASSIFY_ORDINARY
-CLASSIFY_HIGH:
-        LD A,D:CP #0F:JR NZ,CLASSIFY_ORDINARY
-        LD A,E:CP #FF:JR NZ,CLASSIFY_ORDINARY
-        LD A,H:CP #FF:JR NZ,CLASSIFY_ORDINARY
-        LD A,L:CP #F0:JR C,CLASSIFY_ORDINARY
-        CP #F8:JR C,CLASSIFY_INVALID
-        XOR A
-        RET
-CLASSIFY_ORDINARY:
-; Codex - 2026-07-16 - begin
-        ; Тот же A=1, NZ и сброшенный CF одним байтом короче. Освобождённый
-        ; байт сохраняет точный физический размер после нормализации EOC.
-        XOR A:INC A
-; Codex - 2026-07-16 - end
-        RET
+; Claude - 2026-10-01 - begin
+; CLASSIFY_FAT_LINK, CLASSIFY_ORDINARY, CLASSIFY_INVALID и CLASSIFY_IN_VOLUME —
+; в резидентном блоке (конец файла): ядро зовёт проверку ссылки напрямую.
+; Claude - 2026-10-01 - end
 ; Claude - 2026-09-27 - begin
 ; CLASSIFY_DATA (ID_CLASSIFY_DATA — DLSG ядра; FILE_CHAIN): CLASSIFY_IN_VOLUME,
 ; и кластер цепочки корня недопустим. В цепочке файла и в освобождаемой
@@ -2107,12 +2084,11 @@ CLASSIFY_DATA:
         RET C                                   ; недопустимая
         RET Z                                   ; EOC
         CALL ROOT_MEMBER                        ; Z — кластер корня (0 уже отвергнут)
-        JR NZ,CLASSIFY_ORDINARY
+; Claude - 2026-10-01 - begin
+        JP NZ,CLASSIFY_ORDINARY
+        JP CLASSIFY_INVALID
+; Claude - 2026-10-01 - end
 ; Claude - 2026-09-27 - end
-CLASSIFY_INVALID:
-        LD A,1:OR A
-        SCF
-        RET
 
 ; Claude - 2026-09-27 - begin
 ; DIR_CHAIN: цепочка каталога DE:HL (0 — корень, BROOTC) конечна и в томе:
@@ -2377,29 +2353,7 @@ STREAM_LINK:
 ; и запись за границу тома (Codex R25-03). Граница не задана (не больше 2:
 ; том не монтирован HDD) — без проверки, как прежде. Прямые вызовы внутри
 ; расширения — прежний CLASSIFY_FAT_LINK.
-CLASSIFY_IN_VOLUME:
-        CALL CLASSIFY_FAT_LINK
-        RET C                                   ; недопустимая
-        RET Z                                   ; EOC
-        PUSH HL
-        PUSH DE
-        LD BC,(FAT_DATA_CLUSTER_LIMIT):OR A:SBC HL,BC
-        EX DE,HL
-        LD BC,(FAT_DATA_CLUSTER_LIMIT+2):SBC HL,BC   ; CF — кластер ниже границы
-        POP DE
-        POP HL
-        JR C,.inside
-        PUSH HL                                 ; граница задана?
-        LD HL,(FAT_DATA_CLUSTER_LIMIT+2):LD A,H:OR L
-        LD HL,(FAT_DATA_CLUSTER_LIMIT):OR H
-        JR NZ,.set
-        LD A,L:CP 3                             ; CF — не задана
-.set:
-        POP HL
-        JP NC,CLASSIFY_INVALID                  ; за областью данных
-.inside:
-        XOR A:INC A                             ; обычный: A=1, NZ, CF=0
-        RET
+; Claude - 2026-10-01: код CLASSIFY_IN_VOLUME — в резидентном блоке (конец файла).
 ; Claude - 2026-09-27 - end
 
 ; Проверить четыре байта непосредственно перед HL, не меняя указатель.
@@ -3949,6 +3903,97 @@ RESIDENT_SOURCE:
 RESIDENT_START:
 OUTER_PAGE:     DB 0                    ; страница окна #C000 внешнего вызова
 OUTER_IFF:      DB 0                    ; ≠0 — прерывания у него разрешены
+; Claude - 2026-10-01 - begin
+; Входы резидентного кода для ядра — по постоянным адресам (CORE32_EXT_API).
+; Всё, что ниже до CORE_MKSG, исполняется без шлюза: страница окна #C000 и
+; прерывания — вызывающего. Прежде чтение файла на каждом переходе к
+; следующему кластеру и на каждом вызове LOAD256/LOADNON входило в шлюз, а
+; он закрывает прерывания: кадровое прерывание TS-Conf (короткий импульс)
+; терялось, плеер TGV без VDAC2 не сменял кадры. В исходном WC чтение идёт
+; при разрешённых прерываниях.
+        ASSERT $ == STREAM_RESIDENT, вход потока сдвинулся
+        JP STREAM_RESIDENT_CODE
+        ASSERT $ == CLASSIFY_RESIDENT, вход проверки ссылки сдвинулся
+        JP CLASSIFY_IN_VOLUME
+        ASSERT $ == STREAM_LINK_RESIDENT, вход перехода потока сдвинулся
+; Переход потока по записи FAT в SECBU (HL), попадание кэша STREAM_NEXT_CACHED.
+; Ноль — свободный кластер: порча ссылки (см. STREAM_LINK расширения), учёт
+; ошибки — в расширении; иначе GIPAG.
+        PUSH HL
+        LD A,(HL):INC HL:OR (HL):INC HL:OR (HL):INC HL:OR (HL)
+        POP HL
+        JP NZ,@WDOS.GIPAG
+        CALL @WDOS.EXTENSION_GATE
+        DB ID_FAT_LINK_ERROR
+        RET
+; Нормализовать и классифицировать значение FAT32 в DE:HL.
+; Старшие четыре служебных бита отбрасываются. Обычный кластер возвращает
+; NZ/CF=0, EOC #0FFFFFF8..#0FFFFFFF — Z/CF=0, недопустимые 0, 1,
+; #0FFFFFF0..#0FFFFFF7 — NZ/CF=1.
+CLASSIFY_FAT_LINK:
+        LD A,D:AND #0F:LD D,A
+        OR E:OR H
+        JR NZ,CLASSIFY_HIGH
+
+CLASSIFY_LOW:
+        LD A,L:CP 2:JR C,CLASSIFY_INVALID
+        JR CLASSIFY_ORDINARY
+CLASSIFY_HIGH:
+        LD A,D:CP #0F:JR NZ,CLASSIFY_ORDINARY
+        LD A,E:CP #FF:JR NZ,CLASSIFY_ORDINARY
+        LD A,H:CP #FF:JR NZ,CLASSIFY_ORDINARY
+        LD A,L:CP #F0:JR C,CLASSIFY_ORDINARY
+        CP #F8:JR C,CLASSIFY_INVALID
+        XOR A
+        RET
+CLASSIFY_ORDINARY:
+; Codex - 2026-07-16 - begin
+        ; Тот же A=1, NZ и сброшенный CF одним байтом короче. Освобождённый
+        ; байт сохраняет точный физический размер после нормализации EOC.
+        XOR A:INC A
+; Codex - 2026-07-16 - end
+        RET
+CLASSIFY_INVALID:
+        LD A,1:OR A
+        SCF
+        RET
+; CLASSIFY_FAT_LINK с границей области данных тома (см. описание у прежнего
+; места в расширении): GIPAG, GIPP ядра и ID_CLASSIFY_FAT_LINK шлюза.
+CLASSIFY_IN_VOLUME:
+        CALL CLASSIFY_FAT_LINK
+        RET C                                   ; недопустимая
+        RET Z                                   ; EOC
+        PUSH HL
+        PUSH DE
+        LD BC,(FAT_DATA_CLUSTER_LIMIT):OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(FAT_DATA_CLUSTER_LIMIT+2):SBC HL,BC   ; CF — кластер ниже границы
+        POP DE
+        POP HL
+        JR C,.inside
+        PUSH HL                                 ; граница задана?
+        LD HL,(FAT_DATA_CLUSTER_LIMIT+2):LD A,H:OR L
+        LD HL,(FAT_DATA_CLUSTER_LIMIT):OR H
+        JR NZ,.set
+        LD A,L:CP 3                             ; CF — не задана
+.set:
+        POP HL
+        JP NC,CLASSIFY_INVALID                  ; за областью данных
+.inside:
+        XOR A:INC A                             ; обычный: A=1, NZ, CF=0
+        RET
+; LOAD256/LOADNON ядра: вызвать LOAD512 с временным обработчиком сектора DE и
+; вернуть прежний.
+STREAM_RESIDENT_CODE:
+        PUSH HL
+        LD HL,(@WDOS.NW0+1)
+        EX (SP),HL
+        LD (@WDOS.NW0+1),DE
+        CALL @WDOS.LOAD512
+        POP DE
+        LD (@WDOS.NW0+1),DE
+        RET
+; Claude - 2026-10-01 - end
 CORE_MKSG:
         CALL LEAVE_EXT
         CALL @WDOS.MKSG
