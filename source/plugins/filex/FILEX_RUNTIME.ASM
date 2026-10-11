@@ -141,7 +141,13 @@ FILEX_LOAD_CONTEXT:
         JR Z,.no_context
         LD HL,@WDOS.LOBU,DE,FILEX_CONTEXT,BC,FILEX_CONTEXT_SIZE
         LDIR
-        JR FILEX_VERIFY_CONTEXT
+; Claude - 2026-10-10 - begin
+        CALL FILEX_VERIFY_CONTEXT
+        RET NZ
+        ; Цепочка файла (FILEX_FILE_CHAIN_GUARD): цикл уводил WRITE_AT в
+        ; начало файла, а усечение освобождало оставляемые кластеры (драйвер).
+        JP FILEX_FILE_CHAIN_GUARD
+; Claude - 2026-10-10 - end
 .no_context:
         LD A,FILEX_STATUS_NO_CONTEXT
         OR A
@@ -236,6 +242,247 @@ FILEX_CLASSIFY_LINK:
         SCF
         RET
 
+; Claude - 2026-10-10 - begin
+; ---- Цепочки FAT (из драйвера FAT32: FILE_CHAIN_GUARD, FILE_CHAIN_CHECK,
+; CHAINS_DISJOINT). Прежде FILEX проверял только каждую ссылку по отдельности.
+
+; Ссылка цепочки файла или подкаталога: обычный кластер в области данных тома
+; и не кластер корня (ID_CLASSIFY_DATA; таблицу корня строит
+; FILEX_ROOT_REFRESH). Выход как у FILEX_CLASSIFY_LINK; HL, DE сохраняются.
+FILEX_CLASSIFY_DATA:
+        LD A,D:AND #0F:LD D,A
+        FILEX_CALL_EXTENSION ID_CLASSIFY_DATA
+        RET
+
+; Освежить таблицу корня расширения (ROOT_BUILD; она одна на все тома и
+; панели) — через FILE_CHAIN с длиной 1: он строит её и проверяет первый
+; кластер DE:HL и его ссылку. Аргументы — на стеке: на время шлюза по #C000
+; подключена страница расширения, и указатели в страницу FILEX ей не годятся.
+; Выход: Z — первый кластер годен. Разрушает AF, BC, DE, HL и SECBU.
+FILEX_ROOT_REFRESH:
+        LD BC,0:PUSH BC                         ; длина 1
+        INC C:PUSH BC
+        PUSH DE:PUSH HL                         ; первый кластер
+        LD HL,0:ADD HL,SP
+        LD D,H:LD E,L
+        INC DE:INC DE:INC DE:INC DE
+        XOR A
+        FILEX_CALL_EXTENSION ID_FILE_CHAIN
+        POP BC:POP BC:POP BC:POP BC
+        RET
+
+; Цепочка файла контекста — один раз на запись: проверенная запись (все 38
+; байт контекста) хранится в FILEX_CHAIN_CACHE, её цепочку повторно не обходят.
+; Каталог и пустой файл без кластера не проверяются: FILEX не пишет и не
+; читает каталоги как файлы. Таблицу корня освежает каждый вызов (для
+; FILEX_NEXT_CLUSTER). Выход: Z — можно; NZ, A=FAT — цепочка испорчена.
+FILEX_FILE_CHAIN_GUARD:
+        LD A,(FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+11):AND #10
+        JR NZ,.ok
+        LD HL,(FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+26)
+        LD DE,(FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+20)
+        LD A,D:AND #0F:LD D,A
+        LD A,H:OR L:OR D:OR E:RET Z             ; пустой без кластера
+        PUSH HL
+        PUSH DE
+        CALL FILEX_ROOT_REFRESH
+        POP DE
+        POP HL
+        JR NZ,.bad
+        CALL FILEX_CHAIN_CACHED
+        RET Z                                   ; уже проверена
+        CALL FILEX_CHAIN_WALK
+        JR NZ,.bad
+        LD HL,FILEX_CONTEXT,DE,FILEX_CHAIN_CACHE,BC,FILEX_CONTEXT_SIZE
+        LDIR
+        LD A,1:LD (FILEX_CHAIN_CACHE_VALID),A
+.ok:
+        XOR A
+        RET
+.bad:
+        LD A,FILEX_STATUS_FAT:OR A
+        RET
+
+; Z — FILEX_CONTEXT совпадает с проверенной записью FILEX_CHAIN_CACHE.
+; Поля времени и дат записи (+13..+19, +22..+25) не сравниваются (с
+; 2026-10-11): WRITE_AT ставит время изменения, и прежде каждая новая отметка
+; (раз в 2 с) заставляла обходить всю цепочку заново. HL, DE сохраняются.
+FILEX_CHAIN_CACHED:
+        LD A,(FILEX_CHAIN_CACHE_VALID):OR A
+        JR Z,.miss
+        PUSH HL
+        PUSH DE
+        LD HL,FILEX_CONTEXT,DE,FILEX_CHAIN_CACHE
+        LD B,FILEX_CONTEXT_ENTRY+13             ; место записи, имя, атрибут, +12
+        CALL .compare
+        JR NZ,.done
+        LD BC,7:ADD HL,BC
+        EX DE,HL:ADD HL,BC:EX DE,HL
+        LD B,2                                  ; старшее слово кластера
+        CALL .compare
+        JR NZ,.done
+        LD BC,4:ADD HL,BC
+        EX DE,HL:ADD HL,BC:EX DE,HL
+        LD B,6                                  ; младшее слово и размер
+        CALL .compare
+.done:
+        POP DE
+        POP HL
+        RET
+.compare:
+        LD A,(DE):CP (HL):RET NZ
+        INC HL:INC DE
+        DJNZ .compare
+        RET
+.miss:
+        OR 1
+        RET
+
+; Цепочка DE:HL (не 0) до конца: FILEX_ROOT_REFRESH и FILEX_CHAIN_WALK.
+FILEX_CHAIN_CHECK:
+        PUSH HL
+        PUSH DE
+        CALL FILEX_ROOT_REFRESH
+        POP DE
+        POP HL
+        RET NZ
+; Цепочка DE:HL до конца: каждый кластер — обычный, в томе, не корень
+; (FILEX_CLASSIFY_DATA), без повторов — алгоритм Брента: «черепаха» встаёт на
+; кластер с номером шага — степенью двойки, «заяц» идёт по цепочке; совпадение
+; — цикл. Z — цела, FILEX_CHAIN_LAST — последний кластер; NZ — нет, в том числе
+; при отказе чтения FAT. Разрушает AF, BC, DE, HL и SECBU.
+FILEX_CHAIN_WALK:
+        LD (FILEX_CHAIN_TORTOISE),HL
+        LD (FILEX_CHAIN_TORTOISE+2),DE
+        PUSH HL
+        LD HL,FILEX_CHAIN_POWER
+        LD B,8
+.zero:
+        LD (HL),0:INC HL                        ; FILEX_CHAIN_POWER и _LAM
+        DJNZ .zero
+        POP HL
+        LD A,1:LD (FILEX_CHAIN_POWER),A
+        XOR A:LD (FILEX_CHAIN_READ),A
+        CALL FILEX_CLASSIFY_DATA
+        JR C,.bad
+        JR Z,.bad                               ; EOC вместо первого кластера
+.cluster:                                       ; DE:HL — кластер цепочки
+        LD (FILEX_CHAIN_LAST),HL
+        LD (FILEX_CHAIN_LAST+2),DE
+        CALL FILEX_CHAIN_VALUE
+        JR C,.bad
+        CALL FILEX_CLASSIFY_DATA
+        JR C,.bad                               ; 0, недопустимая, за томом, корень
+        RET Z                                   ; конец цепочки: Z — цела
+        PUSH HL
+        LD HL,FILEX_CHAIN_LAM:CALL @WDOS.INC4b
+        POP HL
+        LD BC,(FILEX_CHAIN_TORTOISE)
+        LD A,L:CP C:JR NZ,.differ
+        LD A,H:CP B:JR NZ,.differ
+        LD BC,(FILEX_CHAIN_TORTOISE+2)
+        LD A,E:CP C:JR NZ,.differ
+        LD A,D:CP B:JR NZ,.differ
+.bad:                                           ; цикл или порча
+        OR 1
+        RET
+.differ:
+        PUSH HL
+        PUSH DE
+        LD HL,FILEX_CHAIN_LAM,DE,FILEX_CHAIN_POWER,B,4
+.same:
+        LD A,(DE):CP (HL):JR NZ,.keep
+        INC HL:INC DE
+        DJNZ .same
+        POP DE
+        POP HL
+        LD (FILEX_CHAIN_TORTOISE),HL            ; шаг — степень двойки
+        LD (FILEX_CHAIN_TORTOISE+2),DE
+        PUSH HL
+        LD HL,FILEX_CHAIN_POWER
+        SLA (HL):INC HL:RL (HL):INC HL:RL (HL):INC HL:RL (HL)
+        INC HL                                  ; FILEX_CHAIN_LAM
+        XOR A
+        LD (HL),A:INC HL:LD (HL),A:INC HL:LD (HL),A:INC HL:LD (HL),A
+        POP HL
+        JR .cluster
+.keep:
+        POP DE
+        POP HL
+        JR .cluster
+
+; Значение записи FAT кластера DE:HL. Сектор FAT читается CURIT в первый раз
+; за обход и затем, только когда сменился (FILEX_CHAIN_READ). Выход: DE:HL —
+; значение, CF=0; CF=1 — отказ чтения. Разрушает AF, AF', BC.
+FILEX_CHAIN_VALUE:
+        LD A,(FILEX_CHAIN_READ):OR A
+        JR Z,.read
+        PUSH DE
+        PUSH HL
+        CALL @WDOS.STREAM_CACHE_SECTOR          ; Z — тот же сектор FAT, A — запись
+        POP HL
+        POP DE
+        JR NZ,.read
+        LD L,A:LD H,@WDOS.SECBU/1024
+        ADD HL,HL:ADD HL,HL                     ; адрес записи в SECBU
+        JR .value
+.read:
+        XOR A:LD (@WDOS.ABT),A
+        CALL @WDOS.CURIT                        ; HL — запись FAT кластера
+        RET C
+        LD A,1:LD (FILEX_CHAIN_READ),A
+.value:
+        LD E,(HL):INC HL:LD D,(HL):INC HL
+        LD A,(HL):INC HL:LD H,(HL):LD L,A
+        EX DE,HL
+        OR A                                    ; CF=0
+        RET
+
+; Цепочки записей источника и заменяемого назначения не пересекаются. Две
+; конечные цепочки FAT с общим кластером дальше идут вместе, поэтому
+; пересекаются ровно тогда, когда у них общий последний кластер. Z — не
+; пересекаются; NZ — пересекаются или цепочка испорчена.
+FILEX_CHAINS_DISJOINT:
+        LD HL,FILEX_SOURCE_CONTEXT+FILEX_CONTEXT_ENTRY
+        CALL FILEX_CHAIN_TAIL
+        RET NZ
+        LD A,H:OR L:OR D:OR E:RET Z             ; у источника цепочки нет
+        LD (FILEX_CHAIN_OTHER),HL
+        LD (FILEX_CHAIN_OTHER+2),DE
+        LD HL,FILEX_DEST_CONTEXT+FILEX_CONTEXT_ENTRY
+        CALL FILEX_CHAIN_TAIL
+        RET NZ
+        LD A,H:OR L:OR D:OR E:RET Z             ; у назначения цепочки нет
+        LD BC,(FILEX_CHAIN_OTHER)
+        OR A:SBC HL,BC:JR NZ,.differ
+        EX DE,HL
+        LD BC,(FILEX_CHAIN_OTHER+2)
+        SBC HL,BC                               ; CF=0 после равенства выше
+        JR NZ,.differ
+        OR 1                                    ; общий хвост
+        RET
+.differ:
+        XOR A
+        RET
+
+; Последний кластер цепочки записи каталога HL (32 байта). Выход: Z, DE:HL —
+; последний кластер (0 — цепочки нет); NZ — цепочка испорчена.
+FILEX_CHAIN_TAIL:
+        PUSH HL
+        LD BC,20:ADD HL,BC
+        LD E,(HL):INC HL:LD D,(HL)              ; старшее слово кластера
+        POP HL
+        LD BC,26:ADD HL,BC
+        LD A,(HL):INC HL:LD H,(HL):LD L,A       ; младшее слово
+        LD A,D:AND #0F:LD D,A
+        LD A,H:OR L:OR D:OR E:RET Z
+        CALL FILEX_CHAIN_CHECK
+        RET NZ
+        LD HL,(FILEX_CHAIN_LAST),DE,(FILEX_CHAIN_LAST+2)
+        XOR A
+        RET
+; Claude - 2026-10-10 - end
+
 ; Прочитать следующую FAT-ссылку текущего кластера и сделать её текущей.
 FILEX_NEXT_CLUSTER:
         XOR A
@@ -249,7 +496,11 @@ FILEX_NEXT_CLUSTER:
         LD A,(HL):INC HL
         LD H,(HL),L,A
         EX DE,HL
-        CALL FILEX_CLASSIFY_LINK
+; Claude - 2026-10-10 - begin
+        ; В томе и не кластер корня (таблицу корня освежил LOAD_CONTEXT): FAT
+        ; могли изменить после проверки цепочки, и WRITE_AT писал бы в корень.
+        CALL FILEX_CLASSIFY_DATA
+; Claude - 2026-10-10 - end
         JP C,.fat_error
         JP Z,.fat_error
         LD (FILEX_CURRENT_CLUSTER),HL
@@ -294,6 +545,15 @@ FILEX_LOCATE_OFFSET:
 .cluster_index_ready:
         LD (FILEX_CLUSTER_SKIP),HL
         LD (FILEX_CLUSTER_SKIP+2),DE
+; Claude - 2026-10-11 - begin
+        ; Номер кластера в файле — для кэша позиции. Прежде каждый READ_AT/
+        ; WRITE_AT шёл от первого кластера и читал сектор FAT на каждую ссылку:
+        ; на глубине 100 МБ (кластер 32 КиБ) — около 3200 чтений на окно SMB.
+        LD (FILEX_POS_TARGET),HL
+        LD (FILEX_POS_TARGET+2),DE
+        CALL FILEX_LOCATE_CACHED                ; Z — от запомненного кластера
+        JR Z,.walk_start
+; Claude - 2026-10-11 - end
 
         LD HL,(FILEX_FIRST_CLUSTER)
         LD DE,(FILEX_FIRST_CLUSTER+2)
@@ -303,11 +563,15 @@ FILEX_LOCATE_OFFSET:
         LD (FILEX_CURRENT_CLUSTER),HL
         LD (FILEX_CURRENT_CLUSTER+2),DE
 
+; Claude - 2026-10-11 - begin
+.walk_start:
+        XOR A:LD (FILEX_CHAIN_READ),A           ; первый шаг читает сектор FAT
+; Claude - 2026-10-11 - end
 .walk:
         LD HL,(FILEX_CLUSTER_SKIP)
         LD DE,(FILEX_CLUSTER_SKIP+2)
         LD A,D:OR E:OR H:OR L:JR Z,.ready
-        CALL FILEX_NEXT_CLUSTER
+        CALL FILEX_LOCATE_STEP                  ; Claude - 2026-10-11
         RET NZ
         LD HL,(FILEX_CLUSTER_SKIP)
         DEC HL
@@ -320,12 +584,85 @@ FILEX_LOCATE_OFFSET:
         LD (FILEX_CLUSTER_SKIP+2),HL
         JR .walk
 .ready:
+; Claude - 2026-10-11 - begin
+        LD HL,FILEX_POS_NOW,DE,FILEX_POS_KEY,BC,FILEX_POS_KEY_SIZE
+        LDIR
+        LD HL,FILEX_POS_TARGET,DE,FILEX_POS_INDEX,BC,4
+        LDIR
+        LD HL,FILEX_CURRENT_CLUSTER,DE,FILEX_POS_CLUSTER,BC,4
+        LDIR
+        LD A,1:LD (FILEX_POS_VALID),A
+; Claude - 2026-10-11 - end
         XOR A
         RET
 .fat_error:
         LD A,FILEX_STATUS_FAT
         OR A
         RET
+
+; Claude - 2026-10-11 - begin
+; Кэш позиции FILEX_LOCATE_OFFSET: последний найденный кластер файла и его
+; номер. Годен, пока совпадает ключ: поколение FAT ядра (FAT_CACHE_GENERATION
+; меняют любая запись FAT, монтирование, смена драйвера, начало чтения
+; каталога, возврат карты), место записи каталога (LBA и смещение контекста) и
+; первый кластер. Ключ текущего вызова — в FILEX_POS_NOW. Z — нужный кластер
+; не раньше запомненного: FILEX_CURRENT_CLUSTER — запомненный, а
+; FILEX_CLUSTER_SKIP — остаток пути от него; NZ — идти от первого кластера.
+FILEX_LOCATE_CACHED:
+        LD HL,@WDOS.FAT_CACHE_GENERATION,DE,FILEX_POS_NOW,BC,4
+        LDIR
+        LD HL,FILEX_CONTEXT+FILEX_CONTEXT_LBA,BC,6
+        LDIR
+        LD HL,FILEX_FIRST_CLUSTER,BC,4
+        LDIR
+        LD A,(FILEX_POS_VALID):OR A:JR Z,.miss
+        LD HL,FILEX_POS_NOW,DE,FILEX_POS_KEY,B,FILEX_POS_KEY_SIZE
+.compare:
+        LD A,(DE):CP (HL):JR NZ,.miss
+        INC HL:INC DE
+        DJNZ .compare
+        LD HL,(FILEX_CLUSTER_SKIP)
+        LD BC,(FILEX_POS_INDEX)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD HL,(FILEX_CLUSTER_SKIP+2)
+        LD BC,(FILEX_POS_INDEX+2)
+        SBC HL,BC
+        JR C,.miss                              ; нужный раньше запомненного
+        LD (FILEX_CLUSTER_SKIP),DE
+        LD (FILEX_CLUSTER_SKIP+2),HL
+        LD HL,(FILEX_POS_CLUSTER),DE,(FILEX_POS_CLUSTER+2)
+        LD (FILEX_CURRENT_CLUSTER),HL
+        LD (FILEX_CURRENT_CLUSTER+2),DE
+        XOR A
+        RET
+.miss:
+        OR 1
+        RET
+
+; Шаг обхода FILEX_LOCATE_OFFSET: как FILEX_NEXT_CLUSTER, но сектор FAT
+; читается один раз на 128 ссылок (FILEX_CHAIN_VALUE, первый шаг обхода —
+; заново); прежде CURIT читал его на каждую ссылку.
+FILEX_LOCATE_STEP:
+        LD HL,(FILEX_CURRENT_CLUSTER)
+        LD DE,(FILEX_CURRENT_CLUSTER+2)
+        CALL FILEX_CHAIN_VALUE
+        JR C,.read_failed
+        CALL FILEX_CLASSIFY_DATA
+        JR C,.fat_error
+        JR Z,.fat_error
+        LD (FILEX_CURRENT_CLUSTER),HL
+        LD (FILEX_CURRENT_CLUSTER+2),DE
+        XOR A
+        RET
+.read_failed:
+        LD A,(@WDOS.ABT):OR A
+        LD A,FILEX_STATUS_MEDIA:RET NZ
+.fat_error:
+        LD A,FILEX_STATUS_FAT
+        OR A
+        RET
+; Claude - 2026-10-11 - end
 
 ; Подвести драйвер к текущему сектору и сохранить его абсолютный LBA.
 FILEX_POSITION_CURRENT:
@@ -381,7 +718,12 @@ FILEX_COMMIT_CONTEXT_ENTRY:
         CALL @WDOS.PROZ
         LD HL,@WDOS.LOBU
         CALL FILEX_WRITE_ONE
-        RET NZ
+; Claude - 2026-10-10 - begin
+        ; Отказ записи ENTRY неоднозначен (сектор мог лечь, например с новым
+        ; атрибутом «только чтение»): контекст FENTRY/APPEND снят, AF прежний
+        ; (драйвер, R3-4). Легшая запись берёт его заново (COMMIT_CONTEXT_DONE).
+        JP NZ,FILEX_CONTEXT_FORGET
+; Claude - 2026-10-10 - end
 ; Claude - 2026-09-26 - begin
 ; Запись легла: ENTRY ядра и контекст APPEND — по новой записи. Отдельный вход
 ; — для случая, когда отказ записи оказался легшей записью (SET_EOF32).
@@ -843,6 +1185,7 @@ FILEX_MAP_APPEND_ERROR:
         CP #25:JR Z,.fat
         CP #26:JR Z,.directory
         CP #27:JR Z,.internal
+        CP #28:JR Z,.read_only                  ; Claude - 2026-10-10: APPEND
         CP #2A:JR Z,.rollback
         ; Определённые ошибки APPEND перечислены выше. Любой иной ненулевой
         ; код приходит непосредственно из ABT драйвера и означает I/O-сбой.
@@ -858,13 +1201,18 @@ FILEX_MAP_APPEND_ERROR:
 .directory: LD A,FILEX_STATUS_IS_DIRECTORY:OR A:RET
 .internal:  LD A,FILEX_STATUS_INTERNAL:OR A:RET
 .rollback:  LD A,FILEX_STATUS_ROLLBACK:OR A:RET
+.read_only: LD A,FILEX_STATUS_READ_ONLY:OR A:RET  ; Claude - 2026-10-10
 
 ; Усечение публикует меньший размер до отсоединения хвоста. Поэтому сбой FAT
 ; после commit не оставляет запись, указывающую за короткую цепочку: максимум
 ; остаётся лишняя, но уже недоступная цепочка и код COMMITTED_CLEANUP.
-; Хвост последнего сохраняемого сектора обнуляется ещё до публикации; любой
-; отказ до неё (запись обнуления, чтение FAT, ENTRY) возвращает сектор из
-; копии FILEX_SECTOR_BACKUP, не удался и возврат — ROLLBACK (с 2026-09-26).
+; Claude - 2026-10-10 - begin
+; Хвост последнего сохраняемого сектора обнуляется после публикации нового
+; размера, когда за концом файла уже мёртвые данные. Прежде — до публикации,
+; с копией FILEX_SECTOR_BACKUP: там ещё живые данные файла, и отказ записи при
+; неудачном возврате копии терял их (драйвер, R8-3). Отказ до публикации —
+; на диске ничего не менялось; отказ обнуления — COMMITTED_CLEANUP.
+; Claude - 2026-10-10 - end
 FILEX_SHRINK_TO_TARGET:
         ; Компенсация не должна трогать уже исходный размер (особенно size=0).
         LD HL,(FILEX_TARGET_SIZE+2)
@@ -877,8 +1225,10 @@ FILEX_SHRINK_TO_TARGET:
         RET
 .different_size:
         XOR A
-        LD (FILEX_TAIL_ZEROED),A
         LD (FILEX_TAIL_PRESENT),A
+; Claude - 2026-10-10 - begin
+        LD HL,512:LD (FILEX_TAIL_START),HL      ; 512 — хвоста сектора нет
+; Claude - 2026-10-10 - end
         LD HL,(FILEX_TARGET_SIZE)
         LD DE,(FILEX_TARGET_SIZE+2)
         LD A,D:OR E:OR H:OR L:JP Z,.prepare_zero_size
@@ -911,41 +1261,11 @@ FILEX_SHRINK_TO_TARGET:
         LD DE,(FILEX_CURRENT_LBA+2)
         LD (FILEX_TAIL_LBA),HL
         LD (FILEX_TAIL_LBA+2),DE
-        LD HL,@WDOS.LOBU
-        CALL FILEX_READ_ONE
-        RET NZ
-        LD HL,@WDOS.LOBU
-        LD DE,FILEX_SECTOR_BACKUP
-        LD BC,512
-        LDIR
-
+; Claude - 2026-10-10 - begin
         LD HL,(FILEX_BYTE_OFFSET)
         INC HL
-        LD DE,512
-        OR A:SBC HL,DE:JR Z,.tail_zero_ready
-        ADD HL,DE                       ; восстановить start=byte_offset+1
-        EX DE,HL
-        LD HL,512
-        OR A:SBC HL,DE
-        LD B,H:LD C,L
-        LD HL,@WDOS.LOBU
-        ADD HL,DE
-.zero_tail_loop:
-        LD (HL),0
-        INC HL
-        DEC BC
-        LD A,B:OR C:JR NZ,.zero_tail_loop
-; Claude - 2026-09-26 - begin
-        ; Признак ставится до записи: отказ записи, после которой сектор всё
-        ; же лёг, — тоже повод вернуть сектор из копии (прежде RET NZ оставлял
-        ; нули за новым концом при прежнем размере; аудит Codex).
-        LD A,1:LD (FILEX_TAIL_ZEROED),A
-        CALL FILEX_REPOSITION_CURRENT
-        LD HL,@WDOS.LOBU
-        CALL FILEX_WRITE_ONE
-        JP NZ,.restore_tail_before_return
-; Claude - 2026-09-26 - end
-.tail_zero_ready:
+        LD (FILEX_TAIL_START),HL                ; первый байт за новым концом
+; Claude - 2026-10-10 - end
         ; Сохранить прежнюю ссылку хвоста до публикации нового размера.
         XOR A:LD (@WDOS.ABT),A
         LD HL,(FILEX_KEEP_CLUSTER)
@@ -979,7 +1299,7 @@ FILEX_SHRINK_TO_TARGET:
 .entry_commit:
         ; Дисковые чтения затёрли LOBU: перечитать и повторно сверить ENTRY.
         CALL FILEX_LOAD_CONTEXT
-        JP NZ,.restore_tail_before_return
+        RET NZ
         LD HL,(FILEX_TARGET_SIZE)
         LD DE,(FILEX_TARGET_SIZE+2)
         LD (FILEX_CONTEXT+FILEX_CONTEXT_ENTRY+28),HL
@@ -1001,12 +1321,13 @@ FILEX_SHRINK_TO_TARGET:
         ; неотсоединённом хвосте цепочки, а при размере 0 — цепочка без
         ; ссылок (аудит, А.5). Теперь сектор перечитывается: на диске новая
         ; ENTRY — усечение доводится как обычно; прежняя или сектор не
-        ; читается — возврат хвоста сектора, MEDIA.
+        ; читается — MEDIA (Claude, 2026-10-10: контекст FENTRY/APPEND снят
+        ; уже отказом записи, а легшая ENTRY берёт его заново — импорт).
         JR Z,.entry_committed
         LD (FILEX_SAVED_STATUS),A
         CALL FILEX_VERIFY_CONTEXT
         LD A,(FILEX_SAVED_STATUS)
-        JP NZ,.restore_tail_before_return
+        JR NZ,.failed
         CALL FILEX_COMMIT_CONTEXT_DONE
 .entry_committed:
 ; Claude - 2026-09-26 - end
@@ -1042,46 +1363,64 @@ FILEX_SHRINK_TO_TARGET:
         LD A,(@WDOS.ABT):OR A:JR NZ,.committed_cleanup
         CALL #4030
         JR NZ,.committed_cleanup
+; Claude - 2026-10-10 - begin
 .success:
-        XOR A
-        RET
-
-.restore_tail_before_return:
-        LD (FILEX_SAVED_STATUS),A
-        LD A,(FILEX_TAIL_ZEROED):OR A:JR Z,.return_saved
-        LD HL,FILEX_SECTOR_BACKUP
-        LD DE,@WDOS.LOBU
-        LD BC,512
-        LDIR
-        LD HL,(FILEX_TAIL_LBA)
-        LD DE,(FILEX_TAIL_LBA+2)
-        CALL @WDOS.PROZ
-        LD HL,@WDOS.LOBU
-        CALL FILEX_WRITE_ONE
-        JR NZ,.rollback_error
-.return_saved:
-        LD A,(FILEX_SAVED_STATUS)
-        OR A
-        RET
-.rollback_error:
-        LD A,FILEX_STATUS_ROLLBACK
-        OR A
-        RET
+        CALL .zero_tail
+        RET Z
+        JR .cleanup_status
+; Claude - 2026-10-10 - end
 ; Claude - 2026-09-26 - begin
-; Отказ чтения FAT или испорченная ссылка хвоста — уже после обнуления хвоста
-; сектора (если оно было): прежде RET оставлял нули за новым концом при
-; прежнем размере. Теперь выход — через возврат сектора из копии.
+; Отказ чтения FAT или испорченная ссылка хвоста — до публикации: на диске
+; ничего не менялось (Claude, 2026-10-10: обнуления до публикации больше нет).
 .fat_lookup_failed:
         LD A,(@WDOS.ABT):OR A
-        LD A,FILEX_STATUS_MEDIA:JR NZ,.restore_tail_before_return
+        LD A,FILEX_STATUS_MEDIA:RET NZ
 .fat_error:
         LD A,FILEX_STATUS_FAT
-        JR .restore_tail_before_return
 ; Claude - 2026-09-26 - end
+.failed:
+        OR A
+        RET
 .committed_cleanup:
+; Claude - 2026-10-10 - begin
+        CALL .zero_tail                         ; хвост сектора — и здесь
+.cleanup_status:
+; Claude - 2026-10-10 - end
         LD A,FILEX_STATUS_COMMITTED_CLEANUP
         OR A
         RET
+; Claude - 2026-10-10 - begin
+; Обнулить хвост последнего сохраняемого сектора с FILEX_TAIL_START (512 и
+; больше — хвоста нет): прочитать сектор FILEX_TAIL_LBA, обнулить, записать.
+; Выход: Z — обнулён или нечего; NZ — отказ чтения или записи.
+.zero_tail:
+        LD HL,(FILEX_TAIL_START)
+        LD A,H:CP 2:JR NC,.no_tail
+        PUSH HL
+        CALL .tail_position
+        LD HL,@WDOS.LOBU
+        CALL FILEX_READ_ONE
+        POP DE                                  ; начало хвоста
+        RET NZ
+        LD HL,512:OR A:SBC HL,DE
+        LD B,H:LD C,L                           ; длина хвоста, не 0
+        LD HL,@WDOS.LOBU:ADD HL,DE
+.zero_loop:
+        LD (HL),0
+        INC HL
+        DEC BC
+        LD A,B:OR C:JR NZ,.zero_loop
+        CALL .tail_position
+        LD HL,@WDOS.LOBU
+        JP FILEX_WRITE_ONE
+.no_tail:
+        XOR A
+        RET
+.tail_position:
+        LD HL,(FILEX_TAIL_LBA)
+        LD DE,(FILEX_TAIL_LBA+2)
+        JP @WDOS.PROZ
+; Claude - 2026-10-10 - end
 
 ; Перезаписать существующие байты и при необходимости продолжить файл. Вся
 ; часть за старым EOF проходит через APPEND, поэтому новый размер появляется
@@ -1166,9 +1505,7 @@ FILEX_WRITE_AT:
         CALL FILEX_ROLLBACK_WRITE_GAP
         JR NZ,.rollback_failed
         LD A,(FILEX_SAVED_STATUS)
-        PUSH AF
         CALL FILEX_CLEAR_RESULT
-        POP AF
         JP FILEX_FINISH
 .rollback_failed:
         CALL FILEX_CLEAR_RESULT
@@ -1248,13 +1585,15 @@ FILEX_WRITE_AT:
         LD A,FILEX_STATUS_BAD_LENGTH
         JP FILEX_FINISH
 
+; Claude - 2026-10-10 - begin
+; AF сохраняется: прежде XOR A затирал код отказа, и WRITE_AT за концом файла
+; при отказе роста (MEDIA, ROLLBACK) отвечал OK (из драйвера FAT32, R5-1).
 FILEX_CLEAR_RESULT:
-        XOR A
-        LD (FILEX_RESULT+0),A
-        LD (FILEX_RESULT+1),A
-        LD (FILEX_RESULT+2),A
-        LD (FILEX_RESULT+3),A
+        LD HL,0
+        LD (FILEX_RESULT),HL
+        LD (FILEX_RESULT+2),HL
         RET
+; Claude - 2026-10-10 - end
 
 FILEX_APPEND_REMAINING:
         LD HL,(FILEX_BUFFER_POINTER)
@@ -1664,8 +2003,17 @@ FILEX_MOVE_CREATE:
         ; отказ — на цепочке оставались обе ссылки (аудит Codex). Откат
         ; попытается удалить её по имени: до MOVE назначения с этим именем не
         ; было (MOVE_WORKER).
-        JR NZ,.rollback_new
 ; Claude - 2026-09-25 - end
+; Claude - 2026-10-10 - begin
+        ; Откат — только после отказа носителя: отказ без него (нет места,
+        ; имя, занято) — до любой записи, откатывать нечего (драйвер, R10-3).
+        JR Z,.created
+        CP FILEX_STATUS_MEDIA
+        JR Z,.rollback_new
+        OR A
+        RET
+.created:
+; Claude - 2026-10-10 - end
         CALL FILEX_FIND_AND_CAPTURE_DESTINATION
         JR NZ,.rollback_new
         CALL FILEX_COPY_DEST_TO_CURRENT
@@ -1679,6 +2027,15 @@ FILEX_MOVE_CREATE:
         CALL FILEX_DELETE_SOURCE_ENTRY
         JR Z,.committed
         CP FILEX_STATUS_COMMITTED_CLEANUP:JR Z,.committed_cleanup
+; Claude - 2026-10-10 - begin
+        ; Удаление источника не прошло или не подтвердилось — довести перенос
+        ; по месту (ENTRY_KILL_AT); прежде сразу откат, и отказ уже в откате
+        ; оставлял на цепочке две живые ссылки (драйвер, R8).
+        LD (FILEX_SAVED_STATUS),A
+        CALL FILEX_KILL_SOURCE
+        JR Z,.committed_cleanup
+        LD A,(FILEX_SAVED_STATUS)
+; Claude - 2026-10-10 - end
 ; Claude - 2026-09-25 - begin
 ; Откат: сначала вернуть «..» (без изменения — ничего не пишет), и только
 ; если это удалось — удалить новую ссылку. Прежде результат возврата «..»
@@ -1689,16 +2046,23 @@ FILEX_MOVE_CREATE:
 ; ссылок осталось (обычно две — из прежнего родителя и из нового; но если
 ; удаление источника легло, а его сектор не перечитался, — одна или ни
 ; одной) и куда смотрит «..», по статусу не узнать.
+; Claude - 2026-10-10: каждый шаг отката — до трёх попыток (FILEX_RETRY3), а
+; выход отката — без контекста FENTRY/APPEND: он мог быть уже взят по новой
+; ссылке, и следующий FILEX без FENTRY освобождал или переписывал цепочку
+; живого назначения (драйвер, R8, R9-1).
 .rollback_new:
         LD (FILEX_SAVED_STATUS),A
-        CALL FILEX_RESTORE_DOTDOT
+        LD HL,FILEX_RESTORE_DOTDOT
+        CALL FILEX_RETRY3
         JR NZ,.rollback_error
         CALL FILEX_DELETE_DESTINATION_LINK
         JR NZ,.rollback_error
-        LD A,(FILEX_SAVED_STATUS):OR A:RET
+        LD A,(FILEX_SAVED_STATUS):OR A
+        JP FILEX_CONTEXT_FORGET
 ; Claude - 2026-09-25 - end
 .rollback_error:
-        LD A,FILEX_STATUS_ROLLBACK:OR A:RET
+        LD A,FILEX_STATUS_ROLLBACK:OR A
+        JP FILEX_CONTEXT_FORGET
 .committed:
         CALL FILEX_IMPORT_CONTEXT
         JP FILEX_MOVE_SUCCESS
@@ -1732,9 +2096,20 @@ FILEX_CREATE_DESTINATION_LINK:
         LD B,A
         LD A,(@WDOS.ABT):OR A
         LD A,FILEX_STATUS_MEDIA:RET NZ
-        LD A,B:CP 16
-        LD A,FILEX_STATUS_NO_SPACE:RET Z
-        LD A,FILEX_STATUS_INTERNAL:OR A:RET
+; Claude - 2026-10-10 - begin
+        ; Прежде NO_SPACE уходил с Z: MOVE_CREATE шёл дальше и отвечал
+        ; NOT_FOUND; код 1 (имя не годится) давал INTERNAL (драйвер, R10-3).
+        LD A,B
+        LD C,FILEX_STATUS_NO_SPACE
+        CP 16:JR Z,.status
+        LD C,FILEX_STATUS_INVALID_NAME
+        CP 1:JR Z,.status
+        LD C,FILEX_STATUS_INTERNAL
+.status:
+        LD A,C
+        OR A
+        RET
+; Claude - 2026-10-10 - end
 
 FILEX_FIND_AND_CAPTURE_DESTINATION:
         CALL FILEX_SET_DEST_DIRECTORY
@@ -1812,19 +2187,137 @@ FILEX_DELETE_SOURCE_ENTRY:
 .ambiguous_commit:
         LD A,FILEX_STATUS_COMMITTED_CLEANUP:OR A:RET
 
+; Claude - 2026-10-10 - begin
+; Удалить новую ссылку назначения (откат MOVE с созданием): найти её (поиск,
+; не прочитавший каталог, — до трёх попыток; место — в FILEX_DEST_CONTEXT),
+; удалить по имени с длинным именем и убедиться по месту (ENTRY_KILL_AT).
+; Прежде — одна попытка по имени: стерев длинное имя и не записав короткую,
+; она оставляла живую вторую ссылку. Не нашлась без отказа чтения — ссылки
+; нет: Z (драйвер, R8).
 FILEX_DELETE_DESTINATION_LINK:
+        LD A,3
+.find:
+        LD (FILEX_RETRY_LEFT),A
+        CALL FILEX_FIND_AND_CAPTURE_DESTINATION
+        JR Z,.found
+        CP FILEX_STATUS_NOT_FOUND
+        JR NZ,.again
+        XOR A
+        RET
+.again:
+        LD A,(FILEX_RETRY_LEFT):DEC A
+        JR NZ,.find
+        LD A,FILEX_STATUS_MEDIA:OR A
+        RET
+.found:
         CALL FILEX_SET_DEST_DIRECTORY
         LD HL,(FILEX_DEST_QUERY)
         XOR A:LD (@WDOS.ABT),A
         CALL @WDOS.SRHDRN
-        JR Z,.gone
+        JR Z,.verify
         FILEX_CALL_EXTENSION ID_DELETE_ENTRY_WITH_LFN
+.verify:
+        LD HL,(FILEX_DEST_CONTEXT+FILEX_CONTEXT_LBA)
+        LD DE,(FILEX_DEST_CONTEXT+FILEX_CONTEXT_LBA+2)
+        LD BC,(FILEX_DEST_CONTEXT+FILEX_CONTEXT_OFFSET)
+        CALL FILEX_ENTRY_KILL_AT
+        RET Z
+        LD A,FILEX_STATUS_MEDIA:OR A
         RET
-.gone:
-        LD A,(@WDOS.ABT):OR A
-        LD A,FILEX_STATUS_MEDIA:RET NZ
-        XOR A
+
+; Довести перенос, когда удаление источника по имени не прошло или не
+; подтвердилось: его короткая запись — #E5 по месту (ENTRY_KILL_AT).
+FILEX_KILL_SOURCE:
+        LD HL,(FILEX_SOURCE_CONTEXT+FILEX_CONTEXT_LBA)
+        LD DE,(FILEX_SOURCE_CONTEXT+FILEX_CONTEXT_LBA+2)
+        LD BC,(FILEX_SOURCE_CONTEXT+FILEX_CONTEXT_OFFSET)
+        JP FILEX_ENTRY_KILL_AT
+
+; Шаг отката HL — до трёх попыток, пока не вернёт Z (шаги перечитывают
+; носитель и повторяемы). Прежде шаг делался один раз, и второй отказ подряд
+; оставлял на цепочке две живые записи или «..» на нового родителя. Выход —
+; флаги и A последней попытки.
+FILEX_RETRY3:
+        LD (FILEX_RETRY_STEP),HL
+        LD A,3
+.try:
+        LD (FILEX_RETRY_LEFT),A
+        LD HL,.back
+        PUSH HL
+        LD HL,(FILEX_RETRY_STEP)
+        JP (HL)
+.back:
+        RET Z
+        LD B,A
+        LD A,(FILEX_RETRY_LEFT):DEC A
+        JR NZ,.try
+        LD A,B:OR A
         RET
+
+; Короткую запись в секторе DE:HL по смещению BC (0..511, кратно 32) —
+; удалённой (#E5) вместе с записями её длинного имени в том же секторе (они
+; идут подряд перед ней) — и убедиться: до трёх попыток «прочитать — пометить
+; — записать», затем перечитать. Удаление по имени для повтора не годится:
+; стерев длинное имя и не записав короткую, при повторе оно её уже не находит.
+; Выход: Z — на носителе #E5; NZ — не удалось. Разрушает AF, BC, DE, HL и LOBU.
+FILEX_ENTRY_KILL_AT:
+        LD A,B:CP 2:JR NC,.fail
+        LD A,C:AND #1F:JR NZ,.fail
+        LD (FILEX_KILL_LBA),HL
+        LD (FILEX_KILL_LBA+2),DE
+        LD (FILEX_KILL_OFFSET),BC
+        LD A,4                                  ; три записи и проверка
+.try:
+        LD (FILEX_KILL_LEFT),A
+        CALL .position
+        LD HL,@WDOS.LOBU
+        CALL FILEX_READ_ONE
+        JR NZ,.next                             ; не прочитан — ещё раз
+        LD HL,@WDOS.LOBU,DE,(FILEX_KILL_OFFSET)
+        ADD HL,DE
+        LD A,(HL):CP #E5:RET Z                  ; на носителе удалена
+        LD A,(FILEX_KILL_LEFT):DEC A:JR Z,.fail ; записей больше не будет
+        LD (HL),#E5
+        LD BC,(FILEX_KILL_OFFSET)
+.lfn:                                           ; её длинное имя в этом секторе
+        LD A,B:OR C:JR Z,.write
+        LD A,C:SUB 32:LD C,A
+        LD A,B:SBC A,0:LD B,A
+        LD HL,@WDOS.LOBU:ADD HL,BC
+        LD A,(HL):CP #E5:JR Z,.write
+        PUSH HL
+        LD DE,11:ADD HL,DE
+        LD A,(HL)
+        POP HL
+        CP #0F:JR NZ,.write
+        LD (HL),#E5
+        JR .lfn
+.write:
+        CALL .position
+        LD HL,@WDOS.LOBU
+        CALL FILEX_WRITE_ONE
+        RET Z                                   ; легла
+.next:
+        LD A,(FILEX_KILL_LEFT):DEC A
+        JR NZ,.try
+.fail:
+        OR 1
+        RET
+.position:
+        LD HL,(FILEX_KILL_LBA),DE,(FILEX_KILL_LBA+2)
+        JP @WDOS.PROZ
+
+; Снять контекст FENTRY/APPEND (мост, A=1): после отката или неизвестного
+; исхода записи он не описывает носитель, и следующий FILEX или APPEND без
+; FENTRY писал бы по чужой цепочке (драйвер, R4-7, R9-1). AF сохраняется.
+FILEX_CONTEXT_FORGET:
+        PUSH AF
+        LD A,1
+        FILEX_CALL_EXTENSION ID_FILEX_CONTEXT_BRIDGE
+        XOR A:LD (FILEX_CHAIN_CACHE_VALID),A
+        POP AF
+        RET
+; Claude - 2026-10-10 - end
 
 ; Replace меняет найденную SFN назначения на месте. Источник остаётся целым
 ; до подтверждённой записи назначения и обновления «..» каталога.
@@ -1837,7 +2330,33 @@ FILEX_MOVE_REPLACE:
         LD A,B:OR A:JR Z,.replace_ready
         CALL FILEX_DIRECTORY_EMPTY_DESTINATION
         RET NZ
+; Claude - 2026-10-10 - begin
+        ; Заменяемый каталог — текущий (LSTCAT до MOVE): замена освободила бы
+        ; его цепочку, а текущим остался бы освобождённый кластер, и создание
+        ; писало бы записи в файл, которому он потом достанется (драйвер, R10-1).
+        LD HL,(FILEX_DEST_CONTEXT+FILEX_CONTEXT_ENTRY+26)
+        LD DE,(FILEX_SAVED_ACTIVE_DIR)
+        OR A:SBC HL,DE:JR NZ,.replace_ready
+        LD HL,(FILEX_DEST_CONTEXT+FILEX_CONTEXT_ENTRY+20)
+        LD A,H:AND #0F:LD H,A
+        LD DE,(FILEX_SAVED_ACTIVE_DIR+2)
+        LD A,D:AND #0F:LD D,A
+        OR A:SBC HL,DE
+        LD A,FILEX_STATUS_INVALID_MOVE
+        JR NZ,.replace_ready
+        OR A
+        RET
+; Claude - 2026-10-10 - end
 .replace_ready:
+; Claude - 2026-10-10 - begin
+        ; Цепочки источника и заменяемого назначения не пересекаются: прежде
+        ; сравнивался только первый кластер, и при общем хвосте замена
+        ; освобождала его вместе со старым назначением — из-под живого
+        ; источника (драйвер, R2-7).
+        CALL FILEX_CHAINS_DISJOINT
+        LD A,FILEX_STATUS_FAT
+        RET NZ
+; Claude - 2026-10-10 - end
         CALL FILEX_SAVE_OLD_DEST_CLUSTER
         CALL FILEX_COPY_DEST_TO_CURRENT
         CALL FILEX_VERIFY_CONTEXT
@@ -1857,19 +2376,33 @@ FILEX_MOVE_REPLACE:
         CALL FILEX_DELETE_SOURCE_ENTRY
         JR Z,.committed
         CP FILEX_STATUS_COMMITTED_CLEANUP:JR Z,.committed_cleanup
+; Claude - 2026-10-10 - begin
+        LD (FILEX_SAVED_STATUS),A
+        CALL FILEX_KILL_SOURCE                  ; довести перенос (как у CREATE)
+        JR Z,.committed_cleanup
+        LD A,(FILEX_SAVED_STATUS)
+; Claude - 2026-10-10 - end
 ; Claude - 2026-09-25 - begin
 ; Как у MOVE_CREATE: «..» возвращается и после отказа его собственной записи
 ; (признак ставится до неё), а не вернулся — запись назначения не трогаем.
+; Claude - 2026-10-10: каждый шаг — до трёх попыток; выход отката — без
+; контекста FENTRY/APPEND: запись отката взяла бы в него прежнее назначение,
+; которого никто не выбирал, и следующий FILEX без FENTRY переписывал или
+; усекал его (драйвер, R4-7).
 .restore_destination:
         LD (FILEX_SAVED_STATUS),A
-        CALL FILEX_RESTORE_DOTDOT
+        LD HL,FILEX_RESTORE_DOTDOT
+        CALL FILEX_RETRY3
         JR NZ,.rollback_error
-        CALL FILEX_RESTORE_DESTINATION_ENTRY
+        LD HL,FILEX_RESTORE_DESTINATION_ENTRY
+        CALL FILEX_RETRY3
         JR NZ,.rollback_error
-        LD A,(FILEX_SAVED_STATUS):OR A:RET
+        LD A,(FILEX_SAVED_STATUS):OR A
+        JP FILEX_CONTEXT_FORGET
 ; Claude - 2026-09-25 - end
 .rollback_error:
-        LD A,FILEX_STATUS_ROLLBACK:OR A:RET
+        LD A,FILEX_STATUS_ROLLBACK:OR A
+        JP FILEX_CONTEXT_FORGET
 .committed:
         CALL FILEX_IMPORT_CONTEXT
         CALL FILEX_MOVE_SUCCESS
@@ -1890,22 +2423,25 @@ FILEX_SAVE_OLD_DEST_CLUSTER:
         LD (FILEX_OLD_DEST_CLUSTER+2),DE
         RET
 
+; Claude - 2026-10-10 - begin
+; Вернуть прежнюю запись назначения. На месте прежняя (новая не легла или
+; возврат уже лёг) — Z; новая — пишется прежняя; не читается или там что-то
+; третье — NZ. Повторяема (FILEX_RETRY3): обе ожидаемые записи каждый раз
+; строятся заново — прежде вторая попытка сравнивала уже с прежней и не
+; узнавала новую (драйвер, R8).
 FILEX_RESTORE_DESTINATION_ENTRY:
-        ; FILEX_CONTEXT описывает ожидаемую новую запись на диске.
-        CALL FILEX_VERIFY_CONTEXT
-; Claude - 2026-09-26 - begin
-        ; На диске не новая запись: после отказа её собственной записи это
-        ; может быть прежняя (запись не легла) — тогда возвращать нечего, Z.
-        ; Не читается или там что-то третье — NZ: откат не подтверждён.
-        JR Z,.restore
-        CP FILEX_STATUS_ENTRY_CHANGED:RET NZ
         CALL .old_to_context
-        JP FILEX_VERIFY_CONTEXT
-.restore:
+        CALL FILEX_VERIFY_CONTEXT
+        RET Z                                   ; на месте прежняя
+        CP FILEX_STATUS_ENTRY_CHANGED:RET NZ    ; не читается
+        CALL FILEX_COPY_DEST_TO_CURRENT
+        CALL FILEX_PATCH_CURRENT_FROM_SOURCE
+        CALL FILEX_VERIFY_CONTEXT
+        RET NZ                                  ; на месте не новая
         CALL .old_to_context
         JP FILEX_COMMIT_CONTEXT_ENTRY
 .old_to_context:
-; Claude - 2026-09-26 - end
+; Claude - 2026-10-10 - end
         LD HL,FILEX_DEST_CONTEXT+FILEX_CONTEXT_ENTRY
         LD DE,FILEX_CONTEXT+FILEX_CONTEXT_ENTRY
         LD BC,32
@@ -1943,6 +2479,17 @@ FILEX_DIRECTORY_EMPTY_DESTINATION:
         LD HL,(FILEX_DEST_CONTEXT+FILEX_CONTEXT_ENTRY+26)
         LD DE,(FILEX_DEST_CONTEXT+FILEX_CONTEXT_ENTRY+20)
         LD A,D:AND #0F:LD D,A
+; Claude - 2026-10-10 - begin
+        ; Цепочка каталога назначения конечна, в томе и без кластеров корня
+        ; (FILEX_CHAIN_CHECK): обход ниже прежде вис на замкнутой цепочке без
+        ; нулевой записи (драйвер, R7).
+        PUSH HL
+        PUSH DE
+        CALL FILEX_CHAIN_CHECK
+        POP DE
+        POP HL
+        JR NZ,.fat_error
+; Claude - 2026-10-10 - end
         CALL FILEX_CLASSIFY_LINK
         JR C,.fat_error
         JR Z,.fat_error
@@ -2337,14 +2884,18 @@ FILEX_GET_FS_INFO:
         LD (FILEX_FS_OUTPUT+FILEX_FS_O_TOTAL_CLUSTERS+2),DE
 
         ; FSInfo с плохими сигнатурами не ломает остальную информацию о томе.
-        LD HL,(@WDOS.FSINF)
-        LD DE,(@WDOS.FSINF+2)
-        CALL @WDOS.XPOZI
+; Claude - 2026-10-10 - begin
+        ; Сектор FSInfo — только внутри резервной области (не 0, меньше
+        ; BREZS): прежде испорченный BPB_FSInfo вёл чтение в чужой сектор, и
+        ; его байты с подписями выдавались за подсказки (драйвер, R6-4).
+        CALL FILEX_FSINFO_POSITION
+        JR C,.refresh
+; Claude - 2026-10-10 - end
         LD HL,@WDOS.LOBU
         CALL FILEX_READ_ONE
         JP NZ,FILEX_FINISH
         CALL FILEX_VALIDATE_FSINFO
-        JR NZ,.copy_output
+        JR NZ,.refresh
         LD HL,(@WDOS.LOBU+488)
         LD DE,(@WDOS.LOBU+490)
         LD A,D:AND E:AND H:AND L:CP #FF:JR Z,.next_free
@@ -2370,8 +2921,30 @@ FILEX_GET_FS_INFO:
 .next_free:
         LD HL,(@WDOS.LOBU+492)
         LD DE,(@WDOS.LOBU+494)
+; Claude - 2026-10-10 - begin
+        ; Подсказка — только кластер данных этого тома (прежде отдавалась
+        ; как есть, драйвер, R6-4); иначе — #FFFFFFFF.
+        CALL FILEX_VALIDATE_FREE_HINT
+        JR NZ,.refresh
+; Claude - 2026-10-10 - end
         LD (FILEX_FS_OUTPUT+FILEX_FS_O_NEXT_FREE),HL
         LD (FILEX_FS_OUTPUT+FILEX_FS_O_NEXT_FREE+2),DE
+; Claude - 2026-10-10 - begin
+; FILEX_FLAG_REFRESH_FREE прежде принимался и ничего не менял (драйвер, R6-3),
+; а RFRH_SAFE пишет в FSInfo #FFFFFFFF, и после любой записи WC число
+; свободных кластеров было неизвестно. Теперь — пересчёт по FAT.
+.refresh:
+        LD A,(IY+FILEX_P_FLAGS):OR A:JR Z,.copy_output
+        CALL FILEX_COUNT_FREE
+        JP NZ,FILEX_FINISH
+        LD HL,(FILEX_FS_FREE_TEMP)
+        LD DE,(FILEX_FS_FREE_TEMP+2)
+        LD (FILEX_FS_OUTPUT+FILEX_FS_O_FREE_CLUSTERS),HL
+        LD (FILEX_FS_OUTPUT+FILEX_FS_O_FREE_CLUSTERS+2),DE
+        LD A,(FILEX_FS_OUTPUT+FILEX_FS_O_FLAGS)
+        OR FILEX_FS_FLAG_FREE_KNOWN
+        LD (FILEX_FS_OUTPUT+FILEX_FS_O_FLAGS),A
+; Claude - 2026-10-10 - end
 
 .copy_output:
         LD HL,FILEX_FS_OUTPUT
@@ -2398,6 +2971,10 @@ FILEX_VALIDATE_FSINFO:
         OR A:SBC HL,DE:JR NZ,.bad
         LD HL,(@WDOS.LOBU+486),DE,#6141
         OR A:SBC HL,DE:JR NZ,.bad
+; Claude - 2026-10-10 - begin
+        LD HL,(@WDOS.LOBU+508)                  ; нули перед #55AA (драйвер, R6-4)
+        LD A,H:OR L:JR NZ,.bad
+; Claude - 2026-10-10 - end
         LD HL,(@WDOS.LOBU+510),DE,#AA55
         OR A:SBC HL,DE:JR NZ,.bad
         XOR A
@@ -2405,6 +2982,125 @@ FILEX_VALIDATE_FSINFO:
 .bad:
         LD A,1:OR A
         RET
+
+; Claude - 2026-10-10 - begin
+; Позиционировать на сектор FSInfo, если он внутри резервной области: не 0 и
+; меньше BREZS (номер — относительно начала тома). Выход: CF=0 —
+; позиционировано; CF=1 — сектор вне резерва.
+FILEX_FSINFO_POSITION:
+        LD HL,(@WDOS.FSINF),DE,(@WDOS.FSINF+2)
+        PUSH DE,HL
+        LD BC,(@WDOS.ADDTOP):OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.ADDTOP+2):SBC HL,BC
+        LD A,H:OR L:JR NZ,.invalid              ; DE — номер в томе
+        LD A,D:OR E:JR Z,.invalid
+        LD HL,(@WDOS.BREZS):OR A:SBC HL,DE
+        JR C,.invalid
+        JR Z,.invalid
+        POP HL,DE
+        CALL @WDOS.XPOZI
+        OR A                                    ; CF=0
+        RET
+.invalid:
+        POP HL,DE
+        SCF
+        RET
+
+; Z — DE:HL годится подсказкой следующего свободного: кластер данных тома
+; (2 ≤ n < граница) и его сектор FAT в пределах FAT. HL, DE сохраняются.
+FILEX_VALIDATE_FREE_HINT:
+        LD (FILEX_FS_HINT),HL
+        LD (FILEX_FS_HINT+2),DE
+        LD A,D:OR E:OR H:JR NZ,.minimum_ok
+        LD A,L:CP 2:JR C,.bad
+.minimum_ok:
+        FILEX_CALL_EXTENSION ID_GET_DATA_CLUSTER_LIMIT   ; DE:HL — граница
+        LD B,H:LD C,L
+        LD HL,(FILEX_FS_HINT):OR A:SBC HL,BC
+        LD HL,(FILEX_FS_HINT+2):SBC HL,DE      ; CF — подсказка ниже границы
+        JR NC,.bad
+        LD HL,(FILEX_FS_HINT)
+        LD DE,(FILEX_FS_HINT+2)
+        CALL @WDOS.DEL128                       ; DE:HL — сектор FAT
+        FILEX_CALL_EXTENSION ID_FAT_SECTOR_IN_RANGE      ; CF — внутри FAT
+        JR NC,.bad
+        LD HL,(FILEX_FS_HINT)
+        LD DE,(FILEX_FS_HINT+2)
+        XOR A
+        RET
+.bad:
+        LD HL,(FILEX_FS_HINT)
+        LD DE,(FILEX_FS_HINT+2)
+        LD A,1:OR A
+        RET
+
+; Число свободных кластеров по FAT (FILEX_FLAG_REFRESH_FREE): нули среди
+; записей 2..граница−1 (старшая тетрада не считается). Выход: Z —
+; FILEX_FS_FREE_TEMP; NZ, A — MEDIA или FAT (граница тома не задана).
+FILEX_COUNT_FREE:
+        LD HL,0
+        LD (FILEX_FS_FREE_TEMP),HL
+        LD (FILEX_FS_FREE_TEMP+2),HL
+        LD (FILEX_FAT_SECTOR),HL
+        LD (FILEX_FAT_SECTOR+2),HL
+        FILEX_CALL_EXTENSION ID_GET_DATA_CLUSTER_LIMIT
+        LD (FILEX_FAT_END),HL
+        LD (FILEX_FAT_END+2),DE
+        LD A,D:OR E:OR H:JR NZ,.sector
+        LD A,L:CP 3:JR NC,.sector
+        LD A,FILEX_STATUS_FAT:OR A              ; кластеров данных нет
+        RET
+.sector:
+        LD HL,(FILEX_FAT_END)
+        LD DE,(FILEX_FAT_END+2)
+        LD A,D:OR E:OR H:OR L:RET Z             ; все записи пройдены
+        LD HL,(FILEX_FAT_SECTOR)
+        LD DE,(FILEX_FAT_SECTOR+2)
+        FILEX_CALL_EXTENSION ID_POSITION_FAT_READ
+        LD HL,@WDOS.LOBU
+        CALL FILEX_READ_ONE
+        RET NZ
+        LD HL,(FILEX_FAT_END):LD BC,128:OR A:SBC HL,BC
+        EX DE,HL
+        LD HL,(FILEX_FAT_END+2):LD BC,0:SBC HL,BC
+        LD B,128
+        JR NC,.left_ready
+        LD A,(FILEX_FAT_END):LD B,A             ; последний сектор — неполный
+        LD HL,0:LD D,H:LD E,L
+.left_ready:
+        LD (FILEX_FAT_END),DE
+        LD (FILEX_FAT_END+2),HL
+        LD HL,@WDOS.LOBU
+        LD A,(FILEX_FAT_SECTOR+1):LD C,A
+        LD A,(FILEX_FAT_SECTOR):OR C
+        LD C,A
+        LD A,(FILEX_FAT_SECTOR+2):OR C
+        LD C,A
+        LD A,(FILEX_FAT_SECTOR+3):OR C
+        JR NZ,.scan
+        LD L,8:DEC B:DEC B                      ; записи 0 и 1 — не кластеры
+.scan:
+        LD A,(HL):INC HL
+        OR (HL):INC HL
+        OR (HL):INC HL
+        LD C,A
+        LD A,(HL):INC HL
+        AND #0F:OR C
+        JR NZ,.used
+        PUSH HL
+        LD HL,(FILEX_FS_FREE_TEMP):INC HL:LD (FILEX_FS_FREE_TEMP),HL
+        LD A,H:OR L
+        JR NZ,.counted
+        LD HL,(FILEX_FS_FREE_TEMP+2):INC HL:LD (FILEX_FS_FREE_TEMP+2),HL
+.counted:
+        POP HL
+.used:
+        DJNZ .scan
+        LD HL,FILEX_FAT_SECTOR
+        CALL @WDOS.INC4b
+        JP .sector
+; Claude - 2026-10-10 - end
 
 ; Установить поддерживаемые FAT timestamps и атрибуты последнего FENTRY.
 FILEX_SET_METADATA:
@@ -2674,9 +3370,32 @@ FILEX_KEEP_CLUSTER:         DS 4
 FILEX_TAIL_HEAD:            DS 4
 FILEX_TAIL_LBA:             DS 4
 FILEX_TAIL_PRESENT:         DS 1
-FILEX_TAIL_ZEROED:          DS 1
 FILEX_SAVED_STATUS:         DS 1
-FILEX_SECTOR_BACKUP:        DS 512
+; Claude - 2026-10-10 - begin
+FILEX_TAIL_START:           DS 2                ; первый байт хвоста сектора; 512 — нет
+FILEX_RETRY_LEFT:           DS 1
+FILEX_RETRY_STEP:           DS 2
+FILEX_KILL_LBA:             DS 4
+FILEX_KILL_OFFSET:          DS 2
+FILEX_KILL_LEFT:            DS 1
+FILEX_CHAIN_READ:           DS 1
+FILEX_CHAIN_LAST:           DS 4
+FILEX_CHAIN_OTHER:          DS 4
+FILEX_CHAIN_TORTOISE:       DS 4
+FILEX_CHAIN_POWER:          DS 4                ; FILEX_CHAIN_LAM — сразу за ним
+FILEX_CHAIN_LAM:            DS 4
+FILEX_CHAIN_CACHE_VALID:    DS 1
+FILEX_CHAIN_CACHE:          DS FILEX_CONTEXT_SIZE
+; Claude - 2026-10-10 - end
+; Claude - 2026-10-11 - begin
+FILEX_POS_KEY_SIZE          EQU 14              ; поколение FAT, LBA и смещение записи, первый кластер
+FILEX_POS_VALID:            DS 1
+FILEX_POS_NOW:              DS FILEX_POS_KEY_SIZE
+FILEX_POS_KEY:              DS FILEX_POS_KEY_SIZE
+FILEX_POS_TARGET:           DS 4
+FILEX_POS_INDEX:            DS 4
+FILEX_POS_CLUSTER:          DS 4
+; Claude - 2026-10-11 - end
 FILEX_FS_DESTINATION:       DS 2
 FILEX_FS_FAT_COUNT:         DS 1
 FILEX_FS_FAT_SECTORS:       DS 4
@@ -2685,6 +3404,7 @@ FILEX_FS_FAT_AREA:          DS 4
 FILEX_FS_DATA_SECTORS:      DS 4
 FILEX_FS_TOTAL_CLUSTERS:    DS 4
 FILEX_FS_FREE_TEMP:         DS 4
+FILEX_FS_HINT:              DS 4                ; Claude - 2026-10-10
 FILEX_FS_OUTPUT:            DS FILEX_FS_SIZE
 FILEX_FAT_BUFFER:           DS 2
 FILEX_FAT_SECTOR:           DS 4

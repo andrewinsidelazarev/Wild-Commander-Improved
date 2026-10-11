@@ -43,6 +43,7 @@
 ; запрещены: страница #02 с кодом WC в это время не подключена.
 
         DEVICE ZXSPECTRUM128
+        INCLUDE "../../WMF_FORMAT.ASM"
 
 ; --- резидентные точки WC ---------------------------------------------------
 GATEWAY         EQU #70B2       ; L6011_241 — общий пролог запуска плагина
@@ -149,10 +150,6 @@ BARCH           EQU VARS+59     ; символ полосы прокрутки �
 MCUR            EQU VARS+60     ; строка курсора в окне, помнится между вызовами
 STREAM0         EQU VARS+61     ; поток в окне #0000 до загрузки .WMF
 ARRIVAL         EQU VARS+62     ; A на входе установщика: #07 — сразу при загрузке, #06 — AX_RUN
-MSWAP           EQU VARS+63     ; сортировка меню: был ли обмен за проход
-MPAIRS          EQU VARS+64     ; сортировка меню: пар соседних строк
-NAME_A          EQU VARS+96     ; сортировка меню: имя без ведущих пробелов,
-NAME_B          EQU VARS+128    ; заглавными, по 32 байта
 
 ; Сколько строк показывать в окне меню. По умолчанию — сколько влезает в
 ; текстовый экран (25, 30 или 36 строк), с запасом на рамку и строку клавиш.
@@ -278,7 +275,13 @@ INSTALL_IN_C000:
         LD DE,MENUBUILD
         LD B,MENUBUILD_LENGTH
         CALL COMPARE_VIEW
+        JR Z,.menu_known
+        LD HL,ORIGINAL_MENUBUILD_FULL           ; WC, понимающий полную таблицу
+        LD DE,MENUBUILD
+        LD B,MENUBUILD_LENGTH
+        CALL COMPARE_VIEW
         JR NZ,.done
+.menu_known:
         LD HL,ORIGINAL_MENUPICK
         LD DE,MENUPICK
         LD B,MENUPICK_LENGTH
@@ -333,6 +336,11 @@ ORIGINAL_MENUBUILD:
         DB #3A,#19,#7F                          ; LD A,(PHED+1)
         DB #FE,#C2                              ; CP #C2
         DB #DA,#A3,#99                          ; JP C,F1E
+; Тот же вход в WC, где полная таблица (PHED=#0000) не считается пустой.
+ORIGINAL_MENUBUILD_FULL:
+        DB #3A,#19,#7F                          ; LD A,(PHED+1)
+        DB #FE,#C0                              ; CP #C0
+        DB #CA,#A3,#99                          ; JP Z,F1E
 ORIGINAL_MENUPICK:
         DB #DD,#7E,#0C,#3D,#26,#00,#6F          ; LD A,(IX+12):DEC A:LD H,0:LD L,A
         DB #29,#29,#29,#29,#29,#29,#29,#29,#29  ; ADD HL,HL девять раз
@@ -817,6 +825,16 @@ LOAD_PLUGIN:
         LD B,1
         CALL LOAD512                            ; пропустить сектор заголовка
         JR C,LOAD_BROKEN
+        ; При регистрации #11 метаданные уже прочитаны ядром. При загрузке
+        ; по требованию поток снова в начале: пропустить их перед кодом.
+        LD A,(COPY+32)
+        CP WMF_DYNAMIC_VERSION
+        JR NZ,.code                     ; старое ядро не имеет WMF_SKIP
+        LD HL,COPY
+        LD DE,SECTOR
+        CALL WMF_SKIP
+        JR C,LOAD_BROKEN
+.code:
         CALL LOAD_BLOCKS
         JR C,LOAD_BROKEN
         CALL STREAM_BACK
@@ -1119,131 +1137,10 @@ MENU_ITEM_OK:
         CP #15
         RET
 
-; Меню — по алфавиту, как группы в WC Setup: без учёта регистра и ведущих
-; пробелов. Пузырёк по соседним строкам: имя в LIST (32 байта) и старший байт
-; записи в INDEX меняются вместе. Строк не больше 32.
-MENU_SORT:
-        LD HL,(COUNT)
-        LD B,5
-.rows:
-        SRL H
-        RR L
-        DJNZ .rows                              ; строк = длина / 32
-        LD A,L
-        CP 2
-        RET C
-        DEC A
-        LD (MPAIRS),A
-        PUSH IX
-.pass:
-        XOR A
-        LD (MSWAP),A
-        LD HL,LIST
-        LD IX,INDEX+1
-        LD A,(MPAIRS)
-        LD B,A
-.pair:
-        PUSH BC
-        PUSH HL
-        LD DE,32
-        ADD HL,DE
-        EX DE,HL                                ; DE — следующее имя
-        POP HL
-        CALL NAME_AFTER
-        JR NC,.keep
-        CALL SWAP_NAMES
-        LD A,(IX+0)
-        LD C,(IX+1)
-        LD (IX+0),C
-        LD (IX+1),A
-        LD A,1
-        LD (MSWAP),A
-.keep:
-        LD DE,32
-        ADD HL,DE
-        INC IX
-        POP BC
-        DJNZ .pair
-        LD A,(MSWAP)
-        OR A
-        JR NZ,.pass
-        POP IX
-        RET
-
-; CF=1 — имя HL идёт после имени DE. HL и DE сохраняются.
-NAME_AFTER:
-        PUSH HL
-        PUSH DE
-        PUSH DE
-        LD DE,NAME_A
-        CALL NAME_NORM
-        POP HL
-        LD DE,NAME_B
-        CALL NAME_NORM
-        LD HL,NAME_A
-        LD DE,NAME_B
-        LD B,32
-.compare:
-        LD A,(DE)
-        CP (HL)
-        JR NZ,.done                             ; CF=1 — байт HL больше
-        INC HL
-        INC DE
-        DJNZ .compare                           ; равны целиком: CF=0
-.done:
-        POP DE
-        POP HL
-        RET
-
-; Имя HL (32 байта) без ведущих пробелов, латиница заглавными, добитое
-; пробелами до 32 байт, — в DE.
-NAME_NORM:
-        LD B,32
-.lead:
-        LD A,(HL)
-        CP " "
-        JR NZ,.copy
-        INC HL
-        DJNZ .lead
-.copy:
-        LD C,32                                 ; B — сколько осталось в имени
-.byte:
-        LD A," "
-        INC B
-        DEC B
-        JR Z,.put                               ; имя кончилось — пробел
-        LD A,(HL)
-        INC HL
-        DEC B
-        CP "a"
-        JR C,.put
-        CP "z"+1
-        JR NC,.put
-        SUB #20
-.put:
-        LD (DE),A
-        INC DE
-        DEC C
-        JR NZ,.byte
-        RET
-
-; Обменять 32-байтовые имена HL и DE. HL и DE сохраняются.
-SWAP_NAMES:
-        PUSH HL
-        PUSH DE
-        LD B,32
-.swap:
-        LD A,(DE)
-        LD C,(HL)
-        LD (HL),A
-        LD A,C
-        LD (DE),A
-        INC HL
-        INC DE
-        DJNZ .swap
-        POP DE
-        POP HL
-        RET
+; Claude - 2026-10-11: меню F10 — в порядке строк [PLUGINS] (таблица
+; заголовков WC идёт в нём же). Прежде оно сортировалось по алфавиту; теперь
+; порядок задаёт пользователь в WC Setup: F5/F6 двигают плагин в группе, S —
+; разовая сортировка группы по алфавиту.
 
 MENU_WORK:
         LD A,PLHPG
@@ -1289,7 +1186,7 @@ MENU_WORK:
 .done:
         POP IX
         LD (COUNT),BC
-        JP MENU_SORT                            ; список остался в своей странице
+        RET                                     ; порядок — строк [PLUGINS]
 
 ; --- меню плагинов: окно постоянной высоты, прокрутка и полоса прокрутки ----
 ; Всё меню работает из страницы менеджера в окне #8000. Вывод WC подключает к

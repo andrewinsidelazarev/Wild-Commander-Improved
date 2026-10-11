@@ -45,6 +45,9 @@ class Volume:
             'FSTFRC': 3 + self.original_clusters, 'FSINF': 1,
         }.items():
             p.h.put32(self.mem, self.core(name), value)
+        # Claude - 2026-10-10: резерв, как у HDD (16 бит; за ним FSINF): FSInfo
+        # (сектор 1) пишется только внутри резервной области.
+        p.h.put16(self.mem, self.core('BREZS'), self.fat_start)
         self.mem[self.core('BSECPC')] = self.mem[self.core('BFATS')] = 1
         self.mem[self.core('FATFLAGS')] = 0
         ext = self.pages[0xE8]

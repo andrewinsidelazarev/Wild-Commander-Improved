@@ -21,6 +21,12 @@ WC_PHYS_MOUNTER_END            EQU #E8
 WC_PHYS_IMPROVED_FIRST         EQU #E8
 WC_PHYS_IMPROVED_END           EQU #F0
 WC_PHYS_CORE32_EXT_PAGE        EQU WC_PHYS_IMPROVED_FIRST
+; Списки расширений WMF #11: общий пул, 32 сектора по 512 байт.
+WC_PHYS_WMF_META_PAGE          EQU WC_PHYS_IMPROVED_FIRST+1
+; Claude - 2026-10-11: вынутая загрузочная SD-карта — сюда читается BPB
+; вернувшейся карты для сверки серийного номера (ZCG_RECOVER). Своя страница:
+; ни буферы вызывающего, ни пул фона окон WC не трогаются.
+WC_PHYS_MEDIA_PAGE             EQU WC_PHYS_IMPROVED_FIRST+2
 
 ; Штатные страницы Commander и системы: #F0..#FF.
 WC_PHYS_COMMANDER_FIRST        EQU #F0
@@ -36,5 +42,9 @@ WC_PHYS_COMMANDER_END          EQU #100
         ASSERT WC_PHYS_COMMANDER_END == #100, верхняя граница карты должна быть #100
         ASSERT WC_PHYS_CORE32_EXT_PAGE >= WC_PHYS_IMPROVED_FIRST, CORE32_EXT ниже своего диапазона
         ASSERT WC_PHYS_CORE32_EXT_PAGE < WC_PHYS_IMPROVED_END, CORE32_EXT пересекает Commander
+        ASSERT WC_PHYS_WMF_META_PAGE > WC_PHYS_CORE32_EXT_PAGE, метаданные WMF пересекли CORE32_EXT
+        ASSERT WC_PHYS_WMF_META_PAGE < WC_PHYS_IMPROVED_END, метаданные WMF пересекли Commander
+        ASSERT WC_PHYS_MEDIA_PAGE > WC_PHYS_WMF_META_PAGE, страница сверки карты пересекла WMF
+        ASSERT WC_PHYS_MEDIA_PAGE < WC_PHYS_IMPROVED_END, страница сверки карты пересекла Commander
 
         ENDIF

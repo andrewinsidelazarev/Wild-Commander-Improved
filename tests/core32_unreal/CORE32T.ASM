@@ -398,22 +398,35 @@ TEST_SPACE_FORCES_LFN:
         XOR A
         RET
 
+; Claude - 2026-10-10 - begin
+; Начальные пробелы длинного имени значимы, как внутренние: запись их
+; сохраняет, и « name» с «name» — разные файлы (драйвер FAT32, R11-1). Прежде
+; поиск пропускал их с обеих сторон и попадал в соседний файл.
 TEST_LEADING_SPACES:
         LD HL,LEADING_STORED_CREATE
         CALL MKFILE
         JP NZ,API_ERROR
-        LD HL,LEADING_STORED_TRIMMED_FIND
+        LD HL,LEADING_STORED_SPACED_FIND
         CALL FENTRY
         JP Z,SEARCH_ERROR
+        LD HL,LEADING_STORED_TRIMMED_FIND       ; «Leading Name.txt» — нет
+        CALL .absent
+        RET NZ
 
         LD HL,LEADING_QUERY_CREATE
         CALL MKFILE
         JP NZ,API_ERROR
-        LD HL,LEADING_QUERY_SPACED_FIND
-        CALL FENTRY
-        JP Z,SEARCH_ERROR
+        LD HL,LEADING_QUERY_SPACED_FIND         ; «   Plain Leading.txt» — нет
+        CALL .absent
+        RET NZ
+
+        LD HL,LEADING_TWIN_CREATE               ; «Leading Name.txt» рядом —
+        CALL MKFILE                             ; не «имя занято»
+        JP NZ,API_ERROR
 
         LD HL,INTERNAL_SPACE_MISMATCH_FIND
+.absent:
+; Claude - 2026-10-10 - end
 ; Codex - 2026-07-16 - begin
         ; Прямой FENTRY требует той же рабочей страницы, что штатный API 59.
         CALL CORE_PAGE_IN
@@ -1282,6 +1295,14 @@ LEADING_STORED_CREATE:
         DB "   Leading Name.txt",0
 LEADING_STORED_TRIMMED_FIND:
         DB #00,"Leading Name.txt",0
+; Claude - 2026-10-10 - begin
+LEADING_STORED_SPACED_FIND:
+        DB #00,"   Leading Name.txt",0
+LEADING_TWIN_CREATE:
+        DB #00
+        DD 512
+        DB "Leading Name.txt",0
+; Claude - 2026-10-10 - end
 
 LEADING_QUERY_CREATE:
         DB #00

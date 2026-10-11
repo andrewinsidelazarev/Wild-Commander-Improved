@@ -5,7 +5,7 @@ ID_STREAM_WITH_HANDLER        EQU 0
 ID_READ_SECTORS               EQU 1
 ID_STREAM_IO_ERROR            EQU 2
 ID_INIT_FREE_SCAN             EQU 3
-ID_CHECK_FREE_SCAN_LIMIT      EQU 4
+ID_SCAN_FREE_SECTOR           EQU 4
 ID_NEXT_FREE_FAT_SECTOR       EQU 5
 ID_FAT_SECTOR_IN_RANGE        EQU 6
 ID_POSITION_FAT_READ          EQU 7
@@ -77,7 +77,8 @@ ID_INSTALL_TAIL               EQU 62
 ID_ALIAS_RESET                EQU 63
 ID_ALIAS_ADD                  EQU 64
 ID_ALIAS_SCAN                 EQU 65
-ID_COUNT                      EQU 66
+ID_FILE_START_CHECK           EQU 66
+ID_COUNT                      EQU 67
 ; Claude - 2026-09-27 - end
         ELSE
 ID_ZERO_CLUSTER_TAIL          EQU 26
@@ -170,20 +171,58 @@ ID_ALIAS_ADD                  EQU 54
 ; A=1 — пройдена порция, звать снова с A≠0; Z — ни одна неотмеченная запись не
 ; стоит на кластере отмеченного; NZ — стоит, или каталог не читается.
 ID_ALIAS_SCAN                 EQU 55
-ID_COUNT                      EQU 56
+; Claude - 2026-10-10 - begin
+; Выбор файла (GIPAG_FILE резидента: GFILE): HL → первый кластер
+; (не ноль). CF=1 — он из цепочки корня или корень не прочитался
+; (ABT=#FE, EOC=#FF); CF=0 — нет.
+ID_FILE_START_CHECK           EQU 56
+; Claude - 2026-10-10 - end
+ID_COUNT                      EQU 57
 ; Claude - 2026-09-27 - end
         ENDIF
 ; Claude - 2026-09-27 - begin
 ; Резидентный блок расширения живёт в странице ядра #05 на месте упакованных
 ; драйверов DR1..DR4 (#5176..#5AA9); драйверы установщик переносит в #E8.
 RESIDENT_BASE                 EQU #5176
+; Claude - 2026-10-10 - begin
+; Оверлей FILEX (CORE32_EXT.ASM, OVERLAY_START): 0 — не поставлен (FILEX нет
+; или он старый), 1 — поставлен, 2 — FILEX не от этой сборки (штамп). Пишет
+; установщик FILEX.WMF; FILEX_REQUIRED (AX_RUN, до автозапуска плагинов)
+; при значении ≠1 выводит сообщение и останавливает машину.
+OVERLAY_STATE                 EQU RESIDENT_BASE
+FILEX_REQUIRED                EQU RESIDENT_BASE+1
+; Второй резидентный блок: страница #05 от #56C0 до DEHR (#5AAA), за кодом
+; WMF #11 (#5300..#567F, запас до #56BF на его рост; с 2026-10-11 блок начат
+; на 64 байта раньше — под проверку вынутой карты).
+RESIDENT2_BASE                EQU #56C6        ; с 2026-10-11 (MENU_FIT в коде WMF)
+; Перевод знаков имени CP866 <-> UTF-16 с полной таблицей #B0..#DF, #F2..#FF
+; (входы ядра ORU, UCS, UCH ведут сюда). Прежде псевдографика и №, Є, Ї, Ў, °
+; не переводились: длинное имя писалось с «ё» вместо знака, а на диске такие
+; имена не находились и не показывались (драйвер FAT32 R10-2, Codex R1).
+OEM_UCS_RESIDENT              EQU RESIDENT2_BASE
+UCS_RESIDENT                  EQU RESIDENT2_BASE+3
+UCH_RESIDENT                  EQU RESIDENT2_BASE+6
+; LOAD256 ядра: буфер проверяется до обмена (см. LOAD256_CODE).
+LOAD256_RESIDENT              EQU RESIDENT2_BASE+9
+; Claude - 2026-10-10 - end
+; Claude - 2026-10-11 - begin
+; Главный цикл WC (MAIN, вместо CALL CURSOR): загрузочную карту SD-ZC вынимали
+; и вставили обратно — перемонтировать её панели (см. MEDIA_IDLE_CODE).
+MEDIA_IDLE                    EQU RESIDENT2_BASE+12
+; Загрузчик SPG (WCVW): блок не прочитан — красное окно и останов, программа
+; не запускается (см. SPG_FAIL_CODE).
+SPG_FAIL                      EQU RESIDENT2_BASE+15
+; Claude - 2026-10-11 - end
 ; Claude - 2026-10-01 - begin
-; Входы резидентного кода для ядра (за OUTER_PAGE/OUTER_IFF), по три байта:
-; подмена обработчика потока LOAD256/LOADNON, проверка ссылки FAT (GIPAG,
-; GIPP), переход потока по записи FAT из кэша (STREAM_NEXT_CACHED).
-STREAM_RESIDENT               EQU RESIDENT_BASE+2
-CLASSIFY_RESIDENT             EQU RESIDENT_BASE+5
-STREAM_LINK_RESIDENT          EQU RESIDENT_BASE+8
+; Входы резидентного кода для ядра, по три байта: подмена обработчика потока
+; LOAD256/LOADNON, проверка ссылки FAT (GIPAG, GIPP), переход потока по записи
+; FAT из кэша (STREAM_NEXT_CACHED).
+STREAM_RESIDENT               EQU RESIDENT_BASE+4
+CLASSIFY_RESIDENT             EQU RESIDENT_BASE+7
+; Claude - 2026-10-10: выбор файла для GFILE (MD20, L6011_228) вместо GIPAG —
+; кластер 0 у файла — пустой файл, а не корень; кластер корня — ошибка.
+GIPAG_FILE                    EQU RESIDENT_BASE+10
+STREAM_LINK_RESIDENT          EQU RESIDENT_BASE+13
 ; Claude - 2026-10-01 - end
 ; Claude - 2026-09-27 - end
 ; Codex - 2026-07-17 - end

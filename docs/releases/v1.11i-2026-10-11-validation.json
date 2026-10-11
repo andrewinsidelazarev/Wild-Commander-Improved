@@ -1,0 +1,468 @@
+{
+  "date": "2026-10-11",
+  "passed": true,
+  "runtime": {
+    "Help.txt": {
+      "bytes": 1853,
+      "sha256": "f3cb512407d3366df19e7ba1885f78248a2a51534e589e5f72d61cc0c2350ca0"
+    },
+    "WC/BMPV.WMF": {
+      "bytes": 5935,
+      "sha256": "82a707d1fa2ab573f497d9158251f50005b4b7b4129c6b46107cbefe69d13bb4"
+    },
+    "WC/CHKDSK.WMF": {
+      "bytes": 11599,
+      "sha256": "f44b80016dd8e8dea87936ec21b206a066efdbcb5b7d7c0ebb5ce3b9dff562f3"
+    },
+    "WC/CLOCK.WMF": {
+      "bytes": 75009,
+      "sha256": "8957c4d0cb2d5437fdb90c8a2adec10663e52118e54c0d74e584546dd5626998"
+    },
+    "WC/COMPILER.WMF": {
+      "bytes": 18412,
+      "sha256": "29d2c7f9db3f546909206aeca3c0bab970c9a57f880307f411a4e20a53470693"
+    },
+    "WC/FDI2FDD.WMF": {
+      "bytes": 7168,
+      "sha256": "25f20eb5dc9e343fa109d130a1fa6640d4ccdaf4c8c434b65a90ed525bb1e747"
+    },
+    "WC/FILEX.WMF": {
+      "bytes": 13485,
+      "sha256": "b7dae89c14669fc60e8f06fc409cf2d77cfc702bcc5f6d7816e2f20e7902d3f9"
+    },
+    "WC/FILE_CR.WMF": {
+      "bytes": 20241,
+      "sha256": "18e9ca95813e7988f4102bc96aa407aa25541b5e1162027b6bf75986deaade13"
+    },
+    "WC/FTVIEW.WMF": {
+      "bytes": 49664,
+      "sha256": "da52fce35e3dc992253961c0d67a62086420977d498cbade8b8ec8d9efa48547"
+    },
+    "WC/GIFVIEW.WMF": {
+      "bytes": 3298,
+      "sha256": "49162fa8e3eade9259cdf2bf1269065120eb394efb31a5e69208078322c2bb82"
+    },
+    "WC/GSPLAYER.WMF": {
+      "bytes": 12534,
+      "sha256": "69c40c10631e14663986c88c62f1216cb14227c442fd91fe023aff841b29aeeb"
+    },
+    "WC/ILBMVIEW.WMF": {
+      "bytes": 18944,
+      "sha256": "5ff5186062e9531190596c2f96a8356440f4f0c97ddd580c12fe1d69df3a335b"
+    },
+    "WC/MCGSV.WMF": {
+      "bytes": 2154,
+      "sha256": "929e23debd0d6508e9f9d1d6f668aacd31d8724c69ced95154dfd01cb1d9ca62"
+    },
+    "WC/MENU/Hrust v1.3.spg": {
+      "bytes": 9762,
+      "sha256": "7609625d462b3e9a143561564f7b179be9e901ca0f742df598e68a6722d9fb20"
+    },
+    "WC/MENU/RUD v2.42.spg": {
+      "bytes": 14553,
+      "sha256": "45049127c571bf1a10fbc941583ea77a4f796df60511f7bff77ab070dd4cfba9"
+    },
+    "WC/MENU/WDC v1.60.$C": {
+      "bytes": 21777,
+      "sha256": "9bd3ca4886227769ae3727a5bf2840af4b8676680822004523db265535f1490e"
+    },
+    "WC/MOUNTER.WMF": {
+      "bytes": 42482,
+      "sha256": "4c0756cafb0a42ea6a669313b0d56c2f8d6cb0b31770a8e7d4d1b0ee7411e6d0"
+    },
+    "WC/PLASMATW.WMF": {
+      "bytes": 44032,
+      "sha256": "c4de7bc6a614d04766b5ce045c5bb260bcafef8c55c0dcf9a681a091d6832f85"
+    },
+    "WC/PLM.WMF": {
+      "bytes": 6515,
+      "sha256": "78c0a06db5a33cd92b711216b4370de83270d554cf92456731c6d79b2f82999b"
+    },
+    "WC/ROM_PROG.WMF": {
+      "bytes": 2022,
+      "sha256": "c33dc920ed9327a64fc2bb171ce11a5abd79563d2dca67cb547a90053328c7f8"
+    },
+    "WC/SCRSAVER.WMF": {
+      "bytes": 819,
+      "sha256": "28d0e101dc52dc3863ac7ed639d58e6d08338d9fcac6dcf67e5661b244dc575e"
+    },
+    "WC/SETIME.WMF": {
+      "bytes": 1762,
+      "sha256": "5cd01fe56b427f31a0c48940893dbcebb2abf0fba2591932ea4984e4c2e2fab1"
+    },
+    "WC/SETUP.WMF": {
+      "bytes": 6656,
+      "sha256": "e02b942a397f7e3f878f9dac82d75a6ce137085088fd9a870daf4768346a993c"
+    },
+    "WC/TAPM.WMF": {
+      "bytes": 53760,
+      "sha256": "d12797aa0f40aacc0facd66b1deddb8a5f45da597ca2a67479f1f5eb23ea0103"
+    },
+    "WC/TRDUMP.WMF": {
+      "bytes": 6137,
+      "sha256": "e8c07419396538b457a3d45a2662c4c452482ce584c31217f05bca8d17650845"
+    },
+    "WC/TRDisp.wmf": {
+      "bytes": 8552,
+      "sha256": "508cd851a69d0f93188862f02f0d1f936eb4bd331c1ea98ea38019d18fc63a43"
+    },
+    "WC/TXTEDIT.WMF": {
+      "bytes": 11311,
+      "sha256": "cd49aa5623db7288703bcb562d87d90134503cac6ef7e2e0eaa2214f42fcf8a3"
+    },
+    "WC/TXTVIEW.WMF": {
+      "bytes": 7168,
+      "sha256": "82a0886acb6fe53f356f9a3d052535529d1bd533bedaebb72bbf9c9cb4c4eebd"
+    },
+    "WC/TXTVIEW2.LIC": {
+      "bytes": 4377,
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb"
+    },
+    "WC/TXTVIEW2.WMF": {
+      "bytes": 158208,
+      "sha256": "e1d7dcee844774d19ec7280557316938d0e1b71bb229d8548dd9e8717f64d1fb"
+    },
+    "WC/UNZIP.WMF": {
+      "bytes": 16896,
+      "sha256": "472f304c9e235fdc431e1b4a334c1770fbb66d51e9c55693e9eb9de26e7ca4d8"
+    },
+    "WC/VIDEO_PL.WMF": {
+      "bytes": 3796,
+      "sha256": "28cd7750fb1da4393746657250c3916f5e6d9cfc405aed123eb086d577ab508c"
+    },
+    "WC/WPLAYER.WMF": {
+      "bytes": 29407,
+      "sha256": "dbabc08bf4f501fd8a07df3cc19ded870fda717b9c5d6a2dd0bdac60ba3a4d34"
+    },
+    "WC/wc.ini": {
+      "bytes": 1687,
+      "sha256": "38359f0ddde1732e13bce421bdcd6760a0ab83f941301d0d499b5fde83e16896"
+    },
+    "WC/wc.mnu": {
+      "bytes": 127,
+      "sha256": "1ef183a2f0b5bb3400d248b5f7cdd92ab8367c1ec626ab092f9850714542ed11"
+    },
+    "WC_History.txt": {
+      "bytes": 108902,
+      "sha256": "a1ac69fe52e16c83589d700db713e1f03ccbc512d1f2aa50ab498e4f9fd6c921"
+    },
+    "WC_todo.txt": {
+      "bytes": 2130,
+      "sha256": "4a0354f31d95303a988e3b852519905c4cea1dcb17cd9cc730b96299ae52664f"
+    },
+    "boot.$C": {
+      "bytes": 30602,
+      "sha256": "de18ad1c93a9063e1b28b6a597f019dcbfa4f67d14cf8b7c9976293ad473e317"
+    }
+  },
+  "changed_since_2026_10_01": [
+    "WC/FILEX.WMF",
+    "WC/PLM.WMF",
+    "WC/SETUP.WMF",
+    "WC/TXTEDIT.WMF",
+    "WC/TXTVIEW.WMF",
+    "WC/TXTVIEW2.WMF",
+    "WC_History.txt",
+    "boot.$C"
+  ],
+  "boot": {
+    "bytes": 30602,
+    "sha256": "de18ad1c93a9063e1b28b6a597f019dcbfa4f67d14cf8b7c9976293ad473e317",
+    "limit_bytes": 32768,
+    "tail_room_bytes": 2166,
+    "note": "BIOS TS-Conf читает boot.$c целыми кластерами: файл не длиннее 32768 байт; холодная часть расширения ядра — оверлей в FILEX.WMF"
+  },
+  "abi": {
+    "entry_count": 18,
+    "passed": true,
+    "entries": {
+      "START": "0x4000",
+      "NXTETY2": "0x4067",
+      "NXTETY": "0x413f",
+      "LOAD512": "0x43a0",
+      "SAVE512": "0x4398",
+      "CURIT": "0x44a5",
+      "GIPAG": "0x44d7",
+      "MKSG": "0x4880",
+      "DLSG": "0x49b4",
+      "SRHDRN": "0x4a4c",
+      "MKFILE": "0x4d34",
+      "MKDIR": "0x4d5b",
+      "DELFL": "0x4cdd",
+      "RENAME": "0x4d13",
+      "HDD": "0x4e71",
+      "DOS_SWP": "0x4ff8",
+      "DEHR": "0x5aaa",
+      "END": "0x5bf2"
+    },
+    "guard_in_build": true,
+    "unchanged_since": "2026-09-19"
+  },
+  "tests": {
+    "full_build_passed": true,
+    "build_log_sha256": "0e41f905bf27af84ef8c81df9bf274dbbe5c751282c65eeeaf55c048de261b16",
+    "unittest_runs": [
+      {
+        "tests": 24,
+        "status": "OK"
+      },
+      {
+        "tests": 17,
+        "status": "OK"
+      },
+      {
+        "tests": 44,
+        "status": "OK"
+      },
+      {
+        "tests": 10,
+        "status": "OK"
+      },
+      {
+        "tests": 8,
+        "status": "OK"
+      },
+      {
+        "tests": 4,
+        "status": "OK"
+      },
+      {
+        "tests": 106,
+        "status": "OK"
+      },
+      {
+        "tests": 108,
+        "status": "OK"
+      },
+      {
+        "tests": 36,
+        "status": "OK"
+      },
+      {
+        "tests": 5,
+        "status": "OK"
+      },
+      {
+        "tests": 21,
+        "status": "OK"
+      },
+      {
+        "tests": 2,
+        "status": "OK"
+      },
+      {
+        "tests": 55,
+        "status": "OK"
+      },
+      {
+        "tests": 16,
+        "status": "OK"
+      },
+      {
+        "tests": 8,
+        "status": "OK"
+      },
+      {
+        "tests": 19,
+        "status": "OK"
+      },
+      {
+        "tests": 3,
+        "status": "OK"
+      },
+      {
+        "tests": 9,
+        "status": "OK"
+      },
+      {
+        "tests": 4,
+        "status": "OK"
+      },
+      {
+        "tests": 37,
+        "status": "OK"
+      },
+      {
+        "tests": 74,
+        "status": "OK"
+      },
+      {
+        "tests": 24,
+        "status": "OK"
+      },
+      {
+        "tests": 8,
+        "status": "OK"
+      },
+      {
+        "tests": 21,
+        "status": "OK"
+      },
+      {
+        "tests": 24,
+        "status": "OK"
+      },
+      {
+        "tests": 2,
+        "status": "OK"
+      },
+      {
+        "tests": 17,
+        "status": "OK"
+      },
+      {
+        "tests": 6,
+        "status": "OK"
+      },
+      {
+        "tests": 24,
+        "status": "OK"
+      },
+      {
+        "tests": 9,
+        "status": "OK"
+      },
+      {
+        "tests": 30,
+        "status": "OK"
+      },
+      {
+        "tests": 16,
+        "status": "OK"
+      },
+      {
+        "tests": 18,
+        "status": "OK"
+      },
+      {
+        "tests": 34,
+        "status": "OK"
+      }
+    ],
+    "unittest_tests_total": 843,
+    "suites": [
+      "test_allocator_wrap.py",
+      "test_boot_resources.py",
+      "test_copy_window.py",
+      "test_core32_regressions.py",
+      "test_core_driver_fixes.py",
+      "test_crash_paths.py",
+      "test_dates_api.py",
+      "test_fat_allocator_hint.py",
+      "test_fat_stream_cache.py",
+      "test_file_time.py",
+      "test_filex_abi.py",
+      "test_filex_chain.py",
+      "test_filex_move.py",
+      "test_filex_overlay.py",
+      "test_filex_time.py",
+      "test_filex_truncate.py",
+      "test_full_plugin_table.py",
+      "test_io_failures.py",
+      "test_key_release.py",
+      "test_lfn_namespace.py",
+      "test_media_guard.py",
+      "test_overwrite_path.py",
+      "test_plugin_manager.py",
+      "test_plugin_panel_refresh.py",
+      "test_rename.py",
+      "test_setup_plugin.py",
+      "test_sfn_alias.py",
+      "test_spi_idle.py",
+      "test_txtedit_editing.py",
+      "test_txtedit_features.py",
+      "test_txtedit_navigation.py",
+      "test_txtedit_safety.py",
+      "test_txthex_viewer.py",
+      "test_volume_limit.py",
+      "test_wcfx_copy_bounds.py",
+      "test_wcini_version.py",
+      "test_wmf_dynamic.py"
+    ]
+  },
+  "unreal_runs": [
+    {
+      "build": "boot.$C de18ad1c + FILEX b7dae89c",
+      "date": "2026-10-11",
+      "case": "сверка файловых операций двумя образами (fs_audit и второй чекер после каждой операции), Unreal",
+      "results": {
+        "суперфлоппи, первый набор": "27 из 27 (F5/F6/F7/F8, правка текста F4 + Ctrl+S)",
+        "суперфлоппи, второй набор": "27 из 27 (UNZIP, WC Setup F2, «Сохранить как», копии в себя, полный и нулевой диск)",
+        "MBR, кластер 4 и 32 КиБ": "44 из 44 и 44 из 44"
+      },
+      "passed": true
+    },
+    {
+      "build": "boot.$C 6a1f93c9 + FILEX 1fe376f8 (отличие от выпуска — переход к следующему файлу в WCVW и вызов F3 в MD20; кэш позиции FILEX)",
+      "date": "2026-10-11",
+      "case": "сверка файловых операций, включая старые карты пользователя и IDE Nemo",
+      "results": {
+        "суперфлоппи, два набора": "27 из 27 и 27 из 27",
+        "MBR, кластер 4 и 32 КиБ": "44 из 44 и 44 из 44",
+        "старые карты wc, wc_1, x64_wc, hmm2_sd и IDE Nemo": "79 из 79, чужие данные целы на обоих томах"
+      },
+      "passed": true
+    },
+    {
+      "build": "boot.$C de18ad1c + FILEX b7dae89c",
+      "date": "2026-10-11",
+      "case": "unreal-ng: Text/HEX Viewer на BIG.TXT 1 140 000 байт — F3, End, PgUp, PgUp, Home, End (FILEX READ_AT)",
+      "results": {
+        "End": "строки 19967–20000 из 20000",
+        "PgUp дважды": "19933–19966, затем 19899–19932",
+        "Home, End": "1–34, снова 19967–20000"
+      },
+      "passed": true
+    },
+    {
+      "build": "boot.$C de18ad1c + FILEX b7dae89c; для сравнения выпущенный 4492f994",
+      "date": "2026-10-11",
+      "case": "unreal-ng: Enter на загруженном .WMF — «Plugin already exists! RELOAD IT?» — Enter",
+      "results": {
+        "v1.11i-2026-10-01": "WPLAYER и TXTVIEW — процессор уходит в мусор (pc #00xx, стек ползёт), WC не отвечает",
+        "этот выпуск": "WPLAYER, TXTVIEW, SETUP — «LOADED!!!», затем панель, меню F10 и курсор работают"
+      },
+      "passed": true
+    },
+    {
+      "build": "boot.$C de18ad1c + FILEX b7dae89c",
+      "date": "2026-10-11",
+      "case": "unreal-ng: вынуть загрузочную карту SD-ZC при работающем WC, вставить ту же, чужую, снова свою; F7 после возврата",
+      "results": {
+        "вынута": "красное окно «Insert boot drive»",
+        "та же карта": "WC в главном цикле",
+        "чужая карта": "«Wrong drive - insert boot drive»",
+        "своя после чужой": "WC в главном цикле, F7 создал каталог, том без замечаний fs_audit"
+      },
+      "passed": true
+    },
+    {
+      "build": "boot.$C 6a1f93c9 (меню Shift+F3 то же, что в выпуске)",
+      "date": "2026-10-11",
+      "case": "unreal-ng: Shift+F3 на файлах .MID, .PT3, .TXT, .BIN; выбор GS Player из меню",
+      "results": {
+        ".MID": "Text / HEX / UTF-8, Edit with TXT Editor, GS Player v0.993",
+        ".PT3": "Text / HEX / UTF-8, Edit with TXT Editor, Play by Wild Player",
+        ".TXT и .BIN": "Text / HEX / UTF-8, Edit with TXT Editor",
+        "GS Player из меню": "на входе плагина A=#00, A'=3 (MID), BC — имя, DE'/HL' — как по Enter; окно Sound Player, режим MIDI Player"
+      },
+      "passed": true
+    },
+    {
+      "build": "boot.$C de18ad1c",
+      "date": "2026-10-11",
+      "case": "unreal-ng: Enter на song.mid, GS Player доигрывает и просит следующий файл",
+      "results": {
+        "цепочка": "song.mid, затем song2.mid; на tune.pt3 (его никто не открывает) — панель с курсором на нём, меню нет",
+        "F3 на tune.pt3": "меню Shift+F3: Text / HEX / UTF-8, Edit with TXT Editor, Play by Wild Player"
+      },
+      "passed": true
+    }
+  ],
+  "physical_zx_evolution": {
+    "date": "2026-10-11",
+    "checked": "на ZX Evolution пользователя залиты по FTP и сверены побайтно boot.$C de18ad1c, FILEX b7dae89c, PLM, SETUP, TXTVIEW, txtview2, TXTEDIT этого выпуска; пользователь проверил: после GS Player меню Shift+F3 не появляется, сбоев не найдено (с FILEX 1fe376f8 — та же сборка без кэша позиции); с FILEX b7dae89c запись SMB в конец большого файла быстрая; замер SMB с ПК (другой сессией): запись 1 МиБ — 14,5 с, 70,7 КБ/с, 4 МиБ — 62 КБ/с (прежде около 30 КБ/с), чтение 87–88 КБ/с, файлы совпали побайтно"
+  },
+  "physical_zx_evolution_tested": true,
+  "validation_scope": "Собранный код Z80, машинные тесты ядра и плагинов, прогоны настоящего WC в Unreal и unreal-ng; файлы этого выпуска работают на физическом ZX Evolution пользователя."
+}

@@ -1,15 +1,14 @@
-"""FILEX SET_EOF32: отказ носителя после обнуления хвоста сектора (2026-09-26).
+"""FILEX SET_EOF32: отказы носителя при усечении.
 
-Усечение сначала обнуляет хвост последнего сохраняемого сектора, затем читает
-FAT (ссылку хвоста) и лишь потом публикует новый размер. Отказ чтения FAT
-после обнуления выходил, минуя возврат сектора из копии: размер оставался
-прежним, а байты за новым концом уже были нулями (аудит Codex, десятый
-заход). Отказ самой записи обнуления, после которой сектор всё же лёг, тоже
-не возвращал копию: признак «хвост обнулён» ставился лишь после удачной
-записи. Отказ записи самой ENTRY, после которой она всё же легла, давал
-MEDIA при уже новом размере и неотсоединённом хвосте (аудит, А.5): теперь
-ENTRY перечитывается, и усечение доводится. Исполняются настоящие FILEX,
-ядро и расширение на диске в памяти; отказы — в драйвере сектора.
+Порядок (с 2026-10-10): ссылка хвоста цепочки читается до публикации, затем
+пишется ENTRY с новым размером, затем конец цепочки и освобождение хвоста,
+FSInfo, и лишь потом обнуляется хвост последнего сохраняемого сектора — когда
+за концом файла уже мёртвые данные. Прежде хвост обнулялся до публикации с
+копией сектора, и отказ записи при неудачном возврате копии терял живые
+данные файла (драйвер FAT32, R8-3). Отказ записи самой ENTRY, после которой
+она всё же легла, доводит усечение (аудит, А.5); не легла — контекст
+FENTRY/APPEND снят (драйвер, R3-4). Исполняются настоящие FILEX, ядро и
+расширение на диске в памяти; отказы — в драйвере сектора.
 """
 import unittest
 
@@ -23,14 +22,13 @@ FX = p.FX
 class FaultyVolume(ClockVolume):
     """Файл AUDIT.BIN из 1536 байт #A5, кластер — один сектор. fail_writes —
     номера записей, которые откажут; из них applied — сектор всё же ляжет.
-    fail_read_after_write — первое чтение после первой записи откажет."""
+    fail_reads — номера чтений, которые откажут (read_log — их секторы)."""
 
-    def __init__(self, fail_writes=(), applied=(), fail_read_after_write=False):
+    def __init__(self, fail_writes=(), applied=(), fail_reads=()):
         super().__init__(original=ORIGINAL, free=20)
         self.fail_writes, self.applied = set(fail_writes), set(applied)
-        self.fail_read_after_write = fail_read_after_write
-        self.write_log = []
-        self.read_failed = False
+        self.fail_reads = set(fail_reads)
+        self.write_log, self.read_log = [], []
         self.callbacks[self.core('RDDSE')] = self.read_io
         self.callbacks[self.core('SDDSE')] = self.write_io
 
@@ -47,12 +45,17 @@ class FaultyVolume(ClockVolume):
         self.transfer(True)
 
     def read_io(self):
-        if self.fail_read_after_write and self.write_log and not self.read_failed:
-            self.read_failed = True
+        self.read_log.append(self.position)
+        if len(self.read_log) in self.fail_reads:
             self.mem[self.core('ABT')] = 1
             p.ret(self.cpu)
             return
         self.transfer(False)
+
+    def append_valid(self):
+        """Контекст FENTRY/APPEND ядра (APPEND_VALID в странице расширения)."""
+        ext = self.mem[0xC000:] if self.page == 0xE8 else self.pages[0xE8]
+        return ext[self.ext('APPEND_VALID') - 0xC000]
 
     def data(self):
         start = (self.data_start + 1) * 512
@@ -75,38 +78,52 @@ class Truncate(unittest.TestCase):
         self.assertEqual(data[:TARGET], b'\xA5' * TARGET)
         self.assertEqual(data[TARGET:1024], bytes(1024 - TARGET), 'хвост сектора за концом не обнулён')
 
-    def test_fat_read_failure_after_zeroing_restores_the_tail(self):
-        volume = FaultyVolume(fail_read_after_write=True)
-        status = volume.truncate()
-        self.assertTrue(volume.read_failed, 'сценарий не тот')
-        self.assertEqual(status, FX['FILEX_STATUS_MEDIA'])
-        self.assertEqual(volume.size(), ORIGINAL)
-        self.assertEqual(volume.data(), b'\xA5' * ORIGINAL,
-                         'размер прежний, а байты за новым концом обнулены')
+    def test_order_entry_first_tail_zeroed_last(self):
+        # До ENTRY на диск не пишется ничего; хвост сектора — последней записью.
+        volume = FaultyVolume()
+        self.assertEqual(volume.truncate(), FX['FILEX_STATUS_OK'])
+        self.assertEqual(volume.write_log[0], volume.data_start, 'первая запись — не ENTRY')
+        self.assertEqual(volume.write_log[-1], volume.data_start + 2, 'последняя запись — не хвост сектора')
 
-    def test_zeroing_write_applied_but_reported_failure_restores_the_tail(self):
-        volume = FaultyVolume(fail_writes={1}, applied={1})
+    def test_fat_read_failure_before_commit_keeps_the_file(self):
+        # Отказ чтения ссылки хвоста — до публикации: ни одной записи.
+        volume = FaultyVolume(fail_reads={5})
         status = volume.truncate()
+        self.assertEqual(volume.read_log[4], volume.fat_start, 'сценарий не тот')
         self.assertEqual(status, FX['FILEX_STATUS_MEDIA'])
-        self.assertEqual(volume.size(), ORIGINAL)
-        self.assertEqual(volume.data(), b'\xA5' * ORIGINAL,
-                         'обнуление легло, а сектор не возвращён из копии')
+        self.assertEqual(volume.write_log, [], 'запись до публикации')
+        self.assertEqual((volume.size(), volume.data()), (ORIGINAL, b'\xA5' *ORIGINAL))
 
-    def test_zeroing_write_failed_keeps_the_data(self):
-        volume = FaultyVolume(fail_writes={1})
-        self.assertEqual(volume.truncate(), FX['FILEX_STATUS_MEDIA'])
-        self.assertEqual((volume.size(), volume.data()), (ORIGINAL, b'\xA5' * ORIGINAL))
+    def test_tail_zero_write_failure_is_committed_cleanup(self):
+        # Размер уже новый, хвост цепочки освобождён; отказ обнуления хвоста
+        # сектора — служебная очистка, живые данные целы.
+        volume = FaultyVolume(fail_writes={5})
+        status = volume.truncate()
+        self.assertEqual(volume.write_log[4], volume.data_start + 2, 'сценарий не тот')
+        self.assertEqual(status, FX['FILEX_STATUS_COMMITTED_CLEANUP'])
+        self.assertEqual(volume.size(), TARGET)
+        self.assertEqual(volume.state()['chain_bytes'], 1024)
+        self.assertEqual(volume.data()[:TARGET], b'\xA5' *TARGET)
+
+    def test_tail_read_failure_is_committed_cleanup(self):
+        volume = FaultyVolume(fail_reads={12})
+        status = volume.truncate()
+        self.assertEqual(volume.read_log[11], volume.data_start + 2, 'сценарий не тот')
+        self.assertEqual(status, FX['FILEX_STATUS_COMMITTED_CLEANUP'])
+        self.assertEqual(volume.size(), TARGET)
+        self.assertEqual(volume.data()[:TARGET], b'\xA5' *TARGET)
 
     def test_entry_applied_but_reported_failure_completes(self):
         # ENTRY с новым размером легла, драйвер вернул отказ (аудит, А.5;
         # 2026-09-26): прежде MEDIA при уже новом размере и неотсоединённом
         # хвосте цепочки. Теперь ENTRY перечитывается, и усечение доводится.
-        volume = FaultyVolume(fail_writes={2}, applied={2})
+        volume = FaultyVolume(fail_writes={1}, applied={1})
         status = volume.truncate()
-        self.assertEqual(volume.write_log[1], volume.data_start, 'вторая запись — не ENTRY')
+        self.assertEqual(volume.write_log[0], volume.data_start, 'первая запись — не ENTRY')
         self.assertEqual(status, FX['FILEX_STATUS_OK'])
         self.assertEqual(volume.size(), TARGET)
         self.assertEqual(volume.state()['chain_bytes'], 1024, 'хвост цепочки не отсоединён')
+        self.assertEqual(volume.append_valid(), 1, 'легшая ENTRY не взяла контекст заново')
 
     def test_zero_size_entry_applied_but_reported_failure_frees_the_chain(self):
         # Размер 0: ENTRY (кластер 0) легла с ответом «ошибка». Прежде цепочка
@@ -120,17 +137,13 @@ class Truncate(unittest.TestCase):
                          'цепочка без ссылок осталась занятой')
 
     def test_entry_failed_keeps_the_file(self):
-        volume = FaultyVolume(fail_writes={2})
+        volume = FaultyVolume(fail_writes={1})
         self.assertEqual(volume.truncate(), FX['FILEX_STATUS_MEDIA'])
-        self.assertEqual((volume.size(), volume.data()), (ORIGINAL, b'\xA5' * ORIGINAL))
+        self.assertEqual((volume.size(), volume.data()), (ORIGINAL, b'\xA5' *ORIGINAL))
         self.assertEqual(volume.state()['chain_bytes'], ORIGINAL)
-
-    def test_failed_restore_is_reported_as_rollback(self):
-        # Обнуление легло с ответом «ошибка», возврат копии тоже отказал:
-        # сектор, может быть, так и остался с нулями — это не MEDIA, а ROLLBACK.
-        volume = FaultyVolume(fail_writes={1, 2}, applied={1})
-        self.assertEqual(volume.truncate(), FX['FILEX_STATUS_ROLLBACK'])
-        self.assertEqual(volume.size(), ORIGINAL)
+        self.assertEqual(volume.write_log, [volume.data_start], 'после отказа ENTRY писали ещё')
+        # Исход записи неизвестен — контекст FENTRY/APPEND снят (драйвер, R3-4).
+        self.assertEqual(volume.append_valid(), 0, 'контекст после неизвестного исхода записи')
 
 
 if __name__ == '__main__':

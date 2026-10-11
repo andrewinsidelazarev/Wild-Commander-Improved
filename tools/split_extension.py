@@ -15,6 +15,13 @@ R37-3): двоичный поиск даёт лишь начальную точ�
 отдельных длин MHMT даёт поток, который его же распаковщик не читает, —
 поэтому обратная распаковка обязательна.
 
+Поток каждой части не длиннее её данных (2026-10-10): DEHR сначала кладёт
+поток в конец области назначения (назначение + данные − поток) и распаковывает
+оттуда вперёд. Поток длиннее данных лёг бы ниже начала части и затёр конец
+уже распакованной части 1. Так случилось, когда холодный код ушёл в оверлей
+FILEX и граница съехала к концу: часть 2 из 16 байт дала поток в 26, и
+заголовок потока «HR» лёг на хвост второго резидентного блока.
+
     python split_extension.py --raw CORE32_EXT.bin --part1-room N --part2-room M \\
         --mhmt W:/ZiFi/_spg/mhmt.exe --work W:/.../Build
 
@@ -54,10 +61,10 @@ def choose(raw: bytes, room1: int, room2: int, packed, unpacks,
     bottom = max(MIN_PART, lo - below)
     for cut in range(top, bottom - 1, -1):
         part1 = packed(raw[:cut])
-        if part1 is None or part1 > room1:
+        if part1 is None or part1 > room1 or part1 > cut:
             continue
         part2 = packed(raw[cut:])
-        if part2 is None or part2 > room2 or part2 > room1:
+        if part2 is None or part2 > room2 or part2 > room1 or part2 > len(raw) - cut:
             continue
         if unpacks(raw[:cut]) and unpacks(raw[cut:]):
             return cut, part1, part2

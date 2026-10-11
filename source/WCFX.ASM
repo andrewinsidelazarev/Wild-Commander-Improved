@@ -1315,10 +1315,7 @@ EDIT    CALL GETEN:RET Z
 EDT     LD A,PLHPG:CALL MNGC
 
         LD DE,#C000+197-512
-MTK     LD HL,(PHED)
-        OR A:SBC HL,DE:RET C
-
-        LD HL,512:ADD HL,DE:EX DE,HL
+MTK     CALL WCVW.HNEXT:RET C           ; и полная таблица (PHED=#0000)
         LD A,(DE)
         CP B:JR C,MTK
         CP C:JR NC,MTK
@@ -1328,6 +1325,7 @@ MTK     LD HL,(PHED)
         LD (NYAA),A:CALL WCVW.PLGE
         XOR A:LD (NYAA),A
         RET
+        DS 8,0                          ; прежняя длина перебора: TOBUX на месте
 ;-------
 TOBUX   EX DE,HL:INC HL
         LD DE,BUX

@@ -8,7 +8,7 @@
 ; API 77 временно заменяет окно #C000, поэтому кэш туда помещать нельзя.
         ORG 0
         DS 16,0
-        DB "WildCommanderMDL",#0E,0
+        DB "WildCommanderMDL",#0E,2   ; +33 bit 1: Shift+F3 для любого файла
         DB 1,0
         DB 0,(ENDPL-RE+511)/512
         DS 10,0

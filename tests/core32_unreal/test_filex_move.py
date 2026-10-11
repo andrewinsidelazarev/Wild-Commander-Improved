@@ -55,6 +55,11 @@ class Tree(Volume):
     def lba(self, cluster):
         return self.data_start + cluster - 2
 
+    def append_valid(self):
+        """Контекст FENTRY/APPEND ядра (APPEND_VALID в странице расширения)."""
+        ext = self.mem[0xC000:] if self.page == 0xE8 else self.pages[0xE8]
+        return ext[self.ext('APPEND_VALID') - 0xC000]
+
     def put_dir(self, cluster, parent, records):
         sector = bytearray(512)
         sector[0:32] = entry(b'.          ', cluster)
@@ -240,16 +245,76 @@ class MoveRollback(unittest.TestCase):
         self.assertEqual(tree.links(tree.dst, tree.sub), 1)
 
     def test_dotdot_not_restored_keeps_the_destination_link(self):
-        # «..» лёг на DST, вернуть не удалось: ссылка назначения остаётся —
-        # с ней «..» согласован; результат — ROLLBACK, а не тихий успех отката.
+        # «..» лёг на DST, вернуть не удалось ни одной из трёх попыток:
+        # ссылка назначения остаётся — с ней «..» согласован; результат —
+        # ROLLBACK, а не тихий успех отката.
+        tree = Tree()
+        tree.ambiguous = {tree.lba(tree.sub): {1}}
+        tree.failing = {tree.lba(tree.sub): {2, 3, 4}}
+        status = tree.move()
+        self.assertEqual(status, FX['FILEX_STATUS_ROLLBACK'])
+        self.assertEqual(tree.writes_to.get(tree.lba(tree.sub)), 4, 'не три попытки возврата «..»')
+        self.assertEqual(tree.dotdot(tree.sub), tree.dst)
+        self.assertEqual(tree.links(tree.dst, tree.sub), 1,
+                         'ссылка назначения удалена, а «..» указывает на DST')
+        self.assertEqual(tree.append_valid(), 0, 'контекст после неудачного отката')
+
+    def test_dotdot_restored_on_second_attempt(self):
+        # Первая попытка возврата «..» отказала, вторая легла (драйвер, R8):
+        # прежде одна попытка — и ROLLBACK с двумя ссылками.
         tree = Tree()
         tree.ambiguous = {tree.lba(tree.sub): {1}}
         tree.failing = {tree.lba(tree.sub): {2}}
         status = tree.move()
-        self.assertEqual(status, FX['FILEX_STATUS_ROLLBACK'])
-        self.assertEqual(tree.dotdot(tree.sub), tree.dst)
-        self.assertEqual(tree.links(tree.dst, tree.sub), 1,
-                         'ссылка назначения удалена, а «..» указывает на DST')
+        self.assertEqual(status, FX['FILEX_STATUS_MEDIA'])
+        self.assertEqual(tree.dotdot(tree.sub), tree.src)
+        self.assertEqual((tree.links(tree.src, tree.sub), tree.links(tree.dst, tree.sub)), (1, 0))
+
+    def test_destination_link_delete_retried_by_place(self):
+        # Ссылка назначения легла с отказом; её удаление в откате тоже
+        # отказало — прежде одна попытка по имени оставляла две ссылки. Теперь
+        # запись добивается по месту (ENTRY_KILL_AT).
+        tree = Tree()
+        tree.ambiguous = {tree.lba(tree.dst): {1}}
+        tree.failing = {tree.lba(tree.dst): {2}}
+        status = tree.move()
+        self.assertEqual(status, FX['FILEX_STATUS_MEDIA'])
+        self.assertGreaterEqual(tree.writes_to.get(tree.lba(tree.dst)), 3, 'сценарий не тот')
+        self.assertEqual((tree.links(tree.src, tree.sub), tree.links(tree.dst, tree.sub)), (1, 0))
+        self.assertEqual(tree.dotdot(tree.sub), tree.src)
+
+    def test_rollback_forgets_the_context(self):
+        # Контекст мог быть уже взят по новой ссылке, которую откат удалил:
+        # следующий FILEX без FENTRY писал бы по чужой цепочке (драйвер, R9-1).
+        tree = Tree()
+        self.assertEqual(tree.append_valid(), 1)
+        tree.ambiguous = {tree.lba(tree.sub): {1}}           # «..» лёг с отказом
+        self.assertNotEqual(tree.move(), FX['FILEX_STATUS_OK'])
+        self.assertEqual(tree.append_valid(), 0, 'контекст после отката')
+
+    def test_failure_without_writes_keeps_the_context(self):
+        # Отказ до любой записи (имя недопустимо) — контекст прежний, на
+        # диске ничего; код — INVALID_NAME, не INTERNAL (драйвер, R10-3).
+        tree = Tree()
+        before = bytes(tree.disk)
+        status = tree.move(dest=b'A?B')
+        self.assertEqual(status, FX['FILEX_STATUS_INVALID_NAME'])
+        self.assertEqual(bytes(tree.disk), before)
+        self.assertEqual(tree.append_valid(), 1)
+
+    def test_full_volume_reports_no_space(self):
+        # Каталог назначения полон, свободных кластеров нет: прежде NO_SPACE
+        # уходил с Z, MOVE шёл дальше и отвечал NOT_FOUND (драйвер, R10-3).
+        tree = Tree()
+        names = [entry(b'D%02d        ' % i, 0, 0x20) for i in range(14)]
+        tree.put_dir(tree.dst, 0, names)
+        for cluster in range(2, tree.limit):
+            if tree.fat(cluster) == 0:
+                tree.set_fat(cluster, 0x0FFFFFFF)
+        before = bytes(tree.disk)
+        status = tree.move()
+        self.assertEqual(status, FX['FILEX_STATUS_NO_SPACE'])
+        self.assertEqual(bytes(tree.disk), before)
 
 
 class ReplaceCommit(unittest.TestCase):
@@ -293,6 +358,60 @@ class ReplaceCommit(unittest.TestCase):
         self.assertEqual(tree.writes_to.get(tree.lba(tree.dst)), 1, 'лишняя запись в DST')
         self.assertEqual((tree.links(tree.dst, tree.old), tree.links(tree.src, tree.sub)), (1, 1))
         self.assertEqual(status, FX['FILEX_STATUS_MEDIA'])
+        # Исход записи неизвестен — контекст снят (драйвер, R4-7, R3-4).
+        self.assertEqual(tree.append_valid(), 0)
+
+    def test_restore_retried(self):
+        # Запись назначения легла с отказом, первая попытка вернуть прежнюю
+        # тоже отказала: вторая попытка узнаёт новую запись и возвращает
+        # прежнюю (прежде — одна попытка, драйвер, R8).
+        tree = self.tree()
+        tree.ambiguous = {tree.lba(tree.dst): {1}}
+        tree.failing = {tree.lba(tree.dst): {2}}
+        status = tree.move(flags=FX['FILEX_FLAG_REPLACE'])
+        self.assertEqual(tree.writes_to.get(tree.lba(tree.dst)), 3, 'сценарий не тот')
+        self.assertEqual(tree.links(tree.dst, tree.old), 1, 'прежняя запись назначения не возвращена')
+        self.assertEqual((tree.links(tree.dst, tree.sub), tree.links(tree.src, tree.sub)), (0, 1))
+        self.assertEqual(status, FX['FILEX_STATUS_MEDIA'])
+
+    def test_current_directory_is_not_replaced(self):
+        # Заменяемый каталог — текущий (LSTCAT): замена освободила бы его, а
+        # текущим остался бы свободный кластер (драйвер, R10-1).
+        tree = self.tree()
+        p.h.put32(tree.mem, tree.core('LSTCAT'), tree.old)
+        before = bytes(tree.disk)
+        status = tree.move(flags=FX['FILEX_FLAG_REPLACE'])
+        self.assertEqual(status, FX['FILEX_STATUS_INVALID_MOVE'])
+        self.assertEqual(bytes(tree.disk), before)
+
+    def test_shared_tail_is_refused(self):
+        # Цепочки SUB и заменяемого каталога сходятся в общий кластер: замена
+        # освобождала его из-под живого источника (драйвер, R2-7).
+        tree = self.tree()
+        shared = tree.old + 1
+        tree.set_fat(tree.sub, shared)
+        tree.set_fat(tree.old, shared)
+        tree.set_fat(shared, 0x0FFFFFFF)
+        before = bytes(tree.disk)
+        status = tree.move(flags=FX['FILEX_FLAG_REPLACE'])
+        self.assertEqual(status, FX['FILEX_STATUS_FAT'])
+        self.assertEqual(bytes(tree.disk), before)
+
+    def test_cyclic_destination_directory_is_refused(self):
+        # Цепочка заменяемого каталога замкнута, нулевой записи нет: проверка
+        # пустоты прежде не кончалась (драйвер, R7).
+        tree = self.tree()
+        second = tree.old + 1
+        tree.set_fat(tree.old, second)
+        tree.set_fat(second, tree.old)
+        start = tree.lba(tree.old) * 512
+        for offset in range(64, 512, 32):
+            tree.disk[start + offset] = 0xE5
+        tree.disk[tree.lba(second) * 512:tree.lba(second) * 512 + 512] = bytes([0xE5]) * 512
+        before = bytes(tree.disk)
+        status = tree.move(flags=FX['FILEX_FLAG_REPLACE'])
+        self.assertEqual(status, FX['FILEX_STATUS_FAT'])
+        self.assertEqual(bytes(tree.disk), before)
 
 
 class SourceDelete(unittest.TestCase):
@@ -308,16 +427,29 @@ class SourceDelete(unittest.TestCase):
         self.assertEqual(status, FX['FILEX_STATUS_OK'])
         self.assertEqual((tree.source_links(), tree.links(tree.dst, tree.sub)), (0, 1))
 
-    def test_sfn_write_failed_after_lfn_rolls_back(self):
+    def test_sfn_write_failed_after_lfn_is_completed_by_place(self):
+        # Запись SFN источника отказала (LFN уже стёрто): перенос доводится —
+        # SFN помечается #E5 по месту (ENTRY_KILL_AT; прежде сразу откат, и
+        # отказ уже в откате оставлял две ссылки, драйвер, R8).
         tree = LongTree()
         tree.failing = {tree.lba(tree.src2): {1}}
         status = tree.move(name=tree.NAME)
-        self.assertEqual(tree.writes_to.get(tree.lba(tree.src2)), 1, 'сценарий не тот')
-        self.assertEqual(tree.source_links() + tree.links(tree.dst, tree.sub), 1,
-                         'на каталог смотрят две живые ссылки')
-        self.assertEqual(tree.source_links(), 1, 'короткая запись источника жива')
+        self.assertEqual(tree.writes_to.get(tree.lba(tree.src2)), 2, 'сценарий не тот')
+        self.assertEqual((tree.source_links(), tree.links(tree.dst, tree.sub)), (0, 1))
+        self.assertEqual(tree.dotdot(tree.sub), tree.dst)
+        self.assertEqual(status, FX['FILEX_STATUS_COMMITTED_CLEANUP'])
+
+    def test_sfn_never_written_rolls_back(self):
+        # Запись SFN источника не ложится ни разу (удаление по имени и три
+        # попытки по месту): откат — источник цел, ссылки назначения нет.
+        tree = LongTree()
+        tree.failing = {tree.lba(tree.src2): {1, 2, 3, 4}}
+        status = tree.move(name=tree.NAME)
+        self.assertEqual(tree.writes_to.get(tree.lba(tree.src2)), 4, 'сценарий не тот')
+        self.assertEqual((tree.source_links(), tree.links(tree.dst, tree.sub)), (1, 0))
         self.assertEqual(tree.dotdot(tree.sub), tree.src)
         self.assertEqual(status, FX['FILEX_STATUS_MEDIA'])
+        self.assertEqual(tree.append_valid(), 0)
 
     def test_sfn_delete_applied_but_reported_failure_commits(self):
         tree = LongTree()
@@ -328,9 +460,10 @@ class SourceDelete(unittest.TestCase):
         self.assertEqual(tree.dotdot(tree.sub), tree.dst)
 
     def test_unreadable_source_sector_never_leaves_two_links(self):
-        # Сектор SFN после отказа не читается (три попытки): состояние
-        # неизвестно — откат. Удаление не легло — источник цел; легло —
-        # ссылок не остаётся (потерянная цепочка лучше общей).
+        # Сектор SFN после отказа не читается (три попытки перечитать и
+        # четыре — у доведения по месту): состояние неизвестно — откат.
+        # Удаление не легло — источник цел; легло — ссылок не остаётся
+        # (потерянная цепочка лучше общей).
         for applied in (False, True):
             with self.subTest(applied=applied):
                 tree = LongTree()
@@ -339,7 +472,7 @@ class SourceDelete(unittest.TestCase):
                     tree.ambiguous = faults
                 else:
                     tree.failing = faults
-                tree.bad_reads = {tree.lba(tree.src2): 3}
+                tree.bad_reads = {tree.lba(tree.src2): 7}
                 status = tree.move(name=tree.NAME)
                 self.assertEqual(tree.bad_reads[tree.lba(tree.src2)], 0, 'перечитано меньше трёх раз')
                 self.assertLessEqual(tree.source_links() + tree.links(tree.dst, tree.sub), 1,

@@ -129,7 +129,7 @@ class RenameCrash(unittest.TestCase):
     def rename(self, volume, old, fail_write=None, fail_read_after=False, applied=False):
         """fail_write — номер записи в сектор target, которая откажет (1 — первая).
         applied — сектор при этом всё же лёг на носитель."""
-        state = {'writes': 0, 'failed': False, 'read_failed': False}
+        state = {'writes': 0, 'failed': False, 'read_failed': False, 'bad_reads': int(fail_read_after)}
         sddse, rddse = volume.handlers[volume.core('SDDSE')], volume.handlers[volume.core('RDDSE')]
         target = self.target
 
@@ -146,8 +146,10 @@ class RenameCrash(unittest.TestCase):
             sddse()
 
         def read():
-            if fail_read_after and state['failed'] and not state['read_failed'] \
-                    and volume.position == target:
+            # fail_read_after — сколько чтений сектора target откажут после
+            # первой отказавшей записи (True — одно).
+            if state['bad_reads'] and state['failed'] and volume.position == target:
+                state['bad_reads'] -= 1
                 state['read_failed'] = True
                 volume.mem[volume.core('ABT')] = 1
                 volume._ret()
@@ -162,14 +164,28 @@ class RenameCrash(unittest.TestCase):
         self.a = a                                  # код для окна F6 (FEEM)
         return not f & Z, state
 
-    def test_partial_lfn_delete_keeps_one_entry(self):
+    def test_partial_lfn_delete_is_completed_by_place(self):
         # 14 коротких записей, затем длинное имя: LFN — в конце первого
         # сектора, SFN — во втором. Первая запись во второй сектор — новая
         # запись new.bin (легла), вторая — удаление прежней SFN (отказ).
+        # Claude - 2026-10-10: прежняя SFN добивается по месту (третья
+        # запись), переименование доводится; прежде — откат (драйвер, R8-1).
         old = 'long-name-with-20-chars.txt'
         volume, cluster, self.target = self.prepare(8, old, fillers=14)
         done, state = self.rename(volume, old, fail_write=(2,))
         self.assertTrue(state['failed'], 'сбой не случился — сценарий не тот')
+        owners = [r[:11] for _, r in live_sfn(volume) if cluster_of(r) == cluster]
+        self.assertEqual(len(owners), 1, f'на цепочке {cluster} записей: {owners}')
+        self.assertTrue(done)
+        self.assertEqual([e[0].lower() for e in volume.entries() if e[1] == cluster], ['new.bin'])
+
+    def test_old_sfn_never_written_rolls_back(self):
+        # Прежнюю SFN не пометить ни удалением, ни тремя записями по месту:
+        # откат — новая удаляется, на цепочке одна запись (прежняя).
+        old = 'long-name-with-20-chars.txt'
+        volume, cluster, self.target = self.prepare(8, old, fillers=14)
+        done, state = self.rename(volume, old, fail_write=(2, 3, 4, 5))
+        self.assertEqual(state['writes'], 6, 'сценарий не тот: откат — шестая запись')
         owners = [r[:11] for _, r in live_sfn(volume) if cluster_of(r) == cluster]
         self.assertEqual(len(owners), 1, f'на цепочке {cluster} записей: {owners}')
         self.assertFalse(done, 'отказ удаления прежней записи сообщён как успех')
@@ -177,13 +193,22 @@ class RenameCrash(unittest.TestCase):
         self.assertEqual(self.a, 0, 'после отката окно F6 не «UNKNOWN ERROR!!»')
 
     def test_unreadable_old_sector_keeps_one_entry(self):
+        # Сектор прежней не читается (четыре попытки) — откат.
         volume, cluster, self.target = self.prepare(1, 'old.bin')
-        done, state = self.rename(volume, 'old.bin', fail_write=(2,), fail_read_after=True)
+        done, state = self.rename(volume, 'old.bin', fail_write=(2,), fail_read_after=4)
         self.assertTrue(state['read_failed'], 'повторное чтение не понадобилось')
+        self.assertEqual(state['bad_reads'], 0, 'прочитано меньше четырёх раз')
         owners = [r[:11] for _, r in live_sfn(volume) if cluster_of(r) == cluster]
         self.assertEqual(len(owners), 1, f'на цепочке {cluster} записей: {owners}')
         self.assertFalse(done)
         self.assertEqual(self.a, 0, 'после отката окно F6 не «UNKNOWN ERROR!!»')
+
+    def test_one_failed_reread_still_completes(self):
+        volume, cluster, self.target = self.prepare(1, 'old.bin')
+        done, state = self.rename(volume, 'old.bin', fail_write=(2,), fail_read_after=1)
+        self.assertTrue(state['read_failed'])
+        self.assertTrue(done)
+        self.assertEqual([e[0].lower() for e in volume.entries() if e[1] == cluster], ['new.bin'])
 
     def test_applied_old_delete_keeps_the_new_name(self):
         # Удаление прежней легло на носитель, драйвер вернул ошибку: откат
@@ -211,6 +236,91 @@ class RenameCrash(unittest.TestCase):
         self.assertTrue(done)
         names = [e[0] for e in volume.entries() if e[1] == cluster]
         self.assertEqual([n.lower() for n in names], ['new.bin'])
+
+
+# Claude - 2026-10-10 - begin
+class Attributes(unittest.TestCase):
+    """Новая короткая запись — сразу с полным атрибутом (SVHDFL_ATTR ядра;
+    драйвер FAT32: R2-4, R3-7, R6-1). Прежде ENTREZ оставлял в ней только бит
+    каталога: API 72 терял «только чтение», «скрытый», «системный», «архив»,
+    а RENAME дописывал атрибут отдельной записью сектора уже после удаления
+    прежнего имени."""
+
+    def attr_of(self, volume, name):
+        (entry,) = [e for e in volume.entries() if same_name(e[0], name)]
+        (_, record), = [(o, r) for o, r in live_sfn(volume) if cluster_of(r) == entry[1]]
+        return record[11]
+
+    def test_mkfile_keeps_the_attribute(self):
+        volume = Volume(spc=1, fat_sectors=4)
+        self.assertEqual(volume.mkfile('RO.BIN', 512, attr=0x27), (0, True))
+        self.assertEqual(self.attr_of(volume, 'RO.BIN'), 0x27)
+
+    def test_mkfile_drops_the_directory_bit(self):
+        volume = Volume(spc=1, fat_sectors=4)
+        self.assertEqual(volume.mkfile('NOTDIR.BIN', 512, attr=0x30), (0, True))
+        self.assertEqual(self.attr_of(volume, 'NOTDIR.BIN'), 0x20, 'MKFILE создал «каталог»')
+
+    def test_rename_writes_the_attribute_with_the_new_entry(self):
+        volume = Volume(spc=1, fat_sectors=4)
+        self.assertEqual(volume.mkfile('old.bin', 512, attr=0x21), (0, True))
+        directory = volume.cluster_lba(DIR_CLUSTER)
+        writes = []
+        sddse = volume.handlers[volume.core('SDDSE')]
+
+        def write():
+            if volume.position == directory:
+                writes.append(bytes(volume.mem[volume.cpu.hl:volume.cpu.hl + 512]))
+            sddse()
+
+        volume.handlers[volume.core('SDDSE')] = write
+        volume.mem[NEW_NAME:NEW_NAME + 8] = b'new.bin\0'
+        a, f, _, _ = volume.call(RENAME, hl=volume.query('old.bin'), de=NEW_NAME, budget=20000)
+        volume.handlers[volume.core('SDDSE')] = sddse
+        self.assertFalse(f & Z, 'не переименовано')
+        self.assertEqual(self.attr_of(volume, 'new.bin'), 0x21)
+        # Первая же запись сектора несёт новую запись с полным атрибутом;
+        # всего две записи — новая и удаление прежней, отдельной правки нет.
+        self.assertEqual(len(writes), 2, f'записей в сектор каталога: {len(writes)}')
+        first = [writes[0][o:o + 32] for o in range(0, 512, 32)]
+        self.assertIn(0x21, [r[11] for r in first if r[:3] == b'NEW'])
+
+
+class DotEntries(unittest.TestCase):
+    """«.» и «..» не удаляются и не переименовываются (драйвер FAT32, R9):
+    DELETE «.» освобождал цепочку самого каталога, «..» — родителя, RENAME
+    «..» создавал подкаталог, указывающий на родителя."""
+
+    def subdir(self):
+        volume = Volume(spc=1, fat_sectors=4)
+        a, failed = MkdirCrash.mkdir(None, volume, 'sub')
+        self.assertFalse(failed)
+        (entry,) = [e for e in volume.entries() if same_name(e[0], 'sub')]
+        p = volume.core('LSTCAT')
+        volume.mem[p:p + 4] = entry[1].to_bytes(4, 'little')        # войти в sub
+        return volume, entry[1]
+
+    def test_dot_entries_are_not_deleted(self):
+        for name in ('.', '..'):
+            with self.subTest(name=name):
+                volume, cluster = self.subdir()
+                before = dict(volume.sectors)
+                a, f, _, _ = volume.call(volume.core('DELFL'), hl=volume.query(name, 0x10), budget=20000)
+                self.assertTrue(f & Z, f'«{name}» удалена')
+                self.assertNotEqual(volume.fat(cluster) & 0x0FFFFFFF, 0, 'цепочка каталога освобождена')
+                self.assertEqual(dict(volume.sectors), before, 'диск изменён')
+
+    def test_dot_entries_are_not_renamed(self):
+        for name in ('.', '..'):
+            with self.subTest(name=name):
+                volume, cluster = self.subdir()
+                before = dict(volume.sectors)
+                volume.mem[NEW_NAME:NEW_NAME + 2] = b'x\0'
+                a, f, _, _ = volume.call(RENAME, hl=volume.query(name, 0x10), de=NEW_NAME, budget=20000)
+                self.assertTrue(f & Z, f'«{name}» переименована')
+                self.assertEqual(a, 8)
+                self.assertEqual(dict(volume.sectors), before, 'диск изменён')
+# Claude - 2026-10-10 - end
 
 
 class MkdirCrash(unittest.TestCase):
@@ -853,7 +963,13 @@ class ScanOutsideTheGate(unittest.TestCase):
     def check(self, volume, state, ei):
         iff = 1 if ei else 0
         scans = state['scans']
-        self.assertGreater(len(scans), self.USED - 3, 'просмотр не прошёл занятые кластеры')
+        # С 2026-10-11 FC — один вызов шлюза на сектор FAT (SCAN_FREE_SECTOR),
+        # а не на запись: занятые 3..599 — это 5 секторов по 128 записей.
+        sectors = (self.USED + 127) // 128
+        self.assertGreaterEqual(len(scans), sectors - 1, 'просмотр не прошёл занятые кластеры')
+        # APPEND проходит сектора дважды (проверка и выделение) — всё равно по
+        # сектору: на каждую запись было бы ~600 вызовов.
+        self.assertLessEqual(len(scans), 2 * sectors + 2, 'FC снова на каждую запись FAT')
         self.assertEqual({page for _, page in scans}, {self.OUTER},
                          'во время просмотра в окне #C000 не страница вызывающего')
         self.assertEqual({flag for flag, _ in scans}, {iff},

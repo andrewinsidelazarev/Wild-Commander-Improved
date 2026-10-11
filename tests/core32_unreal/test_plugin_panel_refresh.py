@@ -63,7 +63,7 @@ def installed_cpu(sym, boot):
                for line in (ROOT / 'Build/CORE32_EXT.sym').read_text().splitlines()
                if (m := re.match(r'^([^:]+):\s+EQU\s+(0x[0-9A-Fa-f]+)$', line))}
     core, page = runtime_image.expected_pages(boot, raw_extension, sym, ext_sym)
-    assert banks[0xE8][:len(raw_extension)] == page
+    assert banks[0xE8][:len(page)] == page
     assert bytes(cpu.memory[0x4000:0x5BF2]) == core
     template = sym['PLUGIN_REFRESH_TEMPLATE'] - 0x6000
     assert bytes(cpu.memory[0x5BF2:0x5BFA]) == boot[template:template+8]

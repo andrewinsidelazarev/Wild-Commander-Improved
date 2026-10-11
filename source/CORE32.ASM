@@ -357,31 +357,14 @@ SNMD    XOR A:LD (DE),A:INC DE
         LD (CGPZ),HL
         XOR A:INC A
         RET
-UCH     INC L
-        LD A,(HL):OR A:JR NZ,UCHX
-        DEC L:LD A,(HL):INC L,L
-        OR A:JR Z,UCHE
-        LD (DE),A:INC DE
-        CP #80:RET C
-UCH_    XOR A:RET
-UCh_    INC L:XOR A:RET
-UCHE    XOR A:INC A:RET
-
-UCHX    CP 4:JR NZ,UCh_
-        DEC L:LD A,(HL):INC L,L
-        CP #01:JR Z,HYO
-        CP #10:JR C,UCH_
-        CP #3F+1:JR C,DGG
-        CP #4F+1:JR C,DEE
-        CP #51:JR Z,LYO
-        XOR A
-        RET
-DGG     ADD A,#70:LD (DE),A:INC DE
-        SCF:RET
-DEE     ADD A,#A0:LD (DE),A:INC DE
-        SCF:RET
-HYO     LD A,#F0,(DE),A:INC DE:SCF:RET
-LYO     LD A,#F1,(DE),A:INC DE:SCF:RET
+; Claude - 2026-10-10 - begin
+; Знак UTF-16 в CP866 для списка (NXTETY2) — во втором резидентном блоке, с
+; полной таблицей: имена с псевдографикой и №, Є, Ї, Ў, ° показываются
+; длинными, а не коротким именем. Длина прежняя.
+UCH     JP WDOS_EXT.UCH_RESIDENT
+        DS 79-3,0
+        ASSERT $ == Acs, UCH сменил длину
+; Claude - 2026-10-10 - end
 Acs     CP #80:JR NC,RU3
         CP #40+1:RET C
         CP #5B:RET NC
@@ -523,9 +506,9 @@ LOADNON LD DE,Z0
         JP WDOS_EXT.STREAM_RESIDENT
         DS 2,0
 
-LOAD256 LD DE,RDD256
-        JP WDOS_EXT.STREAM_RESIDENT
-        DS 2,0
+; Claude - 2026-10-10: буфер проверяется в резидентном блоке (LOAD256_CODE).
+LOAD256 JP WDOS_EXT.LOAD256_RESIDENT
+        DS 5,0
 ; Claude - 2026-10-01 - end
 
 ; SAVE512 — потоково записать B блоков по 512 байт из памяти с адреса HL.
@@ -570,8 +553,14 @@ RH      LD HL,(LDHL)
 ; Codex - 2026-07-17 - begin
         ; Штатный EOC=#0F возвращается с CF=0; ошибка #FF сохраняет CF=1.
         LD A,(EOC)
-        JR C,LOAD512_RESTORE_HANDLER
-        OR A
+; Claude - 2026-10-10 - begin
+        ; CF — по самому EOC, а не по этому вызову: поток, остановленный
+        ; ошибкой (EOC=#FF ставят только STREAM_IO_ERROR и FAT_LINK_ERROR),
+        ; на следующем вызове прежде отвечал A=#FF с CF=0 и ABT=0 — как
+        ; обычный конец (драйвер FAT32). #FF — CF=1, NZ; #0F — CF=0, NZ; 0 — Z.
+        ADD A,1
+        DEC A
+; Claude - 2026-10-10 - end
 LOAD512_RESTORE_HANDLER:
         JP STREAM_RESTORE_READ_HANDLER
 ; Codex - 2026-07-17 - end
@@ -652,27 +641,20 @@ SRHFC
         CALL_WDOS_EXTENSION WDOS_EXT.ID_NEXT_FREE_FAT_SECTOR
         RET C
 
-; Codex - 2026-07-16 - begin
-FC      CALL_WDOS_EXTENSION WDOS_EXT.ID_CHECK_FREE_SCAN_LIMIT
+; Claude - 2026-10-11 - begin
+; Записи сектора FAT проверяет расширение одним вызовом шлюза на сектор
+; (SCAN_FREE_SECTOR). Прежде шлюз (CHECK_FREE_SCAN_LIMIT) звался на каждую
+; запись — ~2330 тактов на кластер, и первый после загрузки поиск места на
+; большой карте шёл минуту. Z — свободная (HL — за ней, CADE:CAHL — её номер);
+; NZ — сектор или данные кончились: SRHFC — следующий сектор, за данными —
+; wrap к 2; CF=1 — места нет.
+FC      CALL_WDOS_EXTENSION WDOS_EXT.ID_SCAN_FREE_SECTOR
         RET C
-; Codex - 2026-07-16 - end
-        LD A,(HL):INC HL
-        OR (HL):INC HL
-        OR (HL):INC HL
-        OR (HL):INC HL:JR Z,GETZE
-
-        EX DE,HL
-        LD HL,CAHL
-; Claude - 2026-09-21 - begin
-        ; Тот же 32-битный инкремент CADE:CAHL, что и в GETZE. B и DE здесь
-        ; не живут: CHECK_FREE_SCAN_LIMIT на каждом шаге FC и так их разрушает.
-        CALL INC4b
-        EX DE,HL
-        LD A,H:CP high SECBE:JR C,FC
-        ; SRHFC — ровно прежний хвост: переход к следующему сектору FAT с
-        ; проверкой границы и wrap (NEXT_FREE_FAT_SECTOR), RET C, затем FC.
+        JR Z,GETZE
         JR SRHFC
-; Claude - 2026-09-21 - end
+        DS 21,0                                 ; GETZE и ниже — на прежних адресах
+        ASSERT $ == #447B, сдвинулся GETZE
+; Claude - 2026-10-11 - end
 GETZE   EXX
         LD HL,(CAHL),DE,(CADE)
         PUSH HL:LD HL,CAHL:CALL INC4b
@@ -828,7 +810,12 @@ XSPOZ   LD BC,(ADDTOP),(CLHL),BC
 
 SVHDFL
 
-        LD A,(EFLG):AND #10
+; Claude - 2026-10-10 - begin
+        ; EFLG — это ENTRY+11, и ENTREZ пишет туда тип (бит каталога): полный
+        ; атрибут — в операнд SVHDFL_ATTR до него.
+        LD A,(EFLG):LD (SVHDFL_ATTR+1),A
+        AND #10
+; Claude - 2026-10-10 - end
         CALL ENTREZ_ANY_TYPE:RET NZ
         LD (CGDE),HL
 
@@ -839,8 +826,21 @@ SVHDFL
         ; испорчена — отказ носителя до любой записи. Длина та же.
 SHDFL   CALL_WDOS_EXTENSION WDOS_EXT.ID_DIR_STREAM_OPEN
         JP C,SVHDFL_READ_ERROR
-        DS 10,0
 ; Claude - 2026-09-27 - end
+; Claude - 2026-10-10 - begin
+; Новая короткая запись — сразу с полным атрибутом: «только чтение»,
+; «скрытый», «системный», «каталог», «архив» (#37). Прежде ENTREZ оставлял в
+; ней только бит каталога: RENAME дописывал атрибут отдельной записью уже после
+; удаления прежнего имени (её отказ оставлял файл без «только чтения»), MOVE
+; FILEX — правкой записи после создания, а API 72 терял атрибут совсем
+; (драйвер FAT32: R2-4, R3-7, R6-1). Место — прежнее заполнение блока (здесь
+; DS 10 и DS 4 у FIIL): FELD остаётся на #45FB.
+SVHDFL_ATTR
+        LD A,0
+        AND #37
+        LD (NXTBM+11),A
+        LD (ENTRY+11),A
+; Claude - 2026-10-10 - end
 ; Claude - 2026-09-26 - begin
 ; Отказ чтения сектора каталога (CF=1, EOC=#FF) прежде не проверялся: FIEL
 ; искал свободное место в прежнем содержимом LOBU, а FIIL принимал EOC=#FF
@@ -869,7 +869,6 @@ FIEL    CP (HL):JP Z,FELD
 FIIL    CALL_WDOS_EXTENSION WDOS_EXT.ID_DIR_GROW
         JR Z,NXDCL
         RET C
-        DS 4,0
 ; Claude - 2026-09-27 - end
         LD (BUTS),HL,(BUTS+2),DE
         EXX
@@ -1137,14 +1136,13 @@ OEM2UC  LD A,(DE):OR A:JR Z,FNLZ:INC DE
         LD (HL),B:INC HL
         POP BC
         RET
-ORU     LD B,4
-        CP #F0:LD C,#01:RET Z
-        CP #F1:LD C,#51:RET Z
-        CP #B0:JR NC,OR2
-        SUB #70:LD C,A:RET
-OR2     CP #F0:RET NC
-        CP #E0:RET C
-        SUB #A0:LD C,A:RET
+; Claude - 2026-10-10 - begin
+; Знак CP866 от #80 в UTF-16 — во втором резидентном блоке, с полной таблицей
+; (прежде псевдографика и №, Є, Ї, Ў, ° писались как «ё»). Длина прежняя.
+ORU     JP WDOS_EXT.OEM_UCS_RESIDENT
+        DS 30-3,0
+        ASSERT $ == ENnvl, ORU сменил длину
+; Claude - 2026-10-10 - end
 ; Codex - 2026-07-16 - begin
 ; Старая процедура отвергала ровно 255 символов. Реализация вынесена в
 ; расширение (ID_VALIDATE_NAME); с 2026-09-26 его зовёт сам ENTREZ, прокладка
@@ -1621,9 +1619,12 @@ LNEB    LD A,L:AND #F0:LD L,A
 ; Codex - 2026-07-16 - end
 
         LD DE,(CGDE):INC DE
-; Codex - 2026-07-16 - begin
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_BEGIN_LFN_COMPARE
-; Codex - 2026-07-16 - end
+; Claude - 2026-10-10 - begin
+        ; Прежде — CALL_WDOS_EXTENSION ID_BEGIN_LFN_COMPARE: пропуск начальных
+        ; пробелов, теперь они значимы (COMPARE_LFN_CHAR). Четыре байта вызова
+        ; — NOP: адреса за LNEB (DELFL #4CDD) не сдвигаются.
+        DS 4,0
+; Claude - 2026-10-10 - end
         LD A,L:AND #F0:LD L,A
 
         LD B,1
@@ -1692,26 +1693,13 @@ RU2     CP #E0:RET C
         CP #F0:RET Z
         SUB #50
         RET
-UCS     INC L
-        LD A,(HL):OR A:JR NZ,UCSX
-        DEC L:LD A,(HL):INC L,L
-        OR A:JR Z,UCSE
-        CP #80:RET C
-UCS_    XOR A:RET
-UCSE    LD A,#FF:RET
-
-UCSX    CP 4:JR NZ,UCS_
-        DEC L:LD A,(HL):INC L,L
-        CP #01:JR Z,Hyo
-        CP #10:JR C,UCS_
-        CP #3F+1:JR C,Dgg
-        CP #4F+1:JR C,Dee
-        CP #51:JR Z,Lyo
-        JR UCS_
-Dgg     ADD A,#70:RET
-Dee     ADD A,#A0:RET
-Hyo     LD A,#F0:RET
-Lyo     LD A,#F1:RET
+; Claude - 2026-10-10 - begin
+; Знак UTF-16 в CP866 для сравнения имён — во втором резидентном блоке, с
+; полной таблицей. Длина прежняя: DELFL — на своём адресе.
+UCS     JP WDOS_EXT.UCS_RESIDENT
+        DS 62-3,0
+        ASSERT $ == DELFL, UCS сменил длину
+; Claude - 2026-10-10 - end
 
 ; DELFL — удалить файл или каталог по имени.
 ; Вход: HL указывает на [флаг, имя, 0]. Выход: Z — запись не найдена;
@@ -2004,7 +1992,19 @@ CKAGO   LD (DAHL),HL
         LD H,(HL),L,A:EX DE,HL
 
         CALL CURIT
-        JR CKAGO
+; Claude - 2026-10-10 - begin
+        ; Отказ чтения FAT: прежде JR CKAGO брал ссылку по мусорному указателю,
+        ; и Mounter строил по ней таблицу секторов TRD-образа — TR-DOS писал в
+        ; чужие секторы (драйвер FAT32). Теперь — выход, как у испорченной
+        ; ссылки в GIPP (блок перенесён сюда, длина ядра та же).
+        JR NC,CKAGO
+; Codex - 2026-07-16 - begin
+GIPP_BAD_LINK:
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_RECORD_FAT_LINK_ERROR
+        XOR A
+        RET
+; Codex - 2026-07-16 - end
+; Claude - 2026-10-10 - end
 
 CLUSSEC
 
@@ -2049,12 +2049,6 @@ GIPP
 
         XOR A:INC A
         RET
-; Codex - 2026-07-16 - begin
-GIPP_BAD_LINK:
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_RECORD_FAT_LINK_ERROR
-        XOR A
-        RET
-; Codex - 2026-07-16 - end
 
 ; HDD — найти доступный раздел FAT32 и заполнить рабочие параметры BPB.
 ; Входных регистров нет; драйвер должен быть выбран и позиционироваться через
@@ -2096,40 +2090,39 @@ FHDD    LD A,(ZES):OR A:JR NZ,FHDD_EXTENDED
         RET
 FHDD_EXTENDED:
 ; Codex - 2026-07-16 - end
-
-        LD DE,(DADE),HL,(DAHL)
+; Claude - 2026-10-10 - begin
+; Запасной путь: BPB раздела из MBR не подошёл. Перечитать MBR (LBA 0) и, пока
+; COUNT не исчерпан и запись 2 пуста, пробовать начало записи 1 любого типа;
+; иначе — NHDD (весь носитель как superfloppy). Прежде то же шло через
+; DAHL/DADE «расширенного раздела», но там всегда был 0 (EBR WC не читал
+; никогда, логических томов не находит): второе чтение MBR и сложения с нулём
+; были лишними. Поведение то же, код на 48 байт короче — место под исправления
+; из драйвера FAT32 (добивка — перед DOS_SWP).
+        LD HL,0
+        LD D,H:LD E,L
         CALL XPOZI
-
-; Codex - 2026-07-16 - begin
         LD HL,LOBU:LD A,1:CALL SAFE_RDDSE
         RET NZ
-; Codex - 2026-07-16 - end
-
         LD HL,COUNT:DEC (HL):JP Z,NHDD
-
         LD HL,LOBU+446+16,B,16
         XOR A:OR (HL):INC HL:DJNZ $-2
         JP NZ,NHDD
-
-        LD HL,(LOBU+446+16+8)
-        LD DE,(LOBU+446+16+8+2)
-        LD (CLHL),HL,(CLDE),DE
-        LD HL,(DAHL),DE,(DADE)
-        CALL ADD4BF
-        LD (DADE),DE,(DAHL),HL
-        CALL XPOZI
-
-; Codex - 2026-07-16 - begin
-        LD HL,LOBU,A,1:CALL SAFE_RDDSE
-        RET NZ
-; Codex - 2026-07-16 - end
-
+; Claude - 2026-10-10 - begin
+        LD HL,LOBU+446+12                       ; длина раздела записи 1
+        CALL PARTSZ_FROM
+; Claude - 2026-10-10 - end
         LD HL,(LOBU+446+8)
         LD DE,(LOBU+446+8+2)
-        CALL ADD4BF
         JR LDBPB
+; Claude - 2026-10-10 - end
 
 OKK     INC HL,HL,HL,HL
+; Claude - 2026-10-10 - begin
+        PUSH HL                                 ; +8 — начало раздела
+        INC HL,HL,HL,HL
+        CALL PARTSZ_FROM                        ; +12 — его длина
+        POP HL
+; Claude - 2026-10-10 - end
         LD E,(HL):INC HL
         LD D,(HL):INC HL
         LD A,(HL):INC HL
@@ -2148,7 +2141,6 @@ LDBPB   LD (ADDTOP),HL,(ADDTOP+2),DE
         LD HL,(LOBU+11)
         LD A,H:DEC A,A:OR L:JP NZ,FHDD
         LD A,(LOBU+13):OR A:JP Z,FHDD
-        LD A,(LOBU+14):OR A:JP Z,FHDD
         LD A,(LOBU+16):OR A:JP Z,FHDD
 
         LD HL,(LOBU+17),A,H:OR L
@@ -2162,6 +2154,11 @@ LDBPB   LD (ADDTOP),HL,(ADDTOP+2),DE
         LD B,8:SRL A:JR C,NER:DJNZ $-4:LD A,1
 NER     OR A:JP NZ,FHDD
         LD HL,(LOBU+14),(BREZS),HL
+; Claude - 2026-10-10 - begin
+        ; Резерв — все 16 бит: прежде проверялся младший байт, и любой резерв,
+        ; кратный 256, давал ложный отказ монтирования (драйвер FAT32).
+        LD A,H:OR L:JP Z,FHDD
+; Claude - 2026-10-10 - end
         LD HL,(LOBU+48),DE,0
         CALL XSPOZ
         LD (FSINF),HL,(FSINF+2),DE
@@ -2188,20 +2185,43 @@ NER     OR A:JP NZ,FHDD
         LD (LSTCAT+2),HL
         LD (CGFL),HL
 
-        CALL_WDOS_EXTENSION WDOS_EXT.ID_LOAD_FREE_HINT
 ; Claude - 2026-09-21 - begin
         ; Смонтирован (возможно, другой) том: кэш FAT всех страниц недействителен.
-        ; Прежние четыре NOP заняты вызовом; размер HDD не изменился.
         CALL FAT_CACHE_BUMP
-        NOP
 ; Claude - 2026-09-21 - end
+; Claude - 2026-10-10 - begin
+        ; Геометрия тома (LOAD_FREE_HINT): нет ни одного кластера данных, том
+        ; кончается до области данных, номера кластеров за 2^28 — отказ
+        ; монтирования. Прежде итог не проверялся: такой том монтировался с
+        ; границей кластеров «не задана», и записи каталога уходили за том
+        ; (драйвер FAT32). Сброс кэша — до вызова: CURIT внутри лишь снимает
+        ; метку кэша.
+        CALL_WDOS_EXTENSION WDOS_EXT.ID_LOAD_FREE_HINT
+        JP NZ,FHDD
+        JP TOS
+; Claude - 2026-10-10 - end
 
-        CALL TOS
-        RET
-
-NHDD    LD HL,(DUHL),DE,(DUDE)
+NHDD
+; Claude - 2026-10-10 - begin
+        ; Весь носитель как superfloppy: границы раздела нет.
+        LD HL,#FFFF:LD (DAHL),HL:LD (DADE),HL
+; Claude - 2026-10-10 - end
+        LD HL,(DUHL),DE,(DUDE)
         XOR A:LD (ZES),A
         JP LDBPB
+; Claude - 2026-10-10 - begin
+; Длина раздела из записи MBR (HL → 4 байта) — в DAHL:DADE на время
+; монтирования: LOAD_FREE_HINT не пускает том длиннее раздела (драйвер FAT32).
+; Обе ячейки — временные CHTOSE и поиска места; HDD их и так обнуляет.
+PARTSZ_FROM:
+        LD DE,DAHL,BC,4:LDIR
+        RET
+; Claude - 2026-10-10 - end
+; Claude - 2026-10-10 - begin
+        ; HDD короче (FHDD_EXTENDED): DOS_SWP — на прежнем адресе (ABI).
+        DS #4FF8-$,0
+        ASSERT $ == #4FF8, сдвинулся фиксированный вход DOS_SWP
+; Claude - 2026-10-10 - end
 
 ; DOS_SWP — активировать один из встроенных драйверов носителя.
 ; Вход: A=0 Nemo master, 1 SD ZC, 2 SD NGS, 3 SMUC master,

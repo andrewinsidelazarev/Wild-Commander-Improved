@@ -89,7 +89,7 @@ CP7     EQU #0B;] Low
         DS 16; Reserved
         DB "WildCommanderMDL"; Header
         DB #10; v0.16 of Plugin System Needed
-        DB 0; Reserved
+        DB 2; +33 bit 1: в меню Shift+F3 для любого файла (2026-10-11)
         DB 2; Pages
         DB 0; Page to #8000
 

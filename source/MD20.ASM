@@ -58,7 +58,9 @@ MAIN:
 L6011_0:
         EI
         HALT
-        CALL    CURSOR                  ; Обновить курсор активной панели.
+        ; Claude - 2026-10-11: сперва — не вынимали ли загрузочную карту
+        ; (MEDIA_IDLE перемонтирует её панели), затем CURSOR.
+        CALL    WDOS_EXT.MEDIA_IDLE     ; Обновить курсор активной панели.
         CALL    ALT_KEY
         CALL    NZ,WCFX.F12             ; Действие комбинации с Alt.
         JR      NZ,L6011_0
@@ -94,7 +96,7 @@ L6011_0:
         CALL    F1_KEY
         CALL    NZ,WCFX.HELP
         CALL    F3_KEY
-        CALL    NZ,WCVW.VIEW
+        CALL    NZ,WCVW.VIEWK           ; F3: файлу без обработчика — меню (Claude, 2026-10-11)
         CALL    F10_KEY
         CALL    NZ,WCVW.F11MENU         ; Меню загруженных плагинов.
         CALL    TAB_KEY
@@ -2684,7 +2686,8 @@ L6011_227:
 
 L6011_228:
         LD      HL,#7F30
-        JP      #4012
+; Claude - 2026-10-10: GIPAG_FILE — кластер 0 файла не корень, кластер корня — ошибка.
+        JP      WDOS_EXT.GIPAG_FILE
 
 L6011_229:
         LD      HL,#7F30

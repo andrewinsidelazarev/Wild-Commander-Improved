@@ -1,7 +1,7 @@
 ; WCVW — исходная подсистема просмотровщиков, запуска форматов и плагинов,
 ; точно восстановленная для SJASMPlus. Exact-диапазон: #9149..#9B7B.
 ; Основные процедуры:
-;   NXTFL/PRVFL #9149/#9152 — переход к следующему или предыдущему файлу;
+;   NXTFL/PRVFL #9149/#914E — переход к следующему или предыдущему файлу;
 ;   EXTZEL #915B — выбор расширения; VIEW #92BA — просмотр или запуск файла;
 ;   RUNSPG #957B — загрузка Spectrum Program; F11MENU #9906 — меню плагинов;
 ;   PLGE #9B01 — разбор и запуск выбранного плагина.
@@ -18,7 +18,7 @@ PLHPG   EQU #60
 PLGPG   EQU #61
 PLEPG   EQU #A0
 PLGOV   EQU #02
-PLGCV   EQU #10
+PLGCV   EQU @WMF_DYNAMIC_VERSION
 MAXOP   EQU 8
 BASIC48 EQU #03
 MTXPG   EQU #00
@@ -73,8 +73,17 @@ GIPAG   EQU #4012
 LOAD512 EQU #4015
 
 ;-------
-NXTFL   CALL CRDN,WCFX.STATUS:JP VIEW
-PRVFL   CALL CRUP,WCFX.STATUS:JP VIEW
+; Claude - 2026-10-11: следующий/предыдущий файл по просьбе плагина (A=2/4).
+; Файл, который никто не открывает, — возврат в панель (F3NONE → GED); прежде
+; цепочка плеера на таком файле открывала меню Shift+F3. F3 с клавиатуры
+; (VIEWK) возвращает меню.
+NXTFL   CALL CRDN:JR CHAIN
+PRVFL   CALL CRUP
+CHAIN   CALL WCFX.STATUS
+        LD HL,GED
+        JP F3SET
+        DS #915B-$,0
+        ASSERT $ == #915B, сдвинулся EXTZEL
 ;---------------------------------------
 EXTZEL  CALL GETEN:RET Z
         LD A,H:OR L:RET Z
@@ -93,19 +102,27 @@ EXTSEL  CALL GED
 
         PUSH IX
         LD A,(PHED+1),C,0
-        CP #C2:JR C,GEE
+        ; Пустая таблица — PHED=#C000, полная (32 заголовка) — PHED=#0000:
+        ; прежняя проверка «меньше #C2» принимала полную за пустую.
+        CP #C0:JR Z,GEE
 
         LD A,PLHPG:CALL MNGC
         LD HL,#C000+197,DE,LOBU
 
-ZkL2    LD A,(HL)
-        CP #04:JR Z,GREEGO
-        CP #05:JR Z,GREEGO
-        CP #15:JR Z,GREEGO
-        LD BC,512:JR GREE
-GREEGO  LD BC,7:ADD HL,BC:LD C,24:LDIR
-        LD BC,512-24-7
-GREE    ADD HL,BC
+; Claude - 2026-10-11: в меню — плагины, чей список держит расширение файла,
+; и универсальные просмотрщики (WMF_MENU_FIT); прежде — все #04/#05/#15 для
+; любого файла, а плагины по расширению — никогда. Подписи у плагина по
+; расширению обычно нет (+204) — тогда его имя.
+ZkL2    CALL @WMF_MENU_FIT
+        JR Z,GREE0
+        PUSH HL
+        LD BC,7:ADD HL,BC                       ; +204 — подпись в меню
+        LD A,(HL):CP " "+1:JR NC,GRCAP
+        LD BC,165-204:ADD HL,BC                 ; подписи нет — имя плагина
+GRCAP   LD BC,24:LDIR
+        POP HL
+GREE0   LD BC,512
+        ADD HL,BC
         LD A,(PHED+1):CP H:JR NZ,ZkL2
 
         XOR A
@@ -155,19 +172,30 @@ ES      CALL RRESB
         PUSH AF:LD A,PLHPG:CALL MNGC
         POP BC
         LD DE,#C000+197-512
-ESLG    LD HL,(PHED)
-        OR A:SBC HL,DE:RET C
-        LD HL,512:ADD HL,DE
-        LD A,(HL):EX DE,HL
-        CP #04:JR Z,DSL
-        CP #05:JR Z,DSL
-        CP #15:JR NZ,ESLG
-DSL     DJNZ ESLG
+ESLG    CALL HNEXT:RET C                ; и полная таблица (PHED=#0000)
+        PUSH BC
+        EX DE,HL
+        CALL @WMF_MENU_FIT                      ; тот же отбор, что у списка;
+        EX DE,HL                                ; код формата — в A' запуска
+        POP BC
+        JR Z,ESLG
+        DJNZ ESLG
 
+        DEC A                                   ; A запуска: #00 — как по Enter,
+        LD (NYAA),A                             ; #04 — просмотрщик
         LD BC,0-197
-        LD A,#04,(NYAA),A:CALL PLGE
+        CALL PLGE
         XOR A:LD (NYAA),A
         JP GED
+
+; Claude - 2026-10-11: F3 с клавиатуры — файлу без обработчика меню Shift+F3;
+; в цепочке NXTFL/PRVFL — возврат в панель. F3NONE+1 — цель перехода.
+VIEWK   LD HL,EXTSEL
+F3SET   LD (F3NONE+1),HL
+        JP VIEW
+F3NONE  JP EXTSEL                       ; из VIK при F3: EXTSEL или GED
+        DS #9281-$,0                    ; прежняя длина перебора: адреса ниже те же
+        ASSERT $ == #9281, сдвинулся CHEXT
 ;-------
 CHEXT   LD A,(DE):OR A:RET Z
         CP (HL):JR NZ,HE
@@ -209,7 +237,7 @@ EXEcute LD (F3ENTFL),A
         DEC A; После GOPLG здесь A становится равным нулю.
         DEC A:JP Z,PRVFL
 
-VIK     LD A,(F3ENTFL):OR A:JP NZ,EXTSEL
+VIK     LD A,(F3ENTFL):OR A:JP NZ,F3NONE
         LD HL,ENTRY+8
         LD DE,EXTZ
         CALL CHEXT:JP Z,EXTSEL,(HL)
@@ -363,6 +391,12 @@ KOVR    LD A,(IX):INC IX
         LD B,A
         LD A,D:OR A:JR NZ,SPGPKD
         CALL LOAD512
+; Claude - 2026-10-11 - begin
+; Блок не прочитан (CF=1: отказ носителя, в том числе вынутая загрузочная
+; карта — после её возврата обмены до MAIN отказывают): программу без него не
+; запускать. Страницы WC уже затёрты блоками SPG — окно и останов в ядре.
+        JP C,@WDOS_EXT.SPG_FAIL
+; Claude - 2026-10-11 - end
 PKDE    POP IX,BC
         LD A,C
         AND %10000000:JR NZ,ARBLKZ
@@ -374,6 +408,7 @@ PKDE    POP IX,BC
 ; сведено в одно: освободившиеся байты ушли на перенос страницы #E8.
 SPGPKD  PUSH AF
         PUSH HL:LD HL,#8000:CALL LOAD512
+        JP C,@WDOS_EXT.SPG_FAIL                ; Claude - 2026-10-11: как выше
         POP DE
         POP AF
         DI
@@ -388,8 +423,9 @@ SPGMLZ  LD HL,#8000
         CALL MLZP
         JR SPGPE
 ;-------
-; A — страница-источник (в окно #8000), E — страница назначения (в #C000).
-CPG     CALL MNG8
+; D — страница-источник (в окно #8000), E — страница назначения (в #C000).
+; Claude - 2026-10-11: обе в DE — вызов на байт короче (место под JP C выше).
+CPG     LD A,D:CALL MNG8
         LD A,E:CALL MNGC
         LD HL,#8000,DE,#C000
         LD BC,#4000:LDIR
@@ -400,12 +436,12 @@ CPG     CALL MNG8
 ; стек WC затёрт, а возврат из CPG ещё нужен.
 ARBLKZ  DI
         LD SP,LOB3+1024
-        LD A,D2PG,E,2:CALL CPG-SPGRZ+K
-        LD A,DEPG,E,@WC_PHYS_CORE32_EXT_PAGE:CALL CPG-SPGRZ+K
+        LD DE,D2PG*256+2:CALL CPG-SPGRZ+K
+        LD DE,DEPG*256+@WC_PHYS_CORE32_EXT_PAGE:CALL CPG-SPGRZ+K
 
         CALL TURBOof
 
-        LD A,D5PG,E,5:CALL CPG-SPGRZ+K
+        LD DE,D5PG*256+5:CALL CPG-SPGRZ+K
 ; Claude - 2026-10-01 - end
 
         LD BC,Vpag,A,5:OUT (C),A
@@ -613,9 +649,13 @@ LDRE    LD A,(LOBU+32)
 
         LD A,(PHED+1):CP #40:RET C
         CALL PDCHECK:JP C,RELOAD7
-        LD HL,LOBU,DE,(PHED)
-        LD BC,512:LDIR:LD (PHED),DE
-        EX DE,HL:LD B,0:CALL NOPING
+        ; Регистрация #11 читает/проверяет список до публикации заголовка.
+        ; Старые WMF копируются прежним способом. WALK и его эталон PLM
+        ; обязаны остаться на месте — добивка сохраняет весь участок.
+        CALL @WMF_REGISTER
+        JP C,@WMF_ERROR
+        ASSERT $ <= #97A1, регистрация WMF сдвигает WALK
+        DS #97A1-$,0
 
         LD HL,LOBU+36
 WALK    LD A,(HL):INC HL:CALL MNGC_PL
@@ -740,7 +780,9 @@ LcurSPO LD DE,0:ADD HL,DE:EX DE,HL
         JR LPARS
 ;---------------------------------------
 F11MENU PUSH IX
-MNU     LD A,(PHED+1):CP #C2:JP C,F1E
+; Пустая таблица — PHED=#C000; полная (#0000) прежде давала «нет плагинов».
+; Эти 8 байт PLM сверяет с эталоном (ORIGINAL_MENUBUILD) перед перехватом.
+MNU     LD A,(PHED+1):CP #C0:JP Z,F1E
 
         LD A,PLHPG:CALL MNGC
         LD HL,#C000+165,DE,LOBU
@@ -829,24 +871,42 @@ PSDEL   LD HL,TXTK,DE,#0100
         OR A
         RET
 
-PLGDINI LD A,PLHPG:CALL MNGC
-        LD HL,0,DE,1,BC,512-1
-        LD (HL),L
-        LDIR
-        RET
-PLGDEL  LD DE,HL:DEC D,D
-        LD A,(DE)
-        PUSH DE
+; Claude - 2026-10-11 - begin
+; Перезагрузка (RELOAD7) и удаление (PSDEL) плагина крашили WC. PLGDINI
+; обнулял 512 байт с #0000, а PLGDEL сдвигал заголовки одним LDIR до конца
+; памяти: последние 512 байт копии читались с #0000 — так освободившийся
+; слот становился нулями. В WC Improved в окне #0000 — страница WildDOS
+; панели (буфер каталога), её начало затиралось. И страницы следующих
+; плагинов переносились (PSMOVE) по старой раскладке пула, где они идут
+; подряд за удаляемым; при PLM это не так: незагруженный плагин — база #FF,
+; загруженные стоят, где их поставил PLM. PSMOVE вписывал им базы и копировал
+; DMA страницы с #FF+#61=#60 — таблицы заголовков; запуск исполнял мусор.
+; Теперь заголовки сдвигаются до PHED, слот обнуляется сам, а при PLM
+; (перехват WALK: первый байт не #7E) страницы не трогаются — пустое место
+; закрывает его уплотнение (COMPACT).
+PLGDINI LD A,PLHPG:JP MNGC
+; HL — заголовок за удаляемым (таблица PLHPG в окне #C000).
+PLGDEL  LD D,H:LD E,L:DEC D,D
+        LD A,(DE):PUSH AF                       ; база удаляемого
+        PUSH DE                                 ; его место — с него правка баз
         PUSH HL
-        LD HL,0:SBC HL,DE:LD BC,HL
-        POP HL:LDIR
-        LD HL,(PHED)
-        LD BC,0-512:ADD HL,BC
-        LD (PHED),HL
+        LD HL,(PHED):POP BC:PUSH BC
+        OR A:SBC HL,BC                          ; байт за ним до PHED (0 — до #10000)
+        LD B,H:LD C,L
         POP HL
-
+        LD A,B:OR C:JR Z,$+4
+        LDIR
+        LD H,D:LD L,E                           ; освободившийся последний слот
+        LD (PHED),HL
+        INC DE:LD BC,512-1:LD (HL),0
+        LDIR
+        POP HL
+        POP BC                                  ; B — база удаляемого
+        LD A,(WALK):CP #7E:RET NZ               ; пул ведёт PLM
+        LD A,B
         CALL PSMOVE:LD A,C,(PPGM),A
         RET
+; Claude - 2026-10-11 - end
 
 PSMOVE  ; Вход: A — логическая страница; HL — заголовки для исправления.
 
@@ -892,28 +952,33 @@ DMAPG   PUSH BC
 GOPLG   LD A,PLHPG:CALL MNGC
 
         LD DE,#C000+64-512
-PLG     LD HL,(PHED)
-        OR A:SBC HL,DE:JR C,PF
+PLG     CALL @WMF_NEXT
+        JR C,PF
+        JR OLDPLG
 
-        LD HL,511:ADD HL,DE
-        LD A,(HL):INC HL:EX DE,HL
-        OR A:JR Z,OLDPLG
-        SRL A:AND %00000001
-        LD HL,(F3ENTFL)
-        CP L:JR Z,OLDPLG
-        JR PLG
-
-OLDPLG  LD HL,ENTRY+8
-        PUSH DE:CALL CHext:EX DE,HL
-        POP DE:JR Z,PLG
-
+; Следующий заголовок таблицы плагинов. Вход: DE — поле предыдущего заголовка
+; (заголовок + смещение меньше 512). Выход: CF=0, DE — то же поле следующего;
+; CF=1 — заголовков больше нет. Полная таблица (32 заголовка) — PHED=#0000:
+; конец на переходе через #FFFF. Прежние переборы сравнивали с PHED через SBC
+; и полную таблицу считали пустой. Меняет A и HL, BC сохраняет.
+HNEXT   LD HL,512:ADD HL,DE:RET C
+        EX DE,HL
+        LD HL,(PHED)
+        LD A,H:OR L:RET Z
         SCF:SBC HL,DE
-        LD A,L
-        LD C,255:INC C:SUB 3:JR NZ,$-3
-        LD A,C,(ENV+1),A
+        RET
+        ASSERT $ <= #9AE4, перебор WMF сдвигает OLDPLG
+        DS #9AE4-$,0
+
+OLDPLG  CALL @WMF_MATCH
+        JR Z,PLG
+        LD (ENV+1),A
+        ASSERT $ <= #9AFE, поиск WMF сдвигает PLGE
+        DS #9AFE-$,0
 
         LD BC,0-64
 PLGE    EX DE,HL:ADD HL,BC
+        ASSERT PLGE == #9B01, изменился фиксированный вход PLGE
         LD (PHEP),HL
         LD DE,LOBU,BC,256:LDIR
 ;-------
@@ -934,15 +999,14 @@ PF      LD A,1
 ;-------
 RATM    LD A,PLHPG:CALL MNGC
 
-        LD HL,#C000+197,DE,(PHED),BC,512
-
-RAT     OR A:SBC HL,DE:JR NC,CAF
-        ADD HL,DE
-        LD A,(HL):ADD HL,BC
-        CP 2:JR NZ,RAT
-        LD BC,0-(512+197):ADD HL,BC
+        LD DE,#C000+197-512
+RAT     CALL HNEXT:JR C,CAF             ; и полная таблица (PHED=#0000)
+        LD A,(DE):CP 2:JR NZ,RAT
+        EX DE,HL
+        LD BC,0-197:ADD HL,BC
         LD DE,LOBU,BC,256:LDIR
         CALL AJT
+        DS 8,0                          ; прежняя длина: CAF и ниже на месте
 CAF     LD HL,0
         JR MAF
 ;-------

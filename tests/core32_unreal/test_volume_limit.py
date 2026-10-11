@@ -29,6 +29,9 @@ def mount(harness, total, first_data, fat_sectors):
     m[core['BFATS']] = 2
     m[core['FATFLAGS']] = 0
     h.put32(m, core['FSINF'], 1)
+    # Claude - 2026-10-10: как HDD — резерв и длина раздела (DAHL:DADE).
+    h.put16(m, core['BREZS'], 32)
+    h.put32(m, core['DAHL'], 0xFFFFFFFF)
     harness.read_sector = h.make_fsinfo(0xFFFFFFFF)
     harness.sector_overrides.clear()
     harness.invoke('LOAD_FREE_HINT')

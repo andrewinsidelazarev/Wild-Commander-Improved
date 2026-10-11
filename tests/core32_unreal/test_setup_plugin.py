@@ -63,6 +63,9 @@ class Plugin:
         self.set_text(text)
         self.poke(S['PCOUNT'], 0)
         self.poke16(S['EDITREC'], 0)
+        # Ширину строки ставит OPEN_SCREEN (у экранов своя, 2026-10-11); здесь
+        # окно не открывается — экран плагинов, пока тест не скажет иначе.
+        self.poke(S['ROWW'], S['LINEW'])
         self.call('TEXT_CHANGED')
 
     # --- память ---
@@ -189,6 +192,18 @@ class Plugin:
         for name in names:
             self.cpu.memory[scratch:scratch + len(name) + 1] = name.encode() + b'\0'
             self.call('ADD_PLUGIN', hl=scratch)
+        self.rows()
+
+    def rows(self):
+        """Строки экрана плагинов заново (как после SORT_PLUGINS): запись или
+        линия между группами. Звать после правки групп записей."""
+        self.call('BUILD_ROWMAP')
+
+    def row(self, name) -> int:
+        """Строка окна (с единицы, верх списка — 0) записи name."""
+        index = (self.record(name) - S['PLIST']) // S['PITEM']
+        count = self.cpu.memory[S['ROWS']]
+        return bytes(self.cpu.memory[S['ROWMAP']:S['ROWMAP'] + count]).index(index) + 1
 
     def record(self, name) -> int:
         for index in range(self.cpu.memory[S['PCOUNT']]):
@@ -212,9 +227,11 @@ class Plugin:
         return bytes(self.cpu.memory[start:start + 80]).split(b'\r')[0]
 
     def flags(self, name) -> bytes:
-        start = self.peek16(self.record(name) + S['PFLAGS'])
-        if not start:
+        """Флаги записи — как их находит FLAGS_AT: без ведущих пробелов, до «;»."""
+        self.call('FLAGS_AT', hl=self.record(name))
+        if self.cpu.f & 0x40:                   # Z — строки нет
             return b''
+        start = self.cpu.hl
         return bytes(self.cpu.memory[start:start + 80]).split(b'\r')[0].split(b';')[0]
 
     def edit(self, name, flags: bytes):
@@ -247,7 +264,9 @@ class Linking(unittest.TestCase):
     def test_disabled_line_keeps_its_flags(self):
         p = self.plugin
         self.assertEqual(p.line('MOUNTER.WMF'), b';MOUNTER.WMF -memory=128 -cpu=3,5')
-        self.assertEqual(p.flags('MOUNTER.WMF'), b' -memory=128 -cpu=3,5')
+        self.assertEqual(p.flags('MOUNTER.WMF'), b'-memory=128 -cpu=3,5')
+        self.assertEqual(p.flags('TXTEDIT.WMF'), b'-highlight=auto')
+        self.assertEqual(p.flags('NEWPLUG.WMF'), b'', 'строки нет')
 
     def test_name_only_at_line_start(self):
         # PLASMATW стоит в строке CLOCK после «;» — это подсказка, не строка плагина.
@@ -327,7 +346,7 @@ class Rebuild(unittest.TestCase):
         self.assertEqual(p.mark('FILEX.WMF'), 1)
 
     def test_overflow_leaves_text_and_buffers_alone(self):
-        capacity = S['NEWBUF'] - S['INIBUF'] - 1    # текст и ноль за ним
+        capacity = S['TEXTMAX'] - 1    # текст и ноль за ним
         filler = b';' + b'x' * (capacity - 4 - len(INI)) + b'\r'
         big = INI.replace(b'[LPANEL]', filler + b'[LPANEL]')
         self.assertEqual(len(big), capacity - 2)
@@ -533,12 +552,13 @@ class Savers(unittest.TestCase):
             group = ('GROUP_SAVER' if name in self.SAVERS else
                      'GROUP_MENU' if name == 'MOUNTER.WMF' else 'GROUP_FILE')
             p.poke(p.record(name) + S['PGROUP'], S[group])
+        p.rows()                                # группы сменились — строки заново
         p.poke(S['SHOWN'], 0)                   # без перерисовки окна
         p.poke(S['TOP'], 0)
 
     def toggle(self, name):
         p = self.plugin
-        p.poke(S['WND'] + 12, (p.record(name) - S['PLIST']) // S['PITEM'] + 1)
+        p.poke(S['WND'] + 12, p.row(name))
         p.call_api('TOGGLE_PLUGIN')
         return p.text()
 
@@ -572,11 +592,20 @@ class Savers(unittest.TestCase):
             title = b' ' + name.split('.')[0].encode()
             p.cpu.memory[record + S['PTITLE']:record + S['PTITLE'] + len(title) + 1] = title + bytes(1)
             p.cpu.memory[S['ROWBUF']:S['ROWBUF'] + S['LINEW']] = b' ' * S['LINEW']
-            p.call('PLUGIN_ROW', a=(record - S['PLIST']) // S['PITEM'])
-            rows[name] = bytes(p.cpu.memory[S['ROWBUF']:S['ROWBUF'] + 20]).rstrip()
-        self.assertEqual(rows['CLOCK.WMF'], b'(*) saver CLOCK')
-        self.assertEqual(rows['PLASMATW.WMF'], b'( ) saver PLASMATW')
-        self.assertEqual(rows['MOUNTER.WMF'], b'[ ] F10   MOUNTER')
+            p.call('PLUGIN_ROW', a=p.row(name) - 1)
+            rows[name] = bytes(p.cpu.memory[S['ROWBUF']:S['ROWBUF'] + S['LINEW']])
+        # 2026-10-11: группа — только в первой строке своей группы, отметка — с
+        # BOXX, название — с TITLEX (ведущий пробел заголовка пропущен).
+        group = slice(S['GROUPX'], S['GROUPX'] + S['GROUPW'])
+        box = slice(S['BOXX'], S['BOXX'] + 3)
+        self.assertEqual(rows['CLOCK.WMF'][group], b'Savers    ', 'первая заставка')
+        self.assertEqual(rows['PLASMATW.WMF'][group], b' ' * S['GROUPW'], 'вторая — без подписи')
+        self.assertEqual(rows['MOUNTER.WMF'][group], b'F10 menu  ')
+        self.assertEqual(rows['CLOCK.WMF'][box], b'(*)')
+        self.assertEqual(rows['PLASMATW.WMF'][box], b'( )')
+        self.assertEqual(rows['MOUNTER.WMF'][box], b'[ ]')
+        for name in rows:
+            self.assertEqual(rows[name][S['TITLEX']:].split(b' ')[0], name.split('.')[0].encode())
 
 
 class SaveResult(unittest.TestCase):
@@ -675,7 +704,9 @@ class SaveResult(unittest.TestCase):
         shown, renames, deleted = self.save([True, True])
         self.assertEqual(shown, S['MSG_SAVED'])
         self.assertEqual(renames, [('ini', 'old'), ('new', 'ini')])
-        self.assertEqual(deleted, ['new', 'old', 'old'])
+        # С 2026-10-11 хвостов wc.new/wc.old нет — и DELFL для них нет (лишний
+        # проход каталога на каждое F2); удаляется только отложенный wc.old.
+        self.assertEqual(deleted, ['old'])
 
     def test_old_that_cannot_be_set_aside_stays_and_nothing_is_saved(self):
         shown, renames, _ = self.save([False])
@@ -687,7 +718,7 @@ class SaveResult(unittest.TestCase):
         shown, renames, deleted = self.save([True, False, True])
         self.assertEqual(shown, S['MSG_FAILED'])
         self.assertEqual(renames, [('ini', 'old'), ('new', 'ini'), ('old', 'ini')])
-        self.assertEqual(deleted, ['new', 'old'], 'отложенный прежний файл не удаляется')
+        self.assertEqual(deleted, [], 'отложенный прежний файл не удаляется')
 
     def test_first_save_without_old_file(self):
         shown, renames, _ = self.save([False, True], state=1)
@@ -767,7 +798,26 @@ class SaveResult(unittest.TestCase):
                 shown, done, deleted = self.save(renames)
                 self.assertEqual(shown, S['MSG_CHECK'])
                 self.assertEqual(done, expected)
-                self.assertEqual(deleted, ['new', 'old'], 'после неясного RENAME ничего не удалять')
+                self.assertEqual(deleted, [], 'после неясного RENAME ничего не удалять')
+
+    def test_same_text_is_not_parsed_again(self):
+        # 2026-10-11: F2 подставляет строку версии; если она уже та же, текст
+        # не меняется — COPY_NEW не разбирает его заново (при 40+ плагинах это
+        # заметная часть записи), но правку флагов считает внесённой.
+        for same in (True, False):
+            with self.subTest(тот_же=same):
+                p = Plugin(INI)
+                text = INI if same else INI.replace(b'CPU_FREQ=2', b'CPU_FREQ=1')
+                p.cpu.memory[S['NEWBUF']:S['NEWBUF'] + len(text)] = text
+                p.poke16(S['NEWPTR'], S['NEWBUF'] + len(text))
+                p.poke16(S['PLUGSEC'], 0x1234)              # разбор заново поставил бы своё
+                p.poke16(S['EDITREC'], S['PLIST'])
+                p.poke(S['MODIFIED'], 0)
+                p.call('COPY_NEW')
+                self.assertEqual(p.text(), text)
+                self.assertEqual(p.peek16(S['EDITREC']), 0)
+                self.assertEqual(p.peek16(S['PLUGSEC']) == 0x1234, same)
+                self.assertEqual(p.cpu.memory[S['MODIFIED']], 0 if same else 1)
 
     def test_known_rename_failure_is_still_not_saved(self):
         shown, _, _ = self.save([True, False, True])
@@ -855,7 +905,7 @@ class ReadIni(unittest.TestCase):
         self.assertEqual(len(p.text()), 100)
 
     def test_size_limit_is_exact(self):
-        limit = S['NEWBUF'] - S['INIBUF'] - 1                   # место под ноль за текстом
+        limit = S['TEXTMAX'] - 1                   # место под ноль за текстом
         self.assertEqual(self.read(limit).cpu.memory[S['INI_STATE']], 0)
         self.assertEqual(self.read(limit + 1).cpu.memory[S['INI_STATE']], 2)
 
@@ -961,7 +1011,7 @@ class MissingKey(unittest.TestCase):
         self.assertEqual([p.line(name) for name in NAMES], before)
 
     def test_no_room_leaves_text_alone(self):
-        size = S['NEWBUF'] - S['INIBUF'] - 1 - 7                  # до предела меньше вставки
+        size = S['TEXTMAX'] - 1 - 7                  # до предела меньше вставки
         text = INI + b';' + b'x' * (size - len(INI) - 2) + CR
         p = Plugin(text)
         log = self.change(p, 1)
@@ -1003,7 +1053,7 @@ class Modified(unittest.TestCase):
         self.assertEqual(self.change(self.plugin(), 1), 1)      # SavePaths= в тексте нет
 
     def test_no_room_keeps_the_mark_off(self):
-        size = S['NEWBUF'] - S['INIBUF'] - 1 - 7
+        size = S['TEXTMAX'] - 1 - 7
         text = INI + b';' + b'x' * (size - len(INI) - 2) + CR
         p = self.plugin(text)
         self.assertEqual(self.change(p, 1), 0)
@@ -1053,8 +1103,9 @@ class Modified(unittest.TestCase):
         p = self.plugin()
         p.add_plugins(NAMES)
         p.poke(p.record('MOUNTER.WMF') + S['PGROUP'], S['GROUP_FILE'])
+        p.rows()
         p.poke(S['SCREEN_NO'], 1)
-        p.poke(S['WND'] + 12, (p.record('MOUNTER.WMF') - S['PLIST']) // S['PITEM'] + 1)
+        p.poke(S['WND'] + 12, p.row('MOUNTER.WMF'))
         p.call_api('CHANGE')
         self.assertIn(CR + b'MOUNTER.WMF -memory=128', p.text())
         self.assertEqual(p.cpu.memory[S['MODIFIED']], 1)
@@ -1063,6 +1114,7 @@ class Modified(unittest.TestCase):
         p = Plugin(INI)
         p.poke(S['MODIFIED'], modified)
         p.poke(S['SCREEN_NO'], screen)
+        p.poke(S['ROWW'], S['LINEW'] if screen else S['LINEW_S'])
         seen = {}
 
         def prsrw(cpu):
@@ -1087,8 +1139,9 @@ class Modified(unittest.TestCase):
                     window = memory[S['WND'] + 6]
                     normal = (window >> 4 | window << 4) & 0xFF
                     # PRWOW ставит название с колонки (ширина-длина)/2, ширина
-                    # окна — LINEW+2; «*» или пробел — колонкой левее.
-                    column = (S['LINEW'] + 2 - len(name)) // 2 - 1
+                    # окна — ROWW+2 (у экранов своя); «*» или пробел — левее.
+                    width = S['LINEW'] if screen else S['LINEW_S']
+                    column = (width + 2 - len(name)) // 2 - 1
                     self.assertEqual(seen['at'], (0, column))
                     self.assertEqual(seen['text'], (b'*' if modified else b' ') + name)
                     self.assertEqual(seen['color'], normal & 0xF0 | 2 if modified else normal)
@@ -1105,6 +1158,7 @@ class LeaveAsk(unittest.TestCase):
 
     def ask(self, keys=('enter',), yes=True, saved=True, modified=1):
         p = Plugin(INI)
+        p.poke(S['ROWW'], S['LINEW_S'])                         # экран настроек
         shown = S['PARAM_COUNT']
         p.poke(S['SHOWN'], shown)
         p.poke(S['WND'] + 5, shown + 2)
@@ -1224,7 +1278,7 @@ class LongFlags(unittest.TestCase):
         p.poke(S['SCREEN_NO'], 1)
         p.poke(S['TOP'], 0)
         p.poke(S['SHOWN'], len(NAMES))
-        p.poke(S['WND'] + 12, (p.record('TXTEDIT.WMF') - S['PLIST']) // S['PITEM'] + 1)
+        p.poke(S['WND'] + 12, p.row('TXTEDIT.WMF'))
         shown = []
 
         def prsrw(cpu):
@@ -1277,6 +1331,24 @@ class ShortList(unittest.TestCase):
                 self.assertLessEqual(max(rows), S['PARAM_COUNT'])
                 self.assertLess(len(rows), 3 * S['PARAM_COUNT'])
 
+    def test_window_leaves_two_rows_under_the_wc_title(self):
+        # Пользователь: окно плагинов во всю высоту сливалось с заголовком WC —
+        # «отступи 2 строки вниз от заголовка WC». PRWOW ставит окно по центру:
+        # Y = (HEI - H) / 2; над окном — строка заголовка WC и две свободные.
+        for hei in (25, 30, 36):
+            with self.subTest(экран=hei):
+                p = Plugin(INI)
+                p.poke(S['HEI'], hei)
+                p.poke(S['SCREEN_NO'], 1)
+                p.poke(S['COUNT'], 44)                  # 40 плагинов и линии групп
+                heights = []
+                p.call_scripted('OPEN_SCREEN.counted', defaultdict(lambda: noop, {
+                    1: lambda cpu: heights.append(cpu.memory[S['WND'] + 5])}))
+                top = (hei - heights[0]) // 2
+                self.assertEqual(top, 3, 'заголовок WC, две пустые строки, окно')
+                self.assertEqual(p.cpu.memory[S['SHOWN']], hei - 8)
+                self.assertGreaterEqual(hei - (top + heights[0]), 3, 'тень и две строки снизу')
+
     def test_two_rows_are_enough(self):
         p = Plugin(INI)
         p.poke(S['SCREEN_NO'], 1)
@@ -1305,12 +1377,361 @@ class ShortList(unittest.TestCase):
         self.assertEqual(p.cpu.memory[S['PLIST']] & 1, 0, 'отметка старой записи не тронута')
 
 
+# Claude - 2026-10-11 - begin
+INI_ORDER = (VERSION + b'\r\r[SETUP]\rCPU_FREQ=2\r\r[PLUGINS]\r'
+             b'FILEX.WMF\rPLM.WMF\rZMENU.WMF\rAMENU.WMF\r;MMENU.WMF -x\rCLOCK.WMF\r'
+             b'ZFILE.WMF\rAFILE.WMF\r\r[LPANEL]\rDRV=1\r')
+ORDER_GROUPS = {'FILEX.WMF': 'GROUP_CORE', 'PLM.WMF': 'GROUP_CORE', 'ZMENU.WMF': 'GROUP_MENU',
+                'AMENU.WMF': 'GROUP_MENU', 'MMENU.WMF': 'GROUP_MENU', 'CLOCK.WMF': 'GROUP_SAVER',
+                'ZFILE.WMF': 'GROUP_FILE', 'AFILE.WMF': 'GROUP_FILE', 'NOLINE.WMF': 'GROUP_FILE'}
+
+
+class Order(unittest.TestCase):
+    """Порядок плагинов (2026-10-11, по просьбе пользователя): по группе, в
+    группе — как строки стоят в [PLUGINS], без сортировки; плагин без строки —
+    в конце группы. Между группами — строка-линия, курсор её перешагивает.
+    F5/F6 меняют местами строки соседей своей группы; S — группы меню F10 и
+    обработчиков файлов по алфавиту. Обязательные, автозапуск и заставки
+    не двигаются и не сортируются."""
+
+    def setUp(self):
+        self.p = p = Plugin(INI_ORDER)
+        p.add_plugins(('AFILE.WMF', 'CLOCK.WMF', 'FILEX.WMF', 'MMENU.WMF', 'NOLINE.WMF',
+                       'PLM.WMF', 'ZFILE.WMF', 'AMENU.WMF', 'ZMENU.WMF'))     # как в каталоге
+        for name, group in ORDER_GROUPS.items():
+            record = p.record(name)
+            p.poke(record + S['PGROUP'], S[group])
+            title = name.split('.')[0].encode()
+            p.cpu.memory[record + S['PTITLE']:record + S['PTITLE'] + len(title) + 1] = title + b'\0'
+        p.call('SORT_PLUGINS')
+        p.poke(S['SCREEN_NO'], 1)
+        p.poke(S['TOP'], 0)
+        p.poke(S['SHOWN'], 0)                   # без перерисовки строк
+        p.poke(S['WND'] + 13, p.cpu.memory[S['ROWS']])
+
+    def order(self):
+        p = self.p
+        return [bytes(p.cpu.memory[S['PLIST'] + i * S['PITEM'] + 1:S['PLIST'] + i * S['PITEM'] + 14])
+                .split(b'\0')[0].decode() for i in range(p.cpu.memory[S['PCOUNT']])]
+
+    def lines(self):
+        return [line for line in plugin_lines(self.p.text()) if line]
+
+    def key(self, routine, name):
+        p = self.p
+        p.poke(S['WND'] + 12, p.row(name))
+        p.call_api(routine)
+
+    def test_list_follows_the_lines(self):
+        p = self.p
+        self.assertEqual(self.order(), ['FILEX.WMF', 'PLM.WMF', 'ZMENU.WMF', 'AMENU.WMF', 'MMENU.WMF',
+                                        'CLOCK.WMF', 'ZFILE.WMF', 'AFILE.WMF', 'NOLINE.WMF'])
+        rows = list(p.cpu.memory[S['ROWMAP']:S['ROWMAP'] + p.cpu.memory[S['ROWS']]])
+        self.assertEqual(rows, [0, 1, 0xFF, 2, 3, 4, 0xFF, 5, 0xFF, 6, 7, 8], 'линии между группами')
+
+    def test_line_row_is_a_thin_line(self):
+        p = self.p
+        p.call('BUILD_ROW', a=2)
+        row = bytes(p.cpu.memory[S['ROWBUF']:S['ROWBUF'] + S['LINEW']])
+        self.assertEqual(row, b' ' * S['GROUPX'] + b'\xc4' * (S['LINEW'] - 2 * S['GROUPX'])
+                         + b' ' * S['GROUPX'])
+
+    def test_f6_moves_within_the_group(self):
+        self.key('MOVE_DOWN', 'ZMENU.WMF')
+        self.assertEqual(self.lines(), [b'FILEX.WMF', b'PLM.WMF', b'AMENU.WMF', b'ZMENU.WMF',
+                                        b';MMENU.WMF -x', b'CLOCK.WMF', b'ZFILE.WMF', b'AFILE.WMF'])
+        self.assertEqual(self.order()[2:5], ['AMENU.WMF', 'ZMENU.WMF', 'MMENU.WMF'])
+        self.assertEqual(self.p.cpu.memory[S['WND'] + 12], self.p.row('ZMENU.WMF'), 'курсор — за плагином')
+        self.assertEqual(self.p.cpu.memory[S['MODIFIED']], 1)
+
+    def test_f5_moves_a_disabled_line_with_its_flags(self):
+        self.key('MOVE_UP', 'MMENU.WMF')
+        self.assertEqual(self.lines()[2:5], [b'ZMENU.WMF', b';MMENU.WMF -x', b'AMENU.WMF'])
+
+    def test_group_edges_do_not_move(self):
+        for routine, name in (('MOVE_UP', 'ZMENU.WMF'), ('MOVE_DOWN', 'MMENU.WMF'),
+                              ('MOVE_UP', 'ZFILE.WMF'), ('MOVE_DOWN', 'AFILE.WMF')):
+            with self.subTest(key=routine, plugin=name):
+                self.key(routine, name)
+                self.assertEqual(self.p.text(), INI_ORDER)
+                self.assertEqual(self.p.cpu.memory[S['MODIFIED']], 0)
+
+    def test_core_and_savers_do_not_move(self):
+        for routine, name in (('MOVE_DOWN', 'FILEX.WMF'), ('MOVE_UP', 'PLM.WMF')):
+            with self.subTest(key=routine, plugin=name):
+                self.key(routine, name)
+                self.assertEqual(self.p.text(), INI_ORDER)
+
+    def test_s_sorts_menu_and_files_only(self):
+        p = self.p
+        p.poke(S['WND'] + 12, 1)
+        p.call_api('ALPHA_SORT')
+        self.assertEqual(self.lines(), [b'FILEX.WMF', b'PLM.WMF', b'AMENU.WMF', b';MMENU.WMF -x',
+                                        b'ZMENU.WMF', b'CLOCK.WMF', b'AFILE.WMF', b'ZFILE.WMF'])
+        self.assertEqual(self.order(), ['FILEX.WMF', 'PLM.WMF', 'AMENU.WMF', 'MMENU.WMF', 'ZMENU.WMF',
+                                        'CLOCK.WMF', 'AFILE.WMF', 'ZFILE.WMF', 'NOLINE.WMF'])
+        self.assertTrue(p.text().endswith(b'\r\r[LPANEL]\rDRV=1\r'), 'прочие секции — как были')
+
+    def test_s_on_the_settings_screen_does_nothing(self):
+        p = self.p
+        p.poke(S['SCREEN_NO'], 0)
+        p.call_api('ALPHA_SORT')
+        self.assertEqual(p.text(), INI_ORDER)
+
+    def test_cursor_steps_over_lines(self):
+        p = self.p
+        p.poke(S['WND'] + 12, p.row('PLM.WMF'))
+        p.call_api('DOWN_BY', b=1)
+        self.assertEqual(p.cpu.memory[S['WND'] + 12], p.row('ZMENU.WMF'))
+        p.call_api('UP_BY', b=1)
+        self.assertEqual(p.cpu.memory[S['WND'] + 12], p.row('PLM.WMF'))
+        p.call_api('GO_END')
+        self.assertEqual(p.cpu.memory[S['WND'] + 12], p.row('NOLINE.WMF'))
+
+
+HEAD_TWICE = VERSION + b'\r\r[SETUP]\rCPU_FREQ=2\r\r[PLUGINS]\r'
+TAIL_TWICE = b'\r[LPANEL]\rDRV=1\r'
+
+
+class Twice(unittest.TestCase):
+    """Имя плагина в [PLUGINS] не одной строкой (по просьбе пользователя —
+    исправлять, а не обходить): FIX_TWICE при открытии оставляет строку, с
+    которой SETUP связывает плагин (первая включённая, иначе первая
+    выключенная), прочие вырезает вместе с переводом строки; текст правленый.
+    Без этого F6/S, переставив одну строку, связывали плагин с другой — с её
+    флагами (седьмой круг Codex)."""
+
+    def fix(self, section: bytes, head=HEAD_TWICE, tail=TAIL_TWICE):
+        p = Plugin(head + section + tail)
+        p.call('FIX_TWICE')
+        self.assertEqual(p.cpu.memory[p.peek16(S['INI_SIZE'])], 0, 'конец текста — ноль')
+        text = p.text()
+        self.assertTrue(text.startswith(head) and text.endswith(tail), 'прочие секции — как были')
+        return p, text[len(head):len(text) - len(tail)]
+
+    def test_extra_lines_go_away(self):
+        for section, kept in (
+                (b'ZMENU.WMF -new\rAMENU.WMF\r;zmenu.wmf -old\r',
+                 b'ZMENU.WMF -new\rAMENU.WMF\r'),                       # выключенная — лишняя
+                (b';ZMENU.WMF -old\rAMENU.WMF\rZMENU.WMF -new\r',
+                 b'AMENU.WMF\rZMENU.WMF -new\r'),                       # включённая важнее
+                (b'ZMENU.WMF -one\rAMENU.WMF\rZMENU.WMF -two\r',
+                 b'ZMENU.WMF -one\rAMENU.WMF\r'),                       # две включённые
+                (b';ZMENU.WMF -1\r;ZMENU.WMF -2\rAMENU.WMF\r',
+                 b';ZMENU.WMF -1\rAMENU.WMF\r'),                        # две выключенные
+                (b'A.WMF\rA.WMF -x\ra.wmf;hint\r;A.WMF\rB.WMF\r',
+                 b'A.WMF\rB.WMF\r'),                                    # четыре строки подряд
+                (b'A.WMF\rB.WMF\rA.WMF\rB.WMF\rA.WMF\r',
+                 b'A.WMF\rB.WMF\r'),                                    # вперемешку
+        ):
+            with self.subTest(section=section):
+                p, got = self.fix(section)
+                self.assertEqual(got, kept)
+                self.assertEqual(p.cpu.memory[S['MODIFIED']], 1, 'текст правленый')
+
+    def test_line_breaks(self):
+        head = HEAD_TWICE.replace(b'\r', b'\r\n')
+        p, got = self.fix(b'A.WMF -1\r\nB.WMF\r\nA.WMF -2\r\nC.WMF\r\n', head, b'\r\n[LPANEL]\r\n')
+        self.assertEqual(got, b'A.WMF -1\r\nB.WMF\r\nC.WMF\r\n')
+        p, got = self.fix(b'A.WMF\nB.WMF\nA.WMF\n', HEAD_TWICE, b'\n[LPANEL]\n')
+        self.assertEqual(got, b'A.WMF\nB.WMF\n')
+        # Лишняя — последняя строка текста, без перевода.
+        p = Plugin(HEAD_TWICE + b'A.WMF\rB.WMF\rA.WMF -x')
+        p.call('FIX_TWICE')
+        self.assertEqual(p.text(), HEAD_TWICE + b'A.WMF\rB.WMF\r')
+
+    def test_nothing_to_fix(self):
+        for section in (b'A.WMF\rB.WMF -x\r;C.WMF -y\r',
+                        b'; comment\r; comment\r\r\rA.WMF\r',          # комментарии и пустые
+                        b';;A.WMF\r;;A.WMF\rA.WMF\r',                   # «;;» — не строка плагина
+                        b' A.WMF\rA.WMF\r',                             # с пробелом — не строка
+                        b'VERYLONGNAME1.WMF\rVERYLONGNAME1.WMF\r',      # длиннее 8.3
+                        b''):
+            with self.subTest(section=section):
+                p, got = self.fix(section)
+                self.assertEqual(got, section)
+                self.assertEqual(p.cpu.memory[S['MODIFIED']], 0)
+
+    def test_no_plugins_section(self):
+        text = VERSION + b'\r\r[SETUP]\rCPU_FREQ=2\r'
+        p = Plugin(text)
+        p.call('FIX_TWICE')
+        self.assertEqual(p.text(), text)
+
+    def test_moves_after_the_fix(self):
+        # После исправления F6/S работают как обычно и флаги — от оставшейся строки.
+        p = Plugin(HEAD_TWICE + b'FILEX.WMF\rZMENU.WMF -one\rAMENU.WMF\rZMENU.WMF -two\r' + TAIL_TWICE)
+        p.call('FIX_TWICE')
+        p.add_plugins(('AMENU.WMF', 'FILEX.WMF', 'ZMENU.WMF'))
+        for name, group in (('FILEX.WMF', 'GROUP_CORE'), ('ZMENU.WMF', 'GROUP_MENU'),
+                            ('AMENU.WMF', 'GROUP_MENU')):
+            p.poke(p.record(name) + S['PGROUP'], S[group])
+            title = name.split('.')[0].encode()
+            at = p.record(name) + S['PTITLE']
+            p.cpu.memory[at:at + len(title) + 1] = title + b'\0'
+        p.call('SORT_PLUGINS')
+        p.poke(S['SCREEN_NO'], 1)
+        p.poke(S['TOP'], 0)
+        p.poke(S['SHOWN'], 0)
+        p.poke(S['WND'] + 13, p.cpu.memory[S['ROWS']])
+        p.poke(S['WND'] + 12, p.row('ZMENU.WMF'))
+        p.call_api('MOVE_DOWN')
+        self.assertEqual(plugin_lines(p.text())[:3], [b'FILEX.WMF', b'AMENU.WMF', b'ZMENU.WMF -one'])
+        self.assertEqual(p.flags('ZMENU.WMF'), b'-one')
+        p.call_api('ALPHA_SORT')
+        self.assertEqual(plugin_lines(p.text())[:3], [b'FILEX.WMF', b'AMENU.WMF', b'ZMENU.WMF -one'])
+
+    def open_screen(self, text, stop):
+        """SCREEN с прочитанным wc.ini text до адреса stop; API — пустышки."""
+        p = Plugin(INI)
+        Z, C = 0x40, 0x01
+
+        def ok(cpu):
+            cpu.f = (cpu.f | Z) & ~C
+
+        def found(cpu):
+            cpu.f &= ~(Z | C)
+            cpu.de, cpu.hl = 0, len(text)
+
+        def load(cpu):
+            cpu.memory[cpu.hl:cpu.hl + len(text)] = text
+            cpu.f &= ~C
+
+        replies = defaultdict(lambda: ok, {57: ok, 59: found, 62: ok, 48: load})
+        return p, p.call_scripted('SCREEN', replies, stop_at=stop)
+
+    def test_open_tells_about_the_fix(self):
+        text = HEAD_TWICE + b'FILEX.WMF\rA.WMF -1\rA.WMF -2\r' + TAIL_TWICE
+        p, shown = self.open_screen(text, S['SHOW_MESSAGE'])
+        self.assertEqual(shown, S['MSG_TWICE'], 'сообщение в открытом окне')
+        self.assertEqual(p.text(), HEAD_TWICE + b'FILEX.WMF\rA.WMF -1\r' + TAIL_TWICE)
+        self.assertEqual(p.cpu.memory[S['MODIFIED']], 1, '«*»: F2 запишет, Esc спросит')
+        self.assertIn(1, [call[0] for call in p.api_calls], 'окно уже открыто (PRWOW)')
+        # Полосы курсора ещё не было: API 7 в SHOW_TEXT вернёт строке цвет IX+15 —
+        # цвет окна, а не 0 (чёрная полоса в первой строке на стенде).
+        self.assertEqual(p.cpu.memory[S['WND'] + 15], p.cpu.memory[S['WND'] + 6])
+
+    def test_open_without_duplicates_is_quiet(self):
+        p, _ = self.open_screen(INI, S['SCREEN.loop'])
+        self.assertNotIn(47, [call[0] for call in p.api_calls], 'сообщения нет')
+        self.assertEqual(p.cpu.memory[S['MODIFIED']], 0)
+        self.assertEqual(p.text(), INI)
+
+
+class SettingsRows(unittest.TestCase):
+    """Экран настроек (2026-10-11): группа — в первой строке своей секции,
+    параметр с точками до значения, поля слева и справа поровну."""
+
+    def test_rows(self):
+        p = Plugin(INI)
+        p.poke(S['SCREEN_NO'], 0)
+        p.poke(S['TOP'], 0)
+        p.poke(S['ROWW'], S['LINEW_S'])
+        rows = []
+        for index in range(S['PARAM_COUNT']):
+            p.call('BUILD_ROW', a=index)
+            rows.append(bytes(p.cpu.memory[S['ROWBUF']:S['ROWBUF'] + S['LINEW_S']]).decode())
+        self.assertEqual(rows[0], '    Commander    CPU speed ...... 14 MHz          ')
+        self.assertEqual(rows[1].strip(), 'Remember dirs .. no')
+        self.assertEqual(rows[6][:16].strip(), 'Left panel')
+        self.assertEqual(rows[9][:16].strip(), 'Right panel')
+        for row in rows:
+            left = len(row) - len(row.lstrip(' '))
+            self.assertGreaterEqual(left, S['S_GROUPX'])
+            self.assertTrue(row.endswith(' ' * S['S_GROUPX']), 'поле справа')
+            self.assertEqual(len(row), S['LINEW_S'])
+# Claude - 2026-10-11 - end
+
+
+class ManyPlugins(unittest.TestCase):
+    """2026-10-11: список был на 40 .WMF, и перебор каталога молча кончался на
+    сороковом — у пользователя их 41, сорок первый (VDAC4MP3.WMF) в WC Setup не
+    попадал. Теперь список во второй странице плагина: PMAX записей, а если
+    файлов больше — сообщение в окне плагинов, а не тишина."""
+
+    Z = 0x40
+
+    def directory(self, count):
+        """Ответы API для перебора каталога WC: count файлов .WMF и каталог."""
+        names = [f'P{i:03d}.WMF' for i in range(count)]
+        entries = [('SUBDIR', 0x10)] + [(n, 0x20) for n in names]
+        state = {'i': 0}
+
+        def ok(cpu):
+            cpu.f |= self.Z
+
+        def next_entry(cpu):
+            if state['i'] >= len(entries):
+                cpu.f |= self.Z                             # каталог кончился
+                return
+            name, attr = entries[state['i']]
+            state['i'] += 1
+            de = cpu.de
+            cpu.memory[de + 4] = attr
+            cpu.memory[de + 5:de + 6 + len(name)] = name.encode() + b'\0'
+            cpu.f &= ~self.Z
+
+        return names, defaultdict(lambda: noop, {57: ok, 58: next_entry, 59: ok})
+
+    def test_sixty_records(self):
+        p = Plugin(INI)
+        names = [f'X{i:02d}.WMF' for i in range(60)]
+        p.add_plugins(names)
+        self.assertEqual(p.cpu.memory[S['PCOUNT']], 60)
+        self.assertEqual(p.cpu.memory[S['ROWS']], 60)
+        last = p.record('X59.WMF')
+        self.assertEqual(last, S['PLIST'] + 59 * S['PITEM'])
+        self.assertGreaterEqual(last, 0xC000, 'список — во второй странице, в окне #C000')
+
+    def test_scan_takes_every_wmf(self):
+        for count, too_many in ((41, 0), (S['PMAX'], 0), (S['PMAX'] + 1, 1)):
+            with self.subTest(файлов=count):
+                p = Plugin(INI)
+                names, replies = self.directory(count)
+                p.call_scripted('SCAN_PLUGINS', replies)
+                self.assertEqual(p.cpu.memory[S['PCOUNT']], min(count, S['PMAX']))
+                self.assertEqual(p.cpu.memory[S['TOO_MANY']], too_many)
+                p.record(names[min(count, S['PMAX']) - 1])          # последний взятый — в списке
+
+    def test_too_many_is_told(self):
+        p = Plugin(INI)
+        names, replies = self.directory(S['PMAX'] + 1)
+        p.poke(S['HEI'], 36)
+        p.poke(S['SCREEN_NO'], 0)
+        shown = p.call_scripted('SWITCH_SCREEN', replies, stop_at=S['SHOW_MESSAGE'])
+        self.assertEqual(shown, S['MSG_MANY'])
+
+    def test_api_call_brings_the_data_page_back(self):
+        # Вызовы WC перекладывают окно #C000; WLD возвращает туда вторую
+        # страницу (и её тень #6003 — по ней окно возвращают прерывания), не
+        # трогая того, что вернул WC.
+        p = Plugin(INI)
+        p.poke(S['PAGE2'], 0x95)
+        p.poke(0x6003, 0x00)
+
+        def answer(cpu):
+            cpu.hl, cpu.de, cpu.bc = 0x1234, 0x5678, 0x9ABC
+            cpu.f = 0xC5
+
+        p.call_scripted('WLD', defaultdict(lambda: answer), a=46)
+        cpu = p.cpu
+        self.assertEqual(p.cpu.memory[0x6003], 0x95)
+        self.assertEqual((cpu.hl, cpu.de, cpu.bc, cpu.f), (0x1234, 0x5678, 0x9ABC, 0xC5))
+
+
 class Header(unittest.TestCase):
 
-    def test_menu_plugin_one_page(self):
+    def test_menu_plugin_two_pages(self):
+        # С 2026-10-11 две страницы: вторая (без данных из файла) — список .WMF
+        # и новый текст; из файла грузится только первая.
         header = WMF.read_bytes()[:512]
         self.assertEqual(header[16:32], b'WildCommanderMDL')
-        self.assertEqual(header[34], 1, 'одна страница')
+        self.assertEqual(header[34], 2, 'код и страница данных')
+        self.assertEqual(header[35], 0, 'вход — в первой')
+        self.assertEqual(list(header[36:40]), [0, (len(WMF.read_bytes()) - 512) // 512, 0, 0],
+                         'из файла — только первая')
+        self.assertEqual(S['NEWBUF'], 0xC000)
+        self.assertLessEqual(S['PLIST'] + S['PMAX'] * S['PITEM'], 0x10000)
         self.assertEqual(header[197], 0x03, 'пункт меню F10, тип #03')
         self.assertEqual(header[165:173], b'WC Setup', 'так пункт называет подсказка ядра')
         self.assertEqual(bytes(header[64:160]), bytes(96), 'по расширению не запускается')

@@ -46,7 +46,7 @@ class SpiIdleAtStart(unittest.TestCase):
         core, page = runtime_image.expected_pages(m.boot, runtime, sym, ext_sym)
         self.assertEqual(bytes(m.cpu.memory[start:end]), core,
                          'ядро по #4000 и резидентный блок на месте драйверов')
-        self.assertEqual(m.page(EXT_PAGE)[:len(runtime)], page,
+        self.assertEqual(m.page(EXT_PAGE)[:len(page)], page,
                          'расширение и драйверы в странице #E8')
         self.assertEqual(m.mapped, 0x03, 'окно #C000 возвращено')
         self.assertEqual(m.cpu.ix, 0x4321, 'IX сохранён')

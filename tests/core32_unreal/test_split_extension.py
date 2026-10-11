@@ -64,6 +64,21 @@ class Split(unittest.TestCase):
         self.assertEqual(cut, len(RAW) - se.MIN_PART)
         self.assertEqual(part2, se.MIN_PART // 2)
 
+    # Claude - 2026-10-10 - begin
+    def test_stream_not_longer_than_its_part(self):
+        # DEHR кладёт поток в конец области назначения: поток длиннее данных
+        # части лёг бы ниже её начала и затёр часть 1 (короткий хвост после
+        # оверлея FILEX: 16 байт — поток 26). Такая граница не годится.
+        def expands(data):
+            if len(data) < 16:
+                return None
+            return len(data) + 10 if len(data) < 64 else len(data) // 2
+        cut, part1, part2 = se.choose(RAW, 100000, 2145, expands, always)
+        self.assertEqual(cut, len(RAW) - 64)
+        self.assertLessEqual(part2, len(RAW) - cut)
+        self.assertLessEqual(part1, cut)
+    # Claude - 2026-10-10 - end
+
     def test_packer_refusal_skips_the_candidate(self):
         def refuses(data):
             return None if len(data) in (6001, len(RAW) - 6000) else linear(data)

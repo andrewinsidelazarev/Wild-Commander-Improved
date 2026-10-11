@@ -11,14 +11,14 @@
 ; шаблон с заводскими значениями, и F2 создаёт файл.
 ;
 ; Высота окна берётся из текущего текстового режима (#600E — 25, 30 или 36
-; строк), список прокручивается, поэтому плагин одинаково работает во всех
-; режимах WC.
+; строк; окно — не выше HEI-6, две строки под заголовком WC), список
+; прокручивается, поэтому плагин одинаково работает во всех режимах WC.
 
         DEVICE ZXSPECTRUM128
         INCLUDE "../../VERSION.ASM"             ; WC_VERSION — первая строка wc.ini
 
 ; --- публичный интерфейс WC -------------------------------------------------
-WLD     EQU #6006       ; диспетчер API: номер в A
+WC_API  EQU #6006       ; диспетчер API: номер в A; зовётся через WLD
 HEI     EQU #600E       ; высота текстового экрана: 25, 30 или 36
 
 API_PRWOW   EQU 1       ; нарисовать окно по описателю IX
@@ -32,6 +32,9 @@ API_TXTPR   EQU 11      ; размеченный текст
 API_SAVE512 EQU 49      ; записать поток поверх прежней цепочки
 API_SPACE   EQU 16      ; клавиши: пробел, стрелки, Enter, Esc
 API_F2      EQU 30      ; F2 — сохранить wc.ini
+API_F5      EQU 33      ; F5/F6 — плагин выше/ниже в своей группе
+API_F6      EQU 34
+API_KBSCN   EQU 42      ; знак нажатой клавиши (A'=0 — с раскладкой): S — сортировка
 API_TAB     EQU 21      ; Tab — переключить экран настроек и плагинов
 API_ISTR    EQU 9       ; строковый редактор WC, подкоманда в A'
 API_WAITUP  EQU 46      ; ждать, пока отпустят все клавиши
@@ -70,32 +73,52 @@ API_TENTRY  EQU 51      ; за FENTRY: 32 байта записи в DE (кла�
 ; .WMF в каталоге WC бывает больше 32 (на карте пользователя их 33). С
 ; 2026-09-27 (признак правки, вопрос при выходе, отказ править флаги длиннее
 ; поля) — ещё на 192 байта каждый, #A00: wc.ini до 2559 байт (поставляемый —
-; ~1,7 КиБ).
+; ~1,7 КиБ). С 2026-10-11 (раскладка по центру, F5/F6 и S, названия до 31
+; знака) — #860: wc.ini до 2143 байт; длиннее — «wc.ini is too long to edit».
+; Затем (исправление дублей [PLUGINS]) размер считает сборка — TEXTMAX ниже,
+; не меньше #800: wc.ini до 2047 байт (поставляемый — 1687).
+; Claude - 2026-10-11 - begin
+; Список .WMF был на 40 записей (PMAX), и перебор каталога молча кончался на
+; сороковом: у пользователя в /wc их 41, сорок первый в WC Setup не попадал.
+; Теперь список и новый текст — во второй странице плагина (+34 = 2, данных
+; из файла в ней нет), она подключена в окно #C000 всё время работы SETUP:
+; вызовы WC его перекладывают, поэтому после каждого — снова она (WLD). Записей —
+; сколько держат байтовые счётчики (PMAX), буфер wc.ini — во всю вторую
+; страницу за списком; в первой — код, текст wc.ini и мелкие буферы.
 CODE        EQU #8000   ; код плагина — до INIBUF
-INIBUF      EQU #9340   ; текст wc.ini: до #9FF байт и ноль за ним
-INISECT     EQU 6       ; столько секторов читаем: хвост шестого ляжет в
-                        ; начало NEWBUF, при чтении это черновик
-NEWBUF      EQU INIBUF+#A00 ; новый текст при правке, в остальное время черновик:
-NEWEND      EQU NEWBUF+#A00
-ENTRYBUF    EQU NEWBUF  ;   выход NXTETY2 при переборе каталога
-SECTOR      EQU NEWBUF  ;   первый сектор .WMF при чтении заголовков
-PLIST       EQU NEWEND  ; найденные .WMF: по PITEM байт на файл
-VALUES      EQU PLIST+PMAX*PITEM ; значения настроек: по байту на параметр
+NEWBUF      EQU #C000   ; вторая страница: новый текст при правке,
+NEWEND      EQU NEWBUF+TEXTMAX
+PLIST       EQU NEWEND  ;   за ним найденные .WMF, по PITEM байт на файл
+TEXTMAX     EQU (#4000-PMAX*PITEM) & #FFF0 ; длина буфера текста: wc.ini до TEXTMAX-1
+ROWMAPW     EQU PMAX+5  ; строки экрана плагинов: записи и линии между группами
+BUF_TAIL    EQU 512+#10+#20+ROWMAPW+#50+128+FLAGW ; SECTOR .. EDITBUF+FLAGW
+INIBUF      EQU #B000-BUF_TAIL-TEXTMAX ; текст wc.ini: до TEXTMAX-1 байт и ноль за ним
+INIEND      EQU INIBUF+TEXTMAX
+INISECT     EQU (TEXTMAX+511)/512 ; столько секторов читаем: хвост последнего
+                        ; ляжет в SECTOR, при чтении это черновик
+SECTOR      EQU INIEND  ; первый сектор .WMF при чтении заголовков (512),
+ENTRYBUF    EQU SECTOR  ;   выход NXTETY2 при переборе каталога
+VALUES      EQU SECTOR+512 ; значения настроек: по байту на параметр
 PLACES      EQU VALUES+#10 ; адреса их цифр в тексте wc.ini, по два байта
-ROWBUF      EQU PLACES+#20 ; строка, которую сейчас печатаем
+ROWMAP      EQU PLACES+#20 ; строки экрана плагинов: запись или #FF — линия
+ROWBUF      EQU ROWMAP+ROWMAPW ; строка, которую сейчас печатаем
 VARS        EQU ROWBUF+#50 ; переменные плагина, за ними EDITBUF
                         ; #B000..#BFFF принадлежит WC и CORE32
+; Claude - 2026-10-11 - end
 
-PMAX        EQU 40      ; все .WMF каталога WC; включить можно не больше 32 —
-                        ; столько записей в таблице заголовков WC
-PITEM       EQU 48      ; запись списка:
+PMAX        EQU 250     ; все .WMF каталога WC (с 2026-10-11; было 40 — мало);
+                        ; предел — байтовые счётчики: записей и линий
+                        ; групп в ROWMAP не больше 254, #FF — линия.
+                        ; Включить можно не больше 32 — столько записей
+                        ; в таблице заголовков WC
+PITEM       EQU 50      ; запись списка:
                         ;   +0  бит 0 — плагин включён: строка без «;»
 PNAME       EQU 1       ;   +1  имя файла 8.3 с нулём (13 байт)
-PLINE       EQU 14      ;   +14 адрес строки плагина в тексте или 0
-PFLAGS      EQU 16      ;   +16 адрес её флагов (сразу за именем) или 0
-PTYPE       EQU 18      ;   +18 тип из заголовка .WMF
-PTITLE      EQU 19      ;   +19 название из заголовка, 28 символов с нулём
-PGROUP      EQU 47      ;   +47 группа, она же порядок в списке:
+PLINE       EQU 14      ;   +14 адрес строки плагина в тексте или 0; флаги —
+                        ;       за именем (FLAGS_AT; с 2026-10-11 без поля PFLAGS)
+PTYPE       EQU 16      ;   +16 тип из заголовка .WMF
+PTITLE      EQU 17      ;   +17 название из заголовка, 31 символ с нулём
+PGROUP      EQU 49      ;   +49 группа, она же порядок в списке:
 GROUP_CORE  EQU 0       ;       обязательные (по имени файла)
 GROUP_AUTO  EQU 1       ;       autoexec (#06)
 GROUP_MENU  EQU 2       ;       есть в меню F10: #03, #05, #11, #13, #15
@@ -103,11 +126,29 @@ GROUP_SAVER EQU 3       ;       заставка (#02): включена не б
 GROUP_FILE  EQU 4       ;       только по файлу: расширения, меню
                         ;       просмотрщиков, F2, F4
 NAMEW       EQU 12      ; длиннее 8.3 имя файла в [PLUGINS] не бывает
-TITLEW      EQU 28
+TITLEW      EQU 32      ; поле названия в заголовке .WMF (+165..+196)
 
-LINEW       EQU 66      ; ширина строки: название плагина и его флаги
-FIELDX      EQU 11+TITLEW       ; колонка флагов в окне, 0 — рамка
-FIELDW      EQU LINEW-10-TITLEW ; сколько флагов видно в строке
+; Claude - 2026-10-11 - begin
+; Раскладка строк (по просьбе пользователя — ровно и по центру): у каждого
+; экрана своя ширина окна; колонка группы, затем строка. Название группы
+; печатается только в первой строке группы (и в верхней строке окна).
+; Строка плагина (LINEW): «  Группа    [x] Название (31)  флаги…»;
+; строка настройки (LINEW_S): «    Группа       Параметр ...... значение    ».
+LINEW       EQU 76      ; экран плагинов: окно LINEW+2, влезает в 80 колонок
+LINEW_S     EQU 50      ; экран настроек
+GROUPX      EQU 2       ; плагины: колонка названия группы
+GROUPW      EQU 10      ;   её ширина
+BOXX        EQU 14      ;   «[x]»
+TITLEX      EQU 18      ;   название, TITLEW-1 знаков
+FLAGSX      EQU 51      ;   флаги — до конца строки
+S_GROUPX    EQU 4       ; настройки: группа (до 11 знаков),
+S_LABELX    EQU 17      ;   параметр с точками до значения (LEADW знаков),
+LEADW       EQU 16
+S_VALUEX    EQU S_LABELX+LEADW+1 ; значение (VALW), справа поле
+        ASSERT S_VALUEX+VALW+S_GROUPX == LINEW_S, настройки не по центру окна
+FIELDX      EQU FLAGSX+1        ; колонка флагов в окне, 0 — рамка
+FIELDW      EQU LINEW-FLAGSX-GROUPX ; сколько флагов видно: справа поле, как слева
+; Claude - 2026-10-11 - end
 FLAGW       EQU 64      ; сколько флагов вмещает поле правки
 BAR_TRACK   EQU #B0     ; полоса прокрутки: дорожка
 BAR_KNOB    EQU #DB     ; и ползунок — как в меню F10
@@ -119,7 +160,8 @@ START_CODE:
         DB "WildCommanderMDL"
         DB #0A                                  ; версия формата
         DB #00
-        DB #01                                  ; одна страница
+        DB #02                                  ; две страницы: код и данные
+                                                ; (вторая — список и новый текст)
         DB #00                                  ; страница входа
         DB #00,(FILE_END-MAIN_START+511)/512
         DB #00,#00
@@ -145,10 +187,39 @@ MAIN_START:
 ; Из меню F10: A=#03. IX — панель, её WC ждёт обратно.
 ENTRY:
         PUSH IX
+        LD A,1
+        EX AF,AF'
+        XOR A                                   ; API 0: вторая страница плагина в #C000;
+        CALL WC_API                             ; её физический номер — из тени окна
+        LD A,(#6003)
+        LD (PAGE2),A
         CALL SCREEN
+        LD A,#FE
+        EX AF,AF'
+        XOR A                                   ; WC — с его страницей в #C000
+        CALL WC_API
         POP IX
         LD A,3                                  ; WC перечитает обе панели: после F2
         RET                                     ; у wc.ini новые кластер, размер и дата
+
+; Claude - 2026-10-11 - begin
+; Вызов API WC (номер в A) и снова вторая страница в #C000: вызовы WC
+; перекладывают это окно (окна, файлы, каталог). Регистры и флаги выхода API —
+; как вернул WC. Тень #6003 — тоже наша: обработчик прерываний (часы) окно
+; возвращает по ней.
+WLD:
+        CALL WC_API
+DATA_PAGE:
+        PUSH AF
+        PUSH BC
+        LD A,(PAGE2)
+        LD (#6003),A
+        LD BC,#13AF
+        OUT (C),A
+        POP BC
+        POP AF
+        RET
+; Claude - 2026-10-11 - end
 
 ; --- чтение wc.ini ----------------------------------------------------------
 ; Выход: CF=0 — файл прочитан в INIBUF и закрыт нулём; CF=1 — файла нет
@@ -167,7 +238,7 @@ READ_INI:
         LD A,D                                  ; размер в DE:HL: не меньше буфера —
         OR E                                    ; не примет, нулю за текстом не встать
         JR NZ,.too_long
-        LD DE,NEWBUF-INIBUF                     ; CF=0 после OR
+        LD DE,TEXTMAX                           ; CF=0 после OR
         SBC HL,DE
         ADD HL,DE
         JR NC,.too_long
@@ -175,7 +246,7 @@ READ_INI:
         LD A,API_GFILE
         CALL WLD
         LD HL,INIBUF
-        LD B,INISECT                            ; 3 КиБ: wc.ini заметно меньше
+        LD B,INISECT                            ; хвост сектора — в SECTOR
         LD A,API_LOAD512
         CALL WLD
         LD A,3                                  ; 3 — не прочитался: текст недостоверен,
@@ -259,6 +330,7 @@ SCREEN:
         LD (MODIFIED),A                         ; правок нет; шаблон вместо ненайденного
         CALL READ_INI                           ; файла — тоже не правка
         CALL TEXT_CHANGED
+        CALL FIX_TWICE                          ; плагин не одной строкой — правка
         CALL OPEN_SCREEN
         LD A,(INI_STATE)
         DEC A
@@ -268,8 +340,12 @@ SCREEN:
         LD HL,MSG_LONG
         JR Z,.tell                              ; файл не лёг в буфер
         DEC A
-        JR NZ,.loop
         LD HL,MSG_UNREAD                        ; файл не прочитался
+        JR Z,.tell
+        LD A,(MODIFIED)
+        OR A
+        JR Z,.loop
+        LD HL,MSG_TWICE                         ; прочитан, лишние строки убраны
 .tell:
         CALL SHOW_MESSAGE
 .loop:
@@ -310,6 +386,19 @@ SCREEN:
         LD A,API_F2
         CALL WLD
         CALL NZ,SAVE_INI
+; Claude - 2026-10-11 - begin
+        LD A,API_F5
+        CALL WLD
+        CALL NZ,MOVE_UP                         ; плагин выше в своей группе
+        LD A,API_F6
+        CALL WLD
+        CALL NZ,MOVE_DOWN                       ; ниже
+        XOR A
+        EX AF,AF'
+        LD A,API_KBSCN                          ; знак с раскладкой
+        CALL WLD
+        CALL NZ,SORT_KEY                        ; S — группы по алфавиту
+; Claude - 2026-10-11 - end
         LD A,API_ESC
         CALL WLD
         JP Z,.loop
@@ -411,8 +500,9 @@ DRAW_TITLE:
         INC C
         JR .copy
 .copied:
-        LD A,LINEW+1                            ; PRWOW: название с колонки
-        SUB C                                   ; (ширина-длина)/2, ширина — LINEW+2;
+        LD A,(ROWW)                             ; PRWOW: название с колонки
+        INC A
+        SUB C                                   ; (ширина-длина)/2, ширина — ROWW+2;
         SRL A                                   ; «*» — на колонку левее, C — с ней
         LD E,A
         LD D,0
@@ -437,23 +527,33 @@ DRAW_TITLE:
 ; Собрать строки текущего экрана и открыть под них окно нужной высоты.
 OPEN_SCREEN:
         CALL REFRESH
+.counted:
         LD IX,WND
         LD A,(SCREEN_NO)
         OR A
         LD HL,TITLE_SETUP
         LD DE,FOOT_SETUP
+        LD A,LINEW_S
         JR Z,.title
         LD HL,TITLE_PLUGS
         LD DE,FOOT_PLUGS
+        LD A,LINEW
 .title:
+        LD (ROWW),A                             ; у экранов своя ширина
+        ADD A,2
+        LD (IX+4),A
         LD (IX+16),L
         LD (IX+17),H
         LD (IX+18),E
         LD (IX+19),D
         LD (IX+2),255                           ; PRWOW пишет сюда вычисленный
         LD (IX+3),255                           ; центр, а высота у экранов разная
+; Claude - 2026-10-11: окно во всю высоту (HEI-5 строк) вставало с первой
+; строки экрана, вплотную под заголовком WC, — «уродливо» (пользователь).
+; Теперь строк списка не больше HEI-8: окно (с рамкой — HEI-6) по центру, над
+; ним три строки экрана (заголовок WC, верх панелей), под ним тень и ещё две.
         LD A,(HEI)
-        SUB 5                                   ; рамка окна и строка клавиш
+        SUB 8
         LD B,A
         LD A,(COUNT)
         CP B
@@ -481,7 +581,13 @@ SWITCH_SCREEN:
         LD A,(SCREEN_NO)
         XOR 1
         LD (SCREEN_NO),A
-        JP OPEN_SCREEN
+        CALL OPEN_SCREEN
+        LD A,(SCREEN_NO)
+        LD HL,TOO_MANY
+        AND (HL)
+        RET Z                                   ; все .WMF каталога в списке
+        LD HL,MSG_MANY
+        JP SHOW_MESSAGE
 
 ; Строки и их число для текущего экрана.
 REFRESH:
@@ -495,7 +601,7 @@ REFRESH:
         CALL SCAN_PLUGINS
         CALL READ_TITLES
         CALL SORT_PLUGINS
-        LD A,(PCOUNT)
+        LD A,(ROWS)                             ; записи и линии между группами
         LD (COUNT),A
         RET
 
@@ -606,11 +712,11 @@ INSERT_KEY:
         LD (INSLEN),HL                          ; длина вставки
         LD DE,(INI_SIZE)                        ; прежний конец текста, там ноль
         ADD HL,DE
-        LD BC,NEWBUF
+        LD BC,INIEND
         OR A
         SBC HL,BC
         CCF
-        RET C                                   ; новый конец не ниже NEWBUF — не влезет
+        RET C                                   ; новый конец не ниже INIEND — не влезет
         ADD HL,BC
         LD (INI_SIZE),HL
         EX DE,HL                                ; DE — новый конец, HL — прежний
@@ -646,7 +752,7 @@ TOGGLE_PLUGIN:
         LD A,(PCOUNT)
         OR A
         RET Z                                   ; список пуст: курсор не на записи
-        CALL CURRENT
+        CALL CUR_ITEM
         CALL PLUGIN_AT                          ; HL — запись
         PUSH HL
         LD DE,PGROUP
@@ -746,9 +852,11 @@ SAVE_INI:
         CALL TAIL_ON_INI_CHAIN
         JP Z,.check_disk
 ; Claude - 2026-09-26 - end
+        JR NC,.no_new                           ; хвоста нет — удалять нечего
         LD HL,NEW_QUERY
         LD A,API_DELFL
         CALL WLD                                ; хвост прошлой неудачной записи
+.no_new:
         LD HL,NEW_MAKE
         LD A,API_MKFILE
         CALL WLD
@@ -768,7 +876,7 @@ SAVE_INI:
         LD HL,INIBUF
         LD A,API_SAVE512
         CALL WLD
-        JR C,.failed
+        JP C,.failed
 ; Замена с запасной копией: прежний wc.ini сначала откладывается в wc.old, новый
 ; встаёт на его имя, и только потом wc.old удаляется. Если новый встать не
 ; смог, делается попытка вернуть wc.old на место, и выводится «wc.ini was NOT
@@ -790,9 +898,11 @@ SAVE_INI:
         CALL TAIL_ON_INI_CHAIN
         JP Z,.check_disk
 ; Claude - 2026-09-26 - end
+        JR NC,.no_old                           ; хвоста нет — удалять нечего
         LD HL,OLD_QUERY
         LD A,API_DELFL
         CALL WLD                                ; хвост прошлой неудачной замены
+.no_old:
         LD HL,INI_QUERY
         LD DE,OLD_QUERY+1
         LD A,API_RENAME
@@ -863,8 +973,10 @@ SAVE_INI:
 ; Z — хвост по HL (wc.new или wc.old) удалять нельзя: он есть, wc.ini тоже
 ; есть и начинается с того же первого кластера (хвост — вторая запись на
 ; цепочке wc.ini после сбоя RENAME), либо каталог не прочитался (FENTRY: Z и
-; CF=1) — тогда общую цепочку не исключить (аудит Codex, R13-1). NZ — удалять
-; можно: хвоста или wc.ini нет, либо цепочки разные. Кластер — из записи,
+; CF=1) — тогда общую цепочку не исключить (аудит Codex, R13-1). NZ и CF=1 —
+; удалять можно: wc.ini нет либо цепочки разные; NZ и CF=0 — хвоста нет,
+; удалять нечего (с 2026-10-11 DELFL тогда не зовётся: лишний проход
+; каталога на каждое F2). Кластер — из записи,
 ; которую отдаёт TENTRY (API 51) сразу за FENTRY: +20 — старшее слово, +26 —
 ; младшее. Размер для этого не годится (так было до R13-2): после сбоя RENAME
 ; обычный APPEND к wc.ini меняет размер только в его записи, а цепочка
@@ -879,13 +991,22 @@ TAIL_ON_INI_CHAIN:
         LD HL,INI_QUERY
         LD DE,ENTRYBUF+32                       ; запись wc.ini
         CALL .entry
-        RET NC
+        JR C,.both
+        RET Z                                   ; wc.ini не прочитан: не удалять
+        SCF                                     ; wc.ini нет: NZ, CF=1 — удалять
+        RET
+.both:
         LD HL,ENTRYBUF+20
         LD DE,ENTRYBUF+32+20
         CALL .word                              ; старшее слово кластера
-        RET NZ
+        JR NZ,.differ
         LD L,low (ENTRYBUF+26)
         LD E,low (ENTRYBUF+32+26)
+        CALL .word
+        RET Z                                   ; одна цепочка: не удалять
+.differ:
+        SCF                                     ; NZ, CF=1 — удалять
+        RET
 .word:
         LD A,(DE):CP (HL):RET NZ
         INC HL:INC DE
@@ -985,6 +1106,8 @@ APPLY:
 ; если в строке не было лишних пробелов: поле их убирает (ведущие, хвостовые,
 ; второй пробел после имени), и такой текст уже другой (аудит Codex R36-2).
 COPY_NEW:
+        XOR A
+        LD (DIFFERS),A
         LD HL,(NEWPTR)
         LD DE,NEWBUF
         OR A
@@ -996,7 +1119,7 @@ COPY_NEW:
         LD DE,(INI_SIZE)
         EX DE,HL
         SBC HL,DE
-        CALL NZ,MARK_MODIFIED                   ; длина другая
+        CALL NZ,.differs                        ; длина другая
         EX DE,HL
         LD (INI_SIZE),HL
         LD (HL),0
@@ -1005,12 +1128,27 @@ COPY_NEW:
 .copy:
         LD A,B
         OR C
-        JR Z,TEXT_CHANGED
+        JR Z,.copied
         LD A,(DE)
         CP (HL)
-        CALL NZ,MARK_MODIFIED                   ; байт другой
+        CALL NZ,.differs                        ; байт другой
         LDI
         JR .copy
+; Claude - 2026-10-11: текст тот же (F2 со строкой версии, что уже стояла) —
+; разбирать его заново незачем: адреса строк и цифр прежние (при 40+
+; плагинах разбор — заметная часть записи). Правка флагов уже в нём.
+.copied:
+        LD A,(DIFFERS)
+        OR A
+        JR NZ,TEXT_CHANGED
+        LD H,A
+        LD L,A
+        LD (EDITREC),HL
+        RET
+.differs:
+        LD A,1
+        LD (DIFFERS),A
+        JP MARK_MODIFIED
 
 ; Текст сменился: заново найти секцию, параметры и строки плагинов.
 TEXT_CHANGED:
@@ -1442,7 +1580,9 @@ BAR:
         PUSH BC
         PUSH DE
         LD HL,BARCH
-        LD E,LINEW+1                            ; правая рамка окна
+        LD A,(ROWW)
+        INC A
+        LD E,A                                  ; правая рамка окна
         LD BC,1
         CALL PRSRW_WND
         POP DE
@@ -1469,7 +1609,9 @@ PAINT_ROW:
 PRINT_ROW:
         LD HL,ROWBUF
         LD E,1
-        LD BC,LINEW
+        LD A,(ROWW)
+        LD C,A
+        LD B,0
 PRSRW_WND:                                      ; HL текст, BC длина, D/E — место
         LD IX,WND
         LD A,API_PRSRW
@@ -1492,7 +1634,7 @@ CENTER_ROW:
         INC C
         JR .length
 .place:
-        LD A,LINEW
+        LD A,(ROWW)
         SUB C
         SRL A
         LD E,A
@@ -1514,6 +1656,11 @@ BLANK_ROW:
         RET
 
 ; Собрать в ROWBUF строку номер A текущего экрана.
+; Claude - 2026-10-11 - begin
+; Раскладка по просьбе пользователя («профессионально: центрировано,
+; стильно»): слева колонка группы — её название только в первой строке группы
+; и в верхней строке окна, — затем строка; поля слева и справа поровну.
+; Claude - 2026-10-11 - end
 BUILD_ROW:
         PUSH AF
         CALL BLANK_ROW
@@ -1522,70 +1669,150 @@ BUILD_ROW:
         BIT 0,(HL)
         JR NZ,PLUGIN_ROW
 
-; Экран настроек: «название: значение».
+; Экран настроек: «Группа   Параметр ...... значение». Группа — секция
+; параметра: её название лежит в тексте сразу за «[СЕКЦИЯ]»,0.
+        PUSH AF                                 ; номер параметра
         LD L,A
         LD H,0
         LD DE,VALUES
         ADD HL,DE
         LD C,(HL)                               ; значение
+        POP AF
         PUSH BC
+        PUSH AF
         CALL PARAM_AT                           ; IX — описание параметра
+        POP AF
+        PUSH IX
+        POP HL                                  ; (HL) — младший байт секции
+        LD DE,PARAM_SIZE
+        CALL NEED_LABEL
+        JR NZ,.label
+        LD L,(IX+0)
+        LD H,(IX+1)
+.section:
+        LD A,(HL)
+        INC HL
+        OR A
+        JR NZ,.section                          ; за «[СЕКЦИЯ]»,0 — название группы
+        LD DE,ROWBUF+S_GROUPX
+        CALL COPY_Z
+.label:
         LD L,(IX+4)
         LD H,(IX+5)
-        LD DE,ROWBUF
+        LD DE,ROWBUF+S_LABELX
         LD BC,LABELW
-        LDIR                                    ; название
-        LD A,":"
+        LDIR                                    ; название параметра
+.back:
+        DEC DE
+        LD A,(DE)
+        CP " "
+        JR Z,.back                              ; DE — последний знак названия
+        INC DE
+        INC DE                                  ; пробел за ним
+        LD HL,ROWBUF+S_LABELX+LEADW
+        OR A
+        SBC HL,DE
+        LD B,L                                  ; точек до значения (не меньше 2)
+.dots:
+        LD A,"."
         LD (DE),A
         INC DE
-        INC DE                                  ; пробел уже стоит
+        DJNZ .dots
         POP BC
         LD A,C
-        PUSH DE
         CALL VALUE_TEXT
-        POP DE
+        LD DE,ROWBUF+S_VALUEX
         LD BC,VALW
         LDIR                                    ; подпись значения
         RET
 
-; Экран плагинов: отметка, группа, название из заголовка и флаги из строки
-; wc.ini — у выключенного плагина тоже, они вернутся вместе с отметкой.
-PLUGIN_ROW:
-        CALL PLUGIN_AT                          ; HL — запись списка
-        PUSH HL
-        LD BC,PGROUP
-        ADD HL,BC
+; Z — строке A нужна подпись группы: первая в списке, верхняя в окне или
+; ключ группы — байт (HL) — не тот, что у предыдущей строки (HL−DE).
+NEED_LABEL:
+        OR A
+        RET Z
+        LD C,A
+        LD A,(TOP)
+        CP C
+        RET Z
         LD A,(HL)
-        LD C,A
+        OR A
+        SBC HL,DE
+        CP (HL)
+        JR Z,.same
+        XOR A
+        RET
+.same:
+        OR 1
+        RET
+
+; Текст HL до нуля — в DE (без нуля).
+COPY_Z:
+        LD A,(HL)
+        OR A
+        RET Z
+        LD (DE),A
+        INC HL
+        INC DE
+        JR COPY_Z
+
+; Экран плагинов: «Группа    [x] Название    флаги». Флаги — из строки wc.ini, у
+; выключенного плагина тоже: они вернутся вместе с отметкой. Не влезли в
+; колонку — последний видимый знак «>». Между группами — строка-линия.
+PLUGIN_ROW:
+        PUSH AF                                 ; номер строки
+        CALL ROW_ITEM                           ; A — запись
+        CP #FF
+        JP Z,.line                              ; между группами — линия
+        CALL PLUGIN_AT                          ; HL — запись
+        POP AF
+        PUSH HL
+        LD DE,PGROUP
+        ADD HL,DE
+        LD C,(HL)                               ; группа
+        PUSH BC
+        LD DE,PITEM
+        CALL NEED_LABEL
+        POP BC
+        JR NZ,.box
+        LD A,C
+        ADD A,A
+        LD B,A
         ADD A,A
         ADD A,A
-        ADD A,C                                 ; метка — 5 символов
-        LD C,A
-        LD B,0
+        ADD A,B                                 ; ×GROUPW
+        LD E,A
+        LD D,0
         LD HL,GROUP_LABELS
-        ADD HL,BC
-        LD DE,ROWBUF+4
-        LD C,5
+        ADD HL,DE
+        LD DE,ROWBUF+GROUPX
+        LD BC,GROUPW
         LDIR
+.box:
+        POP HL                                  ; запись
+        PUSH HL
+        LD DE,PGROUP
+        ADD HL,DE
+        LD A,(HL)                               ; группа (LDIR подписи сбил C)
         POP HL
         LD BC,"]"*256+"["                       ; «[x]»
         LD E,"x"
-        CP GROUP_SAVER*5
-        JR NZ,.box
+        CP GROUP_SAVER
+        JR NZ,.mark_box
         LD BC,")"*256+"("                       ; заставка — одна из: «(*)»
         LD E,"*"
-.box:
+.mark_box:
         LD A,C
-        LD (ROWBUF),A
+        LD (ROWBUF+BOXX),A
         LD A,B
-        LD (ROWBUF+2),A
+        LD (ROWBUF+BOXX+2),A
         LD A,E
         BIT 0,(HL)
         JR NZ,.mark
         LD A," "
 .mark:
-        LD (ROWBUF+1),A
-        LD DE,ROWBUF+10                         ; название
+        LD (ROWBUF+BOXX+1),A
+        LD DE,ROWBUF+TITLEX                     ; название
         PUSH HL
         LD BC,PTITLE
         ADD HL,BC
@@ -1603,7 +1830,7 @@ PLUGIN_ROW:
         POP HL
         CALL FLAGS_AT                           ; HL — флаги или Z
         RET Z
-        LD DE,ROWBUF+FIELDX-1
+        LD DE,ROWBUF+FLAGSX
         LD B,FIELDW
 .copy_flags:
         LD A,(HL)
@@ -1615,19 +1842,45 @@ PLUGIN_ROW:
         INC HL
         INC DE
         DJNZ .copy_flags
+.more:
+        LD A,(HL)                               ; колонка кончилась: есть ли
+        CP ";"                                  ; дальше что-то кроме пробелов
+        RET Z
+        CALL IS_EOL
+        RET Z
+        INC HL
+        CP " "
+        JR Z,.more
+        DEC DE
+        LD A,">"                                ; флаги длиннее колонки
+        LD (DE),A
+        RET
+; Тонкая линия «─» с полями, как у строк (пожелание пользователя).
+.line:
+        POP AF
+        LD HL,ROWBUF+GROUPX
+        LD A,(ROWW)
+        SUB 2*GROUPX
+        LD B,A
+.dash:
+        LD (HL),#C4
+        INC HL
+        DJNZ .dash
         RET
 
-; Флаги записи HL без ведущих пробелов. Выход: NZ и HL — текст; Z — строки
-; плагина в тексте нет.
+; Флаги записи HL без ведущих пробелов: в её строке за «;» выключенной строки
+; и именем. Выход: NZ и HL — текст; Z — строки плагина в тексте нет.
 FLAGS_AT:
-        LD BC,PFLAGS
-        ADD HL,BC
-        LD A,(HL)
-        INC HL
-        LD H,(HL)
-        LD L,A
-        OR H
+        CALL LINE_OF
+        LD A,H
+        OR L
         RET Z
+        LD A,(HL)
+        CP ";"
+        JR NZ,.named
+        INC HL                                  ; у выключенной строки имя за «;»
+.named:
+        CALL SKIP_NAME
         JP SKIP_SPACES                          ; выходит на непробеле: NZ
 
 ; --- правка флагов ----------------------------------------------------------
@@ -1638,7 +1891,7 @@ EDIT_FLAGS:
         LD A,(PCOUNT)
         OR A
         RET Z                                   ; список пуст: курсор не на записи
-        CALL CURRENT
+        CALL CUR_ITEM
         CALL PLUGIN_AT
         LD (EDITREC),HL
         PUSH HL
@@ -1811,8 +2064,21 @@ MOVE_BY:
         LD A,API_CURSOR
         JP WLD                                  ; полоса — на новой строке
 
-; Шаги курсора: IX — описатель окна (его ставит MOVE_BY).
+; Шаги курсора: IX — описатель окна (его ставит MOVE_BY). Линию между группами
+; шаг перешагивает: на ней курсору делать нечего. Первая и последняя строки
+; списка — всегда записи, поэтому перешагнуть есть куда.
 STEP_UP:
+        CALL STEP_UP1
+        CALL ON_LINE
+        JR Z,STEP_UP
+        RET
+STEP_DOWN:
+        CALL STEP_DOWN1
+        CALL ON_LINE
+        JR Z,STEP_DOWN
+        RET
+
+STEP_UP1:
         LD A,(IX+12)
         DEC A
         JR Z,.scroll
@@ -1826,7 +2092,7 @@ STEP_UP:
         DEC (HL)
         RET
 
-STEP_DOWN:
+STEP_DOWN1:
         LD A,(IX+12)
         CP (IX+13)
         JR NC,.scroll
@@ -1851,6 +2117,7 @@ SCAN_PLUGINS:
         LD (PLPTR),HL
         XOR A
         LD (PCOUNT),A
+        LD (TOO_MANY),A
         CALL ENTER_WC                           ; каталог WC в служебном потоке
         RET NZ
         LD A,1
@@ -1858,9 +2125,6 @@ SCAN_PLUGINS:
         LD A,API_ADIR
         CALL WLD                                ; начать перебор сначала
 .next:
-        LD A,(PCOUNT)
-        CP PMAX
-        RET NC
         LD DE,ENTRYBUF
         LD A,%00000100                          ; размер и любой тип
         EX AF,AF'
@@ -1876,8 +2140,15 @@ SCAN_PLUGINS:
         JR Z,.next                              ; запись без имени
         CALL IS_WMF
         JR C,.next
+        LD A,(PCOUNT)
+        CP PMAX
+        JR NC,.full                             ; ещё один .WMF, а места нет
         CALL ADD_PLUGIN
         JR .next
+.full:
+        LD A,1
+        LD (TOO_MANY),A                         ; окно плагинов скажет
+        RET
 
 ; Имя по HL кончается на .WMF? Выход: CF=0 — да.
 IS_WMF:
@@ -1961,8 +2232,7 @@ ADD_PLUGIN:
         RET
 
 ; Связать запись HL со строкой секции [PLUGINS]: отметка — есть ли включённая
-; строка; PLINE и PFLAGS — строка и её флаги, у выключенной строки тоже.
-; HL сохраняется.
+; строка; PLINE — строка, у выключенной строки тоже. HL сохраняется.
 LINK_ITEM:
         PUSH HL
         INC HL                                  ; имя записи
@@ -1972,22 +2242,6 @@ LINK_ITEM:
         PUSH HL
         LD BC,PLINE
         ADD HL,BC
-        LD (HL),E
-        INC HL
-        LD (HL),D
-        INC HL                                  ; PFLAGS — сразу за PLINE
-        LD A,D
-        OR E
-        JR Z,.store
-        EX DE,HL
-        LD A,(HL)
-        CP ";"
-        JR NZ,.named
-        INC HL                                  ; у выключенной строки имя за «;»
-.named:
-        CALL SKIP_NAME
-        EX DE,HL
-.store:
         LD (HL),E
         INC HL
         LD (HL),D
@@ -2150,17 +2404,24 @@ CORE_NAMES:
         DB "PLM.WMF",0
         DB 0
 
-GROUP_LABELS:                                   ; в порядке GROUP_*
-        DB "core "
-        DB "auto "
-        DB "F10  "
-        DB "saver"
-        DB "file "
+GROUP_LABELS:                                   ; в порядке GROUP_*, по GROUPW
+        DB "Core      "
+        DB "Autostart "
+        DB "F10 menu  "
+        DB "Savers    "
+        DB "Files     "
+        ASSERT $-GROUP_LABELS == 5*GROUPW
 
-; Отсортировать список по названию: без учёта регистра и ведущих пробелов,
-; у пары плагинов название в заголовке начинается с пробела. Плагинов не
-; больше 32, поэтому хватает простой сортировки обменами.
+; Упорядочить список: по группе, в группе — как строки стоят в [PLUGINS]
+; (с 2026-10-11, по просьбе пользователя: без сортировки по умолчанию; по
+; алфавиту — клавишей S, порядок — F5/F6). Плагины без строки в тексте — в
+; конце группы, по названию: без учёта регистра и ведущих пробелов, у пары
+; плагинов название в заголовке начинается с пробела. Плагинов не больше
+; PMAX, поэтому хватает простой сортировки обменами.
 SORT_PLUGINS:
+        CALL .sort
+        JP BUILD_ROWMAP                         ; и строки экрана — заново
+.sort:
         LD A,(PCOUNT)
         CP 2
         RET C
@@ -2213,6 +2474,36 @@ TITLE_AFTER:
 .same_group:
         PUSH HL
         PUSH DE
+        CALL LINE_KEY
+        PUSH BC                                 ; ключ HL: строка−1, без строки — #FFFF
+        EX DE,HL
+        CALL LINE_KEY                           ; ключ DE
+        POP HL
+        OR A
+        SBC HL,BC
+        POP DE
+        POP HL
+        JR Z,TITLES_AFTER                       ; обе без строки — по названию
+        CCF                                     ; ключ HL больше — HL после DE
+        RET
+
+; Ключ записи HL для порядка в группе: адрес её строки минус 1 (строки нет —
+; #FFFF, в конец группы). Выход: BC. HL сохраняется.
+LINE_KEY:
+        PUSH HL
+        LD BC,PLINE
+        ADD HL,BC
+        LD C,(HL)
+        INC HL
+        LD B,(HL)
+        DEC BC
+        POP HL
+        RET
+
+; Сравнить названия записей HL и DE. Выход: CF=1 — HL идёт после DE.
+TITLES_AFTER:
+        PUSH HL
+        PUSH DE
         LD BC,PTITLE
         ADD HL,BC
         EX DE,HL
@@ -2251,6 +2542,394 @@ SKIP_SPACES:
         RET NZ
         INC HL
         JR SKIP_SPACES
+
+; Claude - 2026-10-11 - begin
+; F5/F6 на экране плагинов (по просьбе пользователя): плагин под курсором — на
+; строку выше/ниже в своей группе. Меняются местами две строки [PLUGINS]
+; (SWAP_LINES), список заново упорядочивается, курсор идёт за плагином. Порядок
+; строк — это и порядок меню F10 (PLM) и обработчиков файлов. Край группы или
+; у кого-то из двоих нет строки в тексте (.WMF в каталоге, но не в wc.ini) —
+; ничего.
+MOVE_UP:
+        XOR A
+        JR MOVE_PLUGIN
+MOVE_DOWN:
+        LD A,1
+MOVE_PLUGIN:
+        LD (MOVEDIR),A
+        LD A,(SCREEN_NO)
+        OR A
+        RET Z
+        LD A,(PCOUNT)
+        OR A
+        RET Z                                   ; список пуст
+        CALL CUR_ITEM                            ; A — запись под курсором
+        LD C,A
+        LD A,(MOVEDIR)
+        OR A
+        LD A,C
+        JR NZ,.down
+        OR A
+        RET Z                                   ; первая в списке
+        DEC A
+        JR .pair
+.down:
+        INC A
+        LD HL,PCOUNT
+        CP (HL)
+        RET NC                                  ; последняя
+.pair:
+        CALL PLUGIN_AT                          ; HL — соседняя запись
+        PUSH HL
+        LD A,C
+        CALL PLUGIN_AT                          ; HL — запись под курсором
+        POP DE
+        CALL SAME_GROUP
+        RET NZ                                  ; край группы
+        CALL MOVABLE
+        RET NZ                                  ; обязательные, автозапуск, заставки
+        CALL HAS_LINE
+        RET Z
+        EX DE,HL
+        CALL HAS_LINE
+        RET Z
+        CALL LINE_OF                            ; HL — строка соседней
+        PUSH HL
+        EX DE,HL
+        CALL LINE_OF                            ; HL — строка своей
+        POP DE
+        CALL SWAP_LINES
+        CALL SORT_PLUGINS
+        CALL PAINT
+        LD B,1
+        LD A,(MOVEDIR)
+        OR A
+        JP Z,UP_BY                              ; курсор — за плагином
+        JP DOWN_BY
+
+; S на экране плагинов: в группах меню F10 и обработчиков файлов (MOVABLE)
+; плагины со строкой в [PLUGINS] — по алфавиту названий; обязательные,
+; автозапуск и заставки не трогаются. Выбором: на место SORTI — запись с меньшим названием из
+; той же группы ниже (их строки — SWAP_LINES), затем список заново
+; упорядочивается, и она встаёт на SORTI. Курсор и верх окна — прежние.
+SORT_KEY:
+        CP "s"
+        JR Z,ALPHA_SORT
+        CP "S"
+        RET NZ
+ALPHA_SORT:
+        LD A,(SCREEN_NO)
+        OR A
+        RET Z
+        LD A,API_WAITUP
+        CALL WLD                                ; одна сортировка на нажатие
+        XOR A
+.place:
+        LD (SORTI),A
+        INC A
+        LD HL,PCOUNT
+        CP (HL)
+        JP NC,PAINT                             ; ниже места нет — готово
+        LD A,(SORTI)
+        CALL PLUGIN_AT
+        CALL MOVABLE
+        JR NZ,.next                             ; эту группу не сортируем
+        CALL HAS_LINE
+        JR Z,.next                              ; без строки — не двигаем
+        LD (SORTMIN),HL
+        LD A,(SORTI)
+.look:
+        INC A
+        LD HL,PCOUNT
+        CP (HL)
+        JR NC,.swap
+        LD (SORTJ),A
+        CALL PLUGIN_AT                          ; HL — запись SORTJ
+        LD DE,(SORTMIN)
+        CALL SAME_GROUP
+        JR NZ,.swap                             ; группа кончилась: она подряд
+        CALL HAS_LINE
+        JR Z,.swap                              ; дальше в группе — без строк
+        CALL TITLES_AFTER
+        JR C,.again                             ; SORTJ — после меньшей
+        LD (SORTMIN),HL
+.again:
+        LD A,(SORTJ)
+        JR .look
+.swap:
+        LD A,(SORTI)
+        CALL PLUGIN_AT
+        LD DE,(SORTMIN)
+        OR A
+        SBC HL,DE
+        ADD HL,DE
+        JR Z,.next                              ; на месте уже меньшая
+        CALL LINE_OF                            ; HL — строка места
+        PUSH HL
+        EX DE,HL
+        CALL LINE_OF                            ; HL — строка меньшей
+        POP DE
+        CALL SWAP_LINES
+        CALL SORT_PLUGINS
+.next:
+        LD A,(SORTI)
+        INC A
+        JR .place
+
+; Строки экрана плагинов (по просьбе пользователя — тонкая линия между
+; группами): ROWMAP — номер записи, между группами — #FF; ROWS — их число.
+BUILD_ROWMAP:
+        LD A,(PCOUNT)
+        LD B,A
+        LD C,0                                  ; номер записи
+        LD DE,ROWMAP
+        LD HL,PLIST+PGROUP
+        OR A
+        JR Z,.done
+        LD A,(HL)
+        EX AF,AF'                               ; A' — группа предыдущей записи
+.item:
+        EX AF,AF'
+        CP (HL)
+        JR Z,.same
+        LD A,#FF
+        LD (DE),A                               ; группа сменилась — линия
+        INC DE
+        LD A,(HL)
+.same:
+        EX AF,AF'
+        LD A,C
+        LD (DE),A
+        INC DE
+        INC C
+        PUSH DE
+        LD DE,PITEM
+        ADD HL,DE
+        POP DE
+        DJNZ .item
+.done:
+        EX DE,HL
+        LD DE,ROWMAP
+        OR A
+        SBC HL,DE
+        LD A,L
+        LD (ROWS),A
+        RET
+
+; Запись под курсором экрана плагинов (на линию курсор не встаёт).
+CUR_ITEM:
+        CALL CURRENT
+; A — запись в строке A экрана плагинов, #FF — линия между группами.
+ROW_ITEM:
+        LD HL,ROWMAP
+        ADD A,L
+        LD L,A
+        ADC A,H
+        SUB L
+        LD H,A
+        LD A,(HL)
+        RET
+
+; Z — курсор экрана плагинов на линии: шаг курсора её перешагивает.
+ON_LINE:
+        LD A,(SCREEN_NO)
+        OR A
+        JR Z,.no
+        CALL CURRENT
+        CALL ROW_ITEM
+        INC A                                   ; #FF — Z
+        RET
+.no:
+        OR 1
+        RET
+
+; Z — запись HL из группы, где порядок задаёт пользователь: меню F10 и
+; обработчики файлов. Обязательные, автозапуск и заставки не двигаются и не
+; сортируются (пожелание пользователя). HL сохраняется.
+MOVABLE:
+        PUSH HL
+        LD BC,PGROUP
+        ADD HL,BC
+        LD A,(HL)
+        POP HL
+        CP GROUP_MENU
+        RET Z
+        CP GROUP_FILE
+        RET
+
+; Имя плагина стоит в [PLUGINS] не одной строкой — исправить (по просьбе
+; пользователя: не обходить, а исправлять). Остаётся строка, с которой SETUP
+; связывает плагин и чьи флаги показывает (IN_PLUGINS: первая включённая,
+; иначе первая выключенная); прочие вырезаются на месте вместе с переводом
+; строки (CR, LF, CR LF). Без этого F5/F6 и S, переставив одну строку,
+; связали бы плагин с другой, с её флагами (Codex, седьмой круг). Текст после
+; этого правленый (MARK_MODIFIED: «*», F2 запишет, Esc спросит), в окне —
+; MSG_TWICE. Строки без имени (пустые, «; комментарий», с пробелом в начале)
+; и с «именем» длиннее 8.3 не трогаются. Зовётся при открытии, сразу за
+; TEXT_CHANGED (PLUGSEC).
+FIX_TWICE:
+        LD DE,(PLUGSEC)
+        LD A,D
+        OR E
+        RET Z
+        JR .line
+.cut:
+        CALL LINE_END                           ; HL — лишняя строка: её конец
+        LD A,(HL)
+        OR A
+        JR Z,.tail                              ; последняя строка текста
+        INC HL
+        CP 13
+        JR NZ,.tail
+        LD A,(HL)
+        CP 10
+        JR NZ,.tail
+        INC HL                                  ; CR LF
+.tail:
+        EX DE,HL                                ; DE — за строкой
+        LD HL,(INI_SIZE)
+        OR A
+        SBC HL,DE
+        INC HL                                  ; хвост вместе с нулём
+        LD B,H
+        LD C,L
+        EX DE,HL
+        LD DE,(LINEA)
+        LDIR                                    ; хвост — на место строки
+        DEC DE
+        LD (INI_SIZE),DE                        ; там ноль
+        CALL MARK_MODIFIED
+        CALL TEXT_CHANGED
+        LD DE,(LINEA)                           ; там теперь следующая строка
+.line:
+        LD A,(DE)
+        OR A
+        RET Z
+        CP "["
+        RET Z                                   ; следующая секция
+        CALL IS_EOL
+        JR Z,.step
+        LD (LINEA),DE                           ; начало строки
+        CP ";"
+        JR NZ,.name
+        INC DE                                  ; у выключенной строки имя за «;»
+.name:
+        LD HL,ROWBUF                            ; имя заглавными, с нулём: экран
+        LD B,NAMEW+1                            ; ещё не рисуется, строка свободна
+.copy:
+        LD A,(DE)
+        CALL WORD_END
+        JR Z,.named
+        CALL UPPER
+        LD (HL),A
+        INC HL
+        INC DE
+        DJNZ .copy
+        JR .skip                                ; длиннее 8.3 — не имя плагина
+.named:
+        LD (HL),0
+        LD A,B
+        CP NAMEW+1
+        JR Z,.skip                              ; имени нет
+        LD HL,ROWBUF
+        CALL IN_PLUGINS                         ; DE — строка, которая остаётся
+        LD HL,(LINEA)
+        OR A
+        SBC HL,DE
+        ADD HL,DE
+        JR NZ,.cut                              ; эта — лишняя
+.skip:
+        LD A,(DE)                               ; до конца строки
+        CALL IS_EOL
+        JR Z,.eol
+        INC DE
+        JR .skip
+.eol:
+        OR A
+        RET Z
+.step:
+        INC DE
+        JR .line
+
+; Z — записи HL и DE в одной группе. HL, DE сохраняются.
+SAME_GROUP:
+        PUSH HL
+        PUSH DE
+        LD BC,PGROUP
+        ADD HL,BC
+        LD A,(HL)
+        EX DE,HL
+        ADD HL,BC
+        CP (HL)
+        POP DE
+        POP HL
+        RET
+
+; Z — у записи HL нет строки в тексте. HL сохраняется.
+HAS_LINE:
+        PUSH HL
+        LD BC,PLINE
+        ADD HL,BC
+        LD A,(HL)
+        INC HL
+        OR (HL)
+        POP HL
+        RET
+
+; HL — строка записи HL (PLINE).
+LINE_OF:
+        LD BC,PLINE
+        ADD HL,BC
+        LD A,(HL)
+        INC HL
+        LD H,(HL)
+        LD L,A
+        RET
+
+; Поменять местами строки текста, начинающиеся в HL и DE (переводы строк
+; остаются на месте): текст собирается заново в NEWBUF и копируется на место
+; (COPY_NEW — признак правки и новая связь записей со строками). Длина та же.
+SWAP_LINES:
+        OR A
+        SBC HL,DE
+        ADD HL,DE
+        JR C,.ordered                           ; HL выше DE
+        EX DE,HL
+.ordered:
+        LD (LINEA),HL
+        LD (LINEB),DE
+        CALL LINE_END
+        LD (AEND),HL
+        EX DE,HL
+        CALL LINE_END
+        LD (BEND),HL
+        LD HL,NEWBUF
+        LD (NEWPTR),HL
+        LD HL,INIBUF
+        LD DE,(LINEA)
+        CALL EMIT_RANGE                         ; до первой строки
+        LD HL,(LINEB)
+        LD DE,(BEND)
+        CALL EMIT_RANGE                         ; вторая — на место первой
+        LD HL,(AEND)
+        LD DE,(LINEB)
+        CALL EMIT_RANGE                         ; что между ними
+        LD HL,(LINEA)
+        LD DE,(AEND)
+        CALL EMIT_RANGE                         ; первая — на место второй
+        LD HL,(BEND)
+        LD DE,(INI_SIZE)
+        CALL EMIT_RANGE                         ; остаток
+        JP COPY_NEW
+
+; HL — первый байт за строкой HL: перевод строки или ноль.
+LINE_END:
+        LD A,(HL)
+        CALL IS_EOL
+        RET Z
+        INC HL
+        JR LINE_END
+; Claude - 2026-10-11 - end
 
 ; Обменять записи HL и DE целиком.
 SWAP_ITEMS:
@@ -2420,13 +3099,15 @@ PARAMS:
 PARAM_SIZE  EQU 9
 PARAM_COUNT EQU 12
         ASSERT PARAM_COUNT >= 2, сообщению SHOW_TEXT на экране настроек нужны две строки
-VALW        EQU 10                              ; ширина подписи значения
-LABELW      EQU 15                              ; ширина названия параметра
+VALW        EQU 12                              ; ширина подписи значения
+LABELW      EQU 13                              ; ширина названия параметра
         ASSERT PARAM_COUNT*PARAM_SIZE == $-PARAMS
+        ASSERT LABELW+3 <= LEADW, у названия и точек не останется места
 
-SEC_SETUP   DB "[SETUP]",0
-SEC_LEFT    DB "[LPANEL]",0
-SEC_RIGHT   DB "[RPANEL]",0
+; Секция, за её нулём — название группы на экране настроек (BUILD_ROW).
+SEC_SETUP   DB "[SETUP]",0,"Commander",0
+SEC_LEFT    DB "[LPANEL]",0,"Left panel",0
+SEC_RIGHT   DB "[RPANEL]",0,"Right panel",0
 
 KEY_FREQ    DB "CPU_FREQ=",0
 KEY_PATHS   DB "SavePaths=",0
@@ -2438,28 +3119,32 @@ KEY_DRV     DB "DRV=",0
 KEY_INFO    DB "INFO=",0
 KEY_SORT    DB "CSORT=",0
 
-LBL_FREQ    DB "CPU speed      "
-LBL_PATHS   DB "Remember dirs  "
-LBL_CURSOR  DB "Save cursor    "
-LBL_MODE    DB "Text mode      "
-LBL_SAVER   DB "Screen saver   "
-LBL_LOGO    DB "Title logo     "
-LBL_LDRV    DB "Left drive     "
-LBL_LINFO   DB "Left file info "
-LBL_LSORT   DB "Left sorting   "
-LBL_RDRV    DB "Right drive    "
-LBL_RINFO   DB "Right file info"
-LBL_RSORT   DB "Right sorting  "
+; Названия параметров — по LABELW, без «Left/Right»: панель — в колонке группы.
+LBL_FREQ    DB "CPU speed    "
+LBL_PATHS   DB "Remember dirs"
+LBL_CURSOR  DB "Save cursor  "
+LBL_MODE    DB "Text mode    "
+LBL_SAVER   DB "Screen saver "
+LBL_LOGO    DB "Title logo   "
+LBL_LDRV    DB "Drive        "
+LBL_LINFO   DB "File info    "
+LBL_LSORT   DB "Sorting      "
+LBL_RDRV    EQU LBL_LDRV
+LBL_RINFO   EQU LBL_LINFO
+LBL_RSORT   EQU LBL_LSORT
 
-VAL_FREQ    DB "3.5 MHz   ","7 MHz     ","14 MHz    "
-VAL_NOYES   DB "no        ","yes       "
-VAL_MODE    DB "80x25     ","80x30     ","90x36     "
-VAL_SAVER   DB "disabled  ","1 minute  ","2 minutes ","3 minutes ","4 minutes "
-            DB "5 minutes ","6 minutes ","7 minutes ","8 minutes ","9 minutes "
-VAL_ONOFF   DB "disabled  ","enabled   "
-VAL_DRV     DB "IDEnemoMas","SD (ZC)   ","SD (NGS)  ","IDEsmucMas","IDEsmucSla"
-            DB "IDEnemoSla","SD2 (ZC)  "
-VAL_SORT    DB "off       ","by name   ","by ext    ","by size   ","by date   "
+; Подписи значений — по VALW.
+VAL_FREQ    DB "3.5 MHz     ","7 MHz       ","14 MHz      "
+VAL_NOYES   DB "no          ","yes         "
+VAL_MODE    DB "80x25       ","80x30       ","90x36       "
+VAL_SAVER   DB "disabled    ","1 minute    ","2 minutes   ","3 minutes   "
+            DB "4 minutes   ","5 minutes   ","6 minutes   ","7 minutes   "
+            DB "8 minutes   ","9 minutes   "
+VAL_ONOFF   DB "disabled    ","enabled     "
+VAL_DRV     DB "Nemo master ","SD (ZC)     ","SD (NGS)    ","SMUC master "
+            DB "SMUC slave  ","Nemo slave  ","SD 2 (ZC)   "
+VAL_SORT    DB "off         ","by name     ","by ext      ","by size     "
+            DB "by date     "
 
 ; Разобрать [SETUP]: значение каждого параметра и адрес его цифры в тексте.
 PARSE_SETUP:
@@ -2585,15 +3270,18 @@ WND     DB 5+16+128+64,0
         DB 0,0
         DB 1,0
         DB %11100001
-        DB 0
-        DW TITLE_SETUP
+        DB %01011111                            ; цвет строки под полосой — окна: API 7
+        DW TITLE_SETUP                          ; до первой полосы (сообщение при открытии)
         DW FOOT_SETUP
         DW 0
 
 TITLE_SETUP DB #0E,#09,"WC SETUP",0
 TITLE_PLUGS DB #0E,#09,"WC PLUGINS",0
-FOOT_SETUP  DB #0B,1,#09,"Space - change  Tab - plugins  F2 - save  Esc - exit",0
-FOOT_PLUGS  DB #0B,1,#09,"Space - use  Enter - flags  Tab - settings  F2 - save  Esc",0
+; Подсказка клавиш — по центру нижней рамки (#0E), с полем от краёв.
+FOOT_SETUP  DB #0E,#09,"Space change  Tab plugins  F2 save  Esc exit",0
+        ASSERT $-FOOT_SETUP-3 <= LINEW_S-2, подсказка настроек шире окна
+FOOT_PLUGS  DB #0E,#09,"Space use  Enter flags  F5/F6 move  S sort  Tab setup  F2 save  Esc exit",0
+        ASSERT $-FOOT_PLUGS-3 <= LINEW-2, подсказка плагинов шире окна
 
 ; Сообщения печатаются по центру строки шириной LINEW (чётной), поэтому их
 ; длина тоже чётная: иначе отступы слева и справа не сравнять.
@@ -2620,8 +3308,12 @@ MSG_UNREAD  DB "wc.ini could not be read",0
         ASSERT (($-MSG_UNREAD-1) & 1) == 0
 MSG_KEY     DB "Press any key...",0
         ASSERT (($-MSG_KEY-1) & 1) == 0
+MSG_TWICE   DB "Duplicate lines in [PLUGINS] removed",0
+        ASSERT (($-MSG_TWICE-1) & 1) == 0
 MSG_ASK     DB "Save changed settings?",0
         ASSERT (($-MSG_ASK-1) & 1) == 0
+MSG_MANY    DB "Not all .WMF fit in the list",0    ; сверх PMAX — не потерять молча
+        ASSERT (($-MSG_MANY-1) & 1) == 0
         ASSERT (LINEW & 1) == 0
 
 ; Конец кода: дальше в файле ничего нет, буферы и переменные живут в RAM.
@@ -2632,15 +3324,19 @@ FILE_END:
 
 ; --- переменные в RAM, в файл не попадают -----------------------------------
         ASSERT CODE_END <= INIBUF, код плагина дорос до своих данных
-        ASSERT PLIST + PMAX*PITEM <= VALUES
+        ASSERT TEXTMAX >= #800, буфер wc.ini меньше 2 КиБ
+        ASSERT PMAX + 4 <= 254, записи и линии групп — байтом, #FF — линия
+        ASSERT ROWMAP + PMAX + 5 <= ROWBUF, строк с линиями больше места
+        ASSERT PLIST + PMAX*PITEM <= #10000, список вышел за вторую страницу
+        ASSERT SECTOR + 512 <= VALUES
         ASSERT EDITBUF + FLAGW <= #B000, буферы налезли на область WC и CORE32
         ASSERT VALUES + PARAM_COUNT <= PLACES
         ASSERT PLACES + 2*PARAM_COUNT <= ROWBUF
         ASSERT ROWBUF + LINEW <= VARS
         ASSERT SWAPBUF + PITEM <= EDITBUF
         ASSERT EDITBUF + FLAGW <= #B000
-        ASSERT PFLAGS == PLINE+2
-        ASSERT FIELDX + FIELDW == LINEW + 1
+        ASSERT FIELDX + FIELDW == LINEW + 1 - GROUPX, справа поле, как слева
+        ASSERT SWAPBUF + PITEM <= INSPOS, обмен записей налез на INSPOS
 INI_SIZE EQU VARS+0                             ; конец текста wc.ini
 TOP      EQU VARS+2                             ; первая показанная строка
 SHOWN    EQU VARS+3                             ; сколько строк в окне
@@ -2659,18 +3355,33 @@ LINEHEAD EQU VARS+23                            ; начало текущей с
 FILE_LEN EQU VARS+25                            ; размер wc.ini из FENTRY
 INI_STATE EQU VARS+27                           ; 0 прочитан, 1 нет, 2 слишком длинный,
                                                 ; 3 не прочитался (ошибка чтения)
-INSPOS   EQU VARS+112                           ; место вставки строки ключа
-INSLEN   EQU VARS+114                           ; её длина
+INSPOS   EQU VARS+116                           ; место вставки строки ключа
+INSLEN   EQU VARS+118                           ; её длина
+; Claude - 2026-10-11 - begin
+LINEA    EQU VARS+120                           ; SWAP_LINES: начало первой строки,
+LINEB    EQU VARS+122                           ;   второй
+AEND     EQU VARS+124                           ;   и их концы
+BEND     EQU VARS+126
+ROWW     EQU VARS+59                            ; ширина строки текущего экрана
+SORTI    EQU VARS+60                            ; S: место, которое заполняем
+SORTJ    EQU VARS+61                            ;   запись, которую смотрим
+MOVEDIR  EQU VARS+62                            ; F5/F6: 0 — вверх, иначе вниз
+ROWS     EQU VARS+63                            ; строк экрана плагинов (ROWMAP)
+SORTMIN  EQU VARS+30                            ; S: запись с меньшим названием
+; Claude - 2026-10-11 - end
 TITLEPTR EQU VARS+28                            ; запись, чей заголовок читаем
 QUERYBUF EQU VARS+32                            ; запрос FENTRY: [тип,имя 8.3,0]
 SWAPPED  EQU VARS+48                            ; в проходе сортировки был обмен
 EDITREC  EQU VARS+50                            ; запись, чьи флаги правили, или 0
 EDITLEN  EQU VARS+52                            ; длина правленых флагов
 SPARE    EQU VARS+54                            ; выключенная строка при поиске
+DIFFERS  EQU VARS+47                            ; COPY_NEW: текст стал другим
 BARCH    EQU VARS+56                            ; символ полосы прокрутки для PRSRW
 MODIFIED EQU VARS+57                            ; ≠0 — текст правили, на носителе он другой
 QUIET    EQU VARS+58                            ; ≠0 — SAVE_INI по вопросу при выходе
 SWAPBUF  EQU VARS+64                            ; запись при обмене, PITEM байт
+PAGE2    EQU VARS+114                           ; физическая вторая страница (API 0)
+TOO_MANY EQU VARS+115                           ; 1 — .WMF больше PMAX
 EDITBUF  EQU VARS+128                           ; поле правки флагов, FLAGW байт
 
         SAVEBIN "Build/SETUP.WMF",START_CODE,FILE_END-START_CODE

@@ -112,11 +112,17 @@ class FilesystemTests(unittest.TestCase):
                         cpu.memory[harness.core['BSECPC']] = spc
                         p.h.put32(cpu.memory, harness.ext_address('APPEND_SIZE'), clusters * spc * 512 + int(partial))
                         p.h.put32(cpu.memory, harness.ext_address('APPEND_FIRST_CLUSTER'), 2)
+                        # Claude - 2026-10-10: вход — середина APPEND_PREPARE, за
+                        # ROOT_BUILD; его итог — таблица корня пуста, чтение удалось.
+                        cpu.memory[harness.ext_address('ROOT_FAILED')] = 0
+                        p.h.put16(cpu.memory, harness.ext_address('ROOT_COUNT'), 0)
                         callbacks = {address: (lambda machine, fn=fn: fn()) for address, fn in harness.callouts.items()}
                         p.run(cpu, harness.ext_address('APPEND_PREPARE.nonzero_size'), callbacks)
                         self.assertEqual(cpu.a, 0)
                         self.assertEqual(p.h.get32(cpu.memory, harness.ext_address('APPEND_CURRENT_CLUSTER')), total + 1)
-                        self.assertEqual(len(harness.curit_calls), total - 1)
+                        # Обход до EOF и одна ссылка кластера EOF: конец цепочки
+                        # не дальше 255 ссылок (с 2026-10-10 — ловит цикл).
+                        self.assertEqual(len(harness.curit_calls), total)
 
     def test_preflight_cluster_counters(self):
         for required in (0xFF00, 0xFF01, 0xFFFF, 0x10000, 0x1FF01):

@@ -114,8 +114,9 @@ class BootResources(unittest.TestCase):
         import runtime_image
         runtime = (ROOT / 'Build/CORE32_EXT.bin').read_bytes()
         core, page = runtime_image.expected_pages(self.m.boot, runtime, self.m.sym, ext_symbols())
-        self.assertEqual(self.m.page(0xE8)[:len(runtime)], page)
-        self.assertEqual(self.m.page(0xE8)[len(runtime):], bytes([FILL[0xE8]]) * (0x4000 - len(runtime)))
+        # С 2026-10-10 в #E8 — загрузочная часть, на месте оверлея FILEX — HALT.
+        self.assertEqual(self.m.page(0xE8)[:len(page)], page)
+        self.assertEqual(self.m.page(0xE8)[len(page):], bytes([FILL[0xE8]]) * (0x4000 - len(page)))
         self.assertEqual(bytes(self.m.cpu.memory[0x4000:0x4000 + len(core)]), core)
 
     def test_nothing_else_touched(self):
@@ -123,6 +124,22 @@ class BootResources(unittest.TestCase):
         self.assertEqual(self.m.page(0x09)[0x800:], bytes([FILL[0x09]]) * (0x4000 - 0x800))
         self.assertEqual(bytes(self.m.cpu.memory[0x8000:0xC000]), self.page2_before,
                          'источники в окне #8000 не меняются')
+
+    def test_wmf_installer_copies_before_reusing_extension_bss(self):
+        # Исполняем установщик, затем затираем одноразовый источник рабочими
+        # данными. Резидент обязан быть независимой точной копией.
+        m = Machine()
+        m.call(m.sym['WDOS.INSTALL_WILDDOS'])
+        expected = (ROOT / 'Build/WMF_RUNTIME.bin').read_bytes()
+        self.assertEqual(bytes(m.cpu.memory[0x5300:0x5300 + len(expected)]), expected)
+        ext = ext_symbols()
+        page = bytearray(m.banks[0xE8])
+        first = ext['WDOS_EXT.RUNTIME_END'] - 0xC000
+        last = ext['WDOS_EXT.BSS_END'] - 0xC000
+        page[first:last] = bytes([0xA5]) * (last - first)
+        m.banks[0xE8] = bytes(page)
+        self.assertEqual(bytes(m.cpu.memory[0x5300:0x5300 + len(expected)]), expected)
+        self.assertLessEqual(0x5300 + len(expected), 0x5AAA)
 
     def test_registers_and_pages(self):
         cpu = self.m.cpu
@@ -224,7 +241,12 @@ class ClusterLoad(unittest.TestCase):
         sym = symbols()
         room = 0xBF60 - sym['WDOS_EXTENSION_PACKED_END']
         self.assertGreaterEqual(room, 0)
-        self.assertLess(room, 64, 'поток части 1 не занял своё место')
+        # Claude - 2026-10-10: с оверлеем FILEX расширение помещается в часть 1
+        # почти целиком; тогда границу держит не место, а то, что поток части 2
+        # не длиннее её данных (split_extension.py) — хвост короткий.
+        part2 = len((ROOT / 'Build/CORE32_EXT_BOOT.bin').read_bytes()) - (sym['WDOS_EXT_PART2_START'] - 0xC000)
+        self.assertTrue(room < 64 or part2 <= 256,
+                        f'поток части 1 не занял своё место ({room}), а хвост длинный ({part2})')
         self.assertLessEqual(sym['WDOS_BOOT_TAIL_END'], 0xE000)
 
 
@@ -321,7 +343,14 @@ class DriverSwap(unittest.TestCase):
                     self.assertNotEqual(references[name], bytes([self.FILL]) * 0x800)
                 selected, driver = self.swap(a)
                 self.assertEqual(selected, [(slave, 3)], 'SELDEV: A и страница #C000')
-                self.assertEqual(driver, references[name], 'драйвер по #3800')
+                expected = bytearray(references[name])
+                if name == 'DR2':
+                    # Claude - 2026-10-11: входы чтения и записи SD-ZC (#380F,
+                    # #3812, #3815) — через проверку вынутой карты (ZCG_*).
+                    ext = ext_symbols()
+                    for at, guard in ((0x3810, 'ZCG_RDDSE'), (0x3813, 'ZCG_SDDSE'), (0x3816, 'ZCG_RDD256')):
+                        expected[at - 0x3800:at - 0x3800 + 2] = ext['WDOS_EXT.' + guard].to_bytes(2, 'little')
+                self.assertEqual(driver, bytes(expected), 'драйвер по #3800')
                 self.assertEqual((self.m.cpu.ix, self.m.cpu.sp), (0x4321, 0x5FFE), 'IX и стек')
                 self.assertEqual(self.m.mapped, 3, 'страница вызывающего не возвращена')
                 self.assertEqual(self.m.page(0xE8), self.e8, 'страница #E8 изменилась')

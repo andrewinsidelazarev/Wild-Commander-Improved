@@ -208,6 +208,13 @@ if ($StockDsdzcPackedHash -ne '06742113aff8306b39a1a808ae6042cafc784d7dc9ee6aa0b
 # порядке назначения — MLZ50F с #FE00, DEHR1M с #FEE9 — и распаковывается одним
 # вызовом. Каждый поток проверяется обратной распаковкой. Упаковка — до
 # символического прохода BOOT: от размера ресурсов зависят адреса всего за WCINI.
+# Отдельный резидент WMF: прямые входы сохраняют ABI ядра и не растят BSS #E8.
+& $SjasmPlus '--nologo' '--msg=err' `
+    "--raw=$ProjectRootAscii/Build/WMF_RUNTIME.bin" `
+    "--sym=$ProjectRootAscii/Build/WMF_RUNTIME.sym" `
+    "--lst=$ProjectRootAscii/Build/WMF_RUNTIME.lst" `
+    "$ProjectRootAscii/source/WMF_RUNTIME.ASM"
+if ($LASTEXITCODE -ne 0) { throw 'WMF_RUNTIME.ASM assembly failed.' }
 $ResourceStreams = @(
     @{ Raw = Join-Path $ProjectRoot 'source\FONT32L3.CDB'; RawAscii = 'source/FONT32L3.CDB';
        Packed = Join-Path $BuildDir 'FONT32L3.CPD'; PackedAscii = 'Build/FONT32L3.CPD' },
@@ -258,14 +265,22 @@ $CoreSymbolPayload = Join-Path $BuildDir 'boot.symbol-pass.bin'
 $CoreSymbolMap = Join-Path $BuildDir 'boot.symbol-pass.sym'
 $CoreSymbolList = Join-Path $BuildDir 'boot.symbol-pass.lst'
 $CoreInterface = Join-Path $BuildDir 'CORE32_WDOS_SYMBOLS.INC'
-$ExtensionRaw = Join-Path $BuildDir 'CORE32_EXT.bin'
+# Claude - 2026-10-10 - begin
+# Сырой образ: загрузочная часть и за ней оверлей FILEX (tools/split_overlay.py).
+$ExtensionRaw = Join-Path $BuildDir 'CORE32_EXT.raw.bin'
+$ExtensionBoot = Join-Path $BuildDir 'CORE32_EXT_BOOT.bin'
+$ExtensionOverlay = Join-Path $BuildDir 'CORE32_EXT_OVL.bin'
+$ExtensionInstalled = Join-Path $BuildDir 'CORE32_EXT.bin'
+$ExtensionOverlayInc = Join-Path $BuildDir 'CORE32_EXT_OVERLAY.INC'
+# Claude - 2026-10-10 - end
 $ExtensionPacked = Join-Path $BuildDir 'CORE32_EXT.CPD'
 $ExtensionVerify = Join-Path $BuildDir 'CORE32_EXT.verify.bin'
 $ExtensionSymbols = Join-Path $BuildDir 'CORE32_EXT.sym'
 $ExtensionListing = Join-Path $BuildDir 'CORE32_EXT.lst'
 Remove-Item -LiteralPath $CoreSymbolPayload, $CoreSymbolMap, $CoreSymbolList, `
     $CoreInterface, $ExtensionRaw, $ExtensionPacked, $ExtensionVerify, `
-    $ExtensionSymbols, $ExtensionListing -Force -ErrorAction SilentlyContinue
+    $ExtensionSymbols, $ExtensionListing, $ExtensionBoot, $ExtensionOverlay, `
+    $ExtensionInstalled, $ExtensionOverlayInc -Force -ErrorAction SilentlyContinue
 
 & $SjasmPlus '--nologo' '--msg=err' '-DWDOS_SYMBOL_PASS=1' `
     "--raw=$ProjectRootAscii/Build/boot.symbol-pass.bin" `
@@ -325,7 +340,7 @@ Remove-Item -LiteralPath (Join-Path $BuildDir 'CORE32_CODE.verify.bin') -Force
 Push-Location -LiteralPath $ProjectRootAlias
 try {
     & $SjasmPlus '--nologo' '--msg=err' `
-        "--raw=$ProjectRootAscii/Build/CORE32_EXT.bin" `
+        "--raw=$ProjectRootAscii/Build/CORE32_EXT.raw.bin" `
         "--sym=$ProjectRootAscii/Build/CORE32_EXT.sym" `
         "--lst=$ProjectRootAscii/Build/CORE32_EXT.lst" `
         "$ProjectRootAscii/source/CORE32_EXT_BUILD.ASM"
@@ -333,7 +348,19 @@ try {
     Pop-Location
 }
 if ($LASTEXITCODE -ne 0) { throw 'CORE32_EXT.ASM assembly failed.' }
-if ((Get-Item -LiteralPath $ExtensionRaw).Length -gt 0x4000) {
+# Claude - 2026-10-10 - begin
+# Холодная часть расширения (запись, APPEND, псевдонимы, часы, строка
+# состояния) — оверлей: в boot.$C не входит, его везёт обязательный FILEX.WMF.
+& python (Join-Path $ProjectRoot 'tools\split_overlay.py') `
+    --raw $ExtensionRaw --symbols $ExtensionSymbols --boot $ExtensionBoot `
+    --overlay $ExtensionOverlay --installed $ExtensionInstalled --inc $ExtensionOverlayInc
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 extension overlay split failed.' }
+# До ранней установки FILEX на месте оверлея HALT: загрузочная часть и
+# резидентные блоки не должны ссылаться на его метки (кроме таблицы входов).
+& python (Join-Path $ProjectRoot 'tools\check_overlay_refs.py') $ExtensionListing
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 boot part references the FILEX overlay.' }
+# Claude - 2026-10-10 - end
+if ((Get-Item -LiteralPath $ExtensionInstalled).Length -gt 0x4000) {
     throw 'CORE32 extension exceeds one 16-KiB physical page.'
 }
 
@@ -366,9 +393,9 @@ function Get-MeasuredAddress([string]$Name) {
 }
 $Part1Room = 0xBF60 - (Get-MeasuredAddress 'WDOS_EXTENSION_PACKED')
 $Part2Room = 0xE000 - (Get-MeasuredAddress 'WDOS_EXTENSION2_PACKED') - 2   # за потоком — метка сборки
-[byte[]]$ExtensionBytes = [IO.File]::ReadAllBytes($ExtensionRaw)
+[byte[]]$ExtensionBytes = [IO.File]::ReadAllBytes($ExtensionBoot)
 $SplitText = & python (Join-Path $ProjectRoot 'tools\split_extension.py') `
-    --raw "$ProjectRootAscii/Build/CORE32_EXT.bin" --part1-room $Part1Room --part2-room $Part2Room `
+    --raw "$ProjectRootAscii/Build/CORE32_EXT_BOOT.bin" --part1-room $Part1Room --part2-room $Part2Room `
     --mhmt $Mhmt --work "$ProjectRootAscii/Build"
 if ($LASTEXITCODE -ne 0) {
     throw ('boot.$C не помещается в 32768 байт: нет границы частей расширения при месте части 1 ' +
@@ -845,6 +872,14 @@ if ($LASTEXITCODE -ne 0) { throw 'WCINI version compatibility tests failed.' }
 # Шрифт и распаковщики из HR-потоков образа: настоящие установщик и VDAC.
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_boot_resources.py')
 if ($LASTEXITCODE -ne 0) { throw 'Boot resource unpacking tests failed.' }
+# Claude - 2026-10-11 - begin
+# Оверлей FILEX (ранняя установка, входы старта и чтения — ниже оверлея) и
+# вынутая загрузочная карта SD-ZC (проверка карты, окно, MEDIA_FENCE, MAIN).
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_overlay.py')
+if ($LASTEXITCODE -ne 0) { throw 'FILEX overlay tests failed.' }
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_media_guard.py')
+if ($LASTEXITCODE -ne 0) { throw 'SD-ZC removed card tests failed.' }
+# Claude - 2026-10-11 - end
 
 # Шина SPI (SD и FT812 VDAC2) в покое до первого обращения WC: сброс TS-Config
 # её не нормализует; установщик выполняет SpiBusIdle до FINI.
@@ -877,10 +912,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Short name, RENAME and MKDIR crash-path tests 
 # отказ удаления источника с LFN — сектор SFN перечитывается по месту.
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_move.py')
 if ($LASTEXITCODE -ne 0) { throw 'FILEX MOVE rollback tests failed.' }
-# FILEX SET_EOF32: отказ носителя после обнуления хвоста сектора — сектор
-# возвращается из копии, файл остаётся прежним (с 2026-09-26).
+# FILEX SET_EOF32: отказы носителя при усечении; хвост сектора обнуляется
+# после публикации размера (с 2026-10-10, прежде — до неё с копией сектора).
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_truncate.py')
 if ($LASTEXITCODE -ne 0) { throw 'FILEX truncation fault tests failed.' }
+# Claude - 2026-10-10 - begin
+# FILEX: цепочка выбранного файла до конца (цикл, корень), WRITE_AT за концом
+# при отказе роста, проверки FSInfo и пересчёт свободного места (из драйвера
+# FAT32).
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_filex_chain.py')
+if ($LASTEXITCODE -ne 0) { throw 'FILEX chain and FSInfo tests failed.' }
+# Claude - 2026-10-10 - end
 # Даты для программ: API 58 бит 6 (время и дата изменения) и FILEX
 # GET_METADATA — чтение атрибута и времён без записи (с 2026-09-26).
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_dates_api.py')
@@ -909,6 +951,14 @@ if ($LASTEXITCODE -ne 0) { throw 'CORE32 FAT stream cache tests failed.' }
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_overwrite_path.py')
 if ($LASTEXITCODE -ne 0) { throw 'CORE32 file overwrite path tests failed.' }
 # Claude - 2026-09-22 - end
+
+# Claude - 2026-10-10 - begin
+# Исправления ядра из драйвера FAT32: геометрия при монтировании, поток после
+# ошибки, LTHL при чтении FAT, подсказка распределителя, CHTOSE и APPEND
+# («только чтение», цикл, корень, неизвестный исход).
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_core_driver_fixes.py')
+if ($LASTEXITCODE -ne 0) { throw 'CORE32 FAT32 driver port tests failed.' }
+# Claude - 2026-10-10 - end
 
 # Claude - 2026-09-26 - begin
 # Короткое имя без «~n» для имени 8.3 с заглавными буквами: ПЗУ ищет boot.$C
@@ -1033,6 +1083,10 @@ if ($LASTEXITCODE -ne 0) { throw 'FDI2FDD runtime installation failed.' }
 # исполняются настоящим Z80 на модели страниц TS-Conf.
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_plugin_manager.py')
 if ($LASTEXITCODE -ne 0) { throw 'Plugin manager machine tests failed.' }
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_wmf_dynamic.py')
+if ($LASTEXITCODE -ne 0) { throw 'Dynamic WMF metadata tests failed.' }
+& python (Join-Path $ProjectRoot 'tests\core32_unreal\test_full_plugin_table.py')
+if ($LASTEXITCODE -ne 0) { throw 'Full plugin table tests failed.' }
 # Claude - 2026-09-24 - end
 
 # Claude - 2026-09-25 - begin

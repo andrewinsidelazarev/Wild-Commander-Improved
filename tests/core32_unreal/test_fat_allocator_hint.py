@@ -195,6 +195,10 @@ class ExtensionHarness:
         self.memory[self.core["BFATS"]] = 1
         self.memory[self.core["FATFLAGS"]] = 0
         put32(self.memory, self.core["FSINF"], 1)
+        # Claude - 2026-10-10: как HDD — резерв (FSInfo внутри него) и длина
+        # раздела (DAHL:DADE; #FFFFFFFF — без раздела, superfloppy).
+        put16(self.memory, self.core["BREZS"], 32)
+        put32(self.memory, self.core["DAHL"], 0xFFFFFFFF)
         self.read_sector = make_fsinfo(next_free, valid=valid_fsinfo)
         self.sector_overrides.clear()
         self.read_calls.clear()
@@ -334,9 +338,26 @@ def main() -> int:
     harness.written_sectors.clear()
     harness.invoke("LOAD_FREE_HINT")
     expect("занятая FSInfo-подсказка заменяется холодной", get32(memory, core["FSTFRC"]), cold_fallback)
-    expect("занятая FSInfo-подсказка проверяется один раз", harness.curit_calls, [stale_hint])
+    # С 2026-10-11 при занятой подсказке читается и запись холодной точки:
+    # свободна — поиск от неё, как прежде.
+    expect("занятая подсказка: проверены она и 15/16", harness.curit_calls, [stale_hint, cold_fallback])
     expect("FSInfo читается один раз до отдельной FAT-проверки", len(harness.read_calls), 1)
     expect("холодная проверка не пишет носитель", len(harness.written_sectors), 0)
+
+    # Заняты и подсказка, и 15/16 (карта заполнена к концу; FSInfo — от
+    # Windows, WC его не обновляет): поиск — от подсказки, как велит
+    # спецификация FAT32. Прежде — от 15/16 до конца и с wrap через всю FAT:
+    # первая запись после загрузки шла минуту (у пользователя, 2026-10-11).
+    stale_hint = 4_000
+    harness.configure_volume(stale_hint)
+    harness.fat_entries[stale_hint] = 0x0FFFFFFF
+    harness.fat_entries[cold_fallback] = 0x0FFFFFFF
+    harness.written_sectors.clear()
+    harness.invoke("LOAD_FREE_HINT")
+    expect("заняты подсказка и 15/16 — от подсказки", get32(memory, core["FSTFRC"]), stale_hint)
+    expect("проверены обе точки", harness.curit_calls, [stale_hint, cold_fallback])
+    expect("и это без записи", len(harness.written_sectors), 0)
+    harness.fat_entries[cold_fallback] = 0
 
     put32(memory, core["FSTFRC"], 7_000)
     put32(memory, core["LOBU"], 321)

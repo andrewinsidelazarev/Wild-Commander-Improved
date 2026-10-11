@@ -21,6 +21,7 @@
 ; Build/boot.payload.bin; SHA-256 готового exe/boot.$C выводит build.ps1.
 
         INCLUDE "PHYSICAL_MEMORY_MAP.ASM"
+        INCLUDE "WMF_FORMAT.ASM"
         INCLUDE "VERSION.ASM"
 
         ORG #6011
@@ -329,6 +330,9 @@ WDOS_EXTENSION2_MARK EQU WDOS_EXTENSION2_LENGTH ^ #A55A
 WDOS_BOOT_TAIL_END:                     ; логический конец файла (build.ps1)
         ASSERT WDOS_EXTENSION_PACKED+WDOS_EXTENSION2_LENGTH <= #BF60, часть 2 не помещается на место потока части 1
         ASSERT $ <= #E000, boot.$C длиннее 32768 байт - не загрузится с карты с кластером 32 КиБ
+        ASSERT WCFX.ERR0 == #90DE, изменился вход сообщения WMF
+        ASSERT WCFX.BUX == #5E00, изменился буфер имени для WMF
+        ASSERT ENTRY == #7F6B && PHED == #7F18, изменились структуры WC для WMF
 ; Символы WildDOS: CORE32.ASM — за логическим концом файла. ORG #C000 модуля
 ; прежние байты не перекрывает: sjasmplus --raw пишет подряд; build.ps1 режет.
         MODULE WDOS

@@ -18,7 +18,7 @@ ENTRY_TABLE:
         JP READ_SECTORS
         JP STREAM_IO_ERROR
         JP INIT_FREE_SCAN
-        JP CHECK_FREE_SCAN_LIMIT
+        JP SCAN_FREE_SECTOR
         JP NEXT_FREE_FAT_SECTOR
         JP FAT_SECTOR_IN_RANGE
         JP POSITION_FAT_READ
@@ -93,6 +93,9 @@ ENTRY_TABLE:
         JP ALIAS_RESET
         JP ALIAS_ADD
         JP ALIAS_SCAN
+; Claude - 2026-10-10 - begin
+        JP FILE_START_CHECK
+; Claude - 2026-10-10 - end
 ; Claude - 2026-09-27 - end
 ENTRY_TABLE_END:
         ASSERT ENTRY_TABLE_END-ENTRY_TABLE == ID_COUNT*3, нарушена таблица шлюза
@@ -274,6 +277,2343 @@ COPY_ENTRY_AND_CAPTURE:
         LDIR
         RET
 
+; Codex - 2026-07-17 - end
+
+; Claude - 2026-10-10: ENTRY_OFFSET — в загрузочной части: его зовёт
+; COPY_ENTRY_AND_CAPTURE (поиск при старте), оверлея тогда ещё нет.
+; Claude - 2026-09-26 - begin
+; Смещение короткой записи в её секторе. Вход: BC — запись в LOBU/LOBU2 (после
+; SRHDRN или XFENTRY). Выход: CF=0, HL — смещение 0..511; CF=1 — BC не
+; указывает на начало записи в этих буферах. Портит A.
+ENTRY_OFFSET:
+        LD A,C:AND #1F:JR NZ,.no
+        LD A,B:SUB high @WDOS.LOBU:CP 4:JR NC,.no
+        AND 1:LD H,A,L,C                        ; AND сбросил CF
+        RET
+.no:
+        SCF
+        RET
+; Claude - 2026-09-26 - end
+
+; Claude - 2026-09-26 - begin
+; CHECK_STAMP (ID_CHECK_STAMP): штамп FAT с носителя — для программы. Вход:
+; HL — время, DE — дата. Выход: CF=0 — штамп есть в календаре, HL и DE прежние;
+; CF=1 — нет (STAMP_IN_CALENDAR): HL=0, DE — 2026-01-01. Портит A, BC. Зовут
+; API 58 ядра (NXTETY2) и FILEX.
+CHECK_STAMP:
+        CALL STAMP_IN_CALENDAR
+        RET NC
+CLOCK_BROKEN:
+        LD HL,0                                 ; 00:00:00
+        LD DE,STAMP_FALLBACK_DATE
+        RET
+
+STAMP_FALLBACK_DATE EQU (2026-1980)<<9 | 1<<5 | 1
+
+; Есть ли штамп FAT в календаре. Вход: DE — дата, HL — время. Выход: CF=0 —
+; есть; CF=1 — нет: месяц не 1..12, день не 1..длина месяца (февраль года,
+; кратного 4, — 29 дней; 2100-й тоже считается високосным, до него счёт
+; точен), часы больше 23, минуты или секунды больше 59. Год FAT — любой
+; (1980..2107). HL и DE сохраняются, портит A, BC.
+STAMP_IN_CALENDAR:
+        LD A,E
+        AND 31
+        JR Z,.bad                               ; дня 0 нет
+        LD C,A                                  ; день
+        LD A,D
+        RRA                                     ; CF — старший бит месяца
+        LD B,A                                  ; год от 1980: AND сбросил CF
+        LD A,E
+        RRA
+        RRCA
+        RRCA
+        RRCA
+        RRCA
+        AND 15                                  ; месяц
+        DEC A
+        CP 12
+        JR NC,.bad                              ; месяцев 0 и 13..15 нет
+        CP 1
+        JR Z,.february
+; Месяц k+1 (k = 0..11) длиной 31 день, если k+[k<7] нечётно: январь, март,
+; май, июль, август, октябрь, декабрь; остальные — 30.
+        CP 7
+        ADC A,0
+        AND 1
+        ADD A,30
+.days:
+        CP C
+        RET C                                   ; день больше длины месяца
+; Время: часы<<11 | минуты<<5 | секунды/2.
+        LD A,L
+        AND 31
+        CP 30
+        JR NC,.bad                              ; секунды 60..63
+        LD A,H
+        CP 24<<3
+        JR NC,.bad                              ; часы 24..31
+        OR #F8                                  ; CF=0; #FF — минуты от 56
+        INC A
+        RET NZ
+        BIT 7,L
+        RET Z                                   ; минуты 56..59
+.bad:
+        SCF
+        RET
+.february:
+        LD A,B
+        AND 3
+        LD A,28
+        JR NZ,.days
+        INC A                                   ; високосный
+        JR .days
+; Claude - 2026-09-26 - end
+
+; Вызвать драйвер чтения/записи с единым признаком результата в ABT.
+; Старые драйверы ABT не меняют и считаются успешными; исправленные драйверы
+; записывают туда ненулевой код ошибки. На выходе ошибка даёт NZ, CF=1 и
+; A=#FF (с 2026-09-26): прежде A был сырым кодом драйвера, и отказ записи FAT
+; в MKSG доходил до окна F7/F5 как код имени 1 — «Long Name is not valid!».
+READ_SECTORS:
+        PUSH AF
+        XOR A:LD (@WDOS.ABT),A
+        POP AF
+        CALL @WDOS.RDDSE
+        JR IO_RESULT
+
+WRITE_SECTORS:
+        PUSH AF
+        XOR A:LD (@WDOS.ABT),A
+        POP AF
+        CALL @WDOS.SDDSE
+
+IO_RESULT:
+        LD A,(@WDOS.ABT)
+        OR A:RET Z
+        LD A,#FF                                ; отказ носителя, NZ уже стоит
+        SCF
+        RET
+
+; Claude - 2026-10-01 - begin
+; CLASSIFY_FAT_LINK, CLASSIFY_ORDINARY, CLASSIFY_INVALID и CLASSIFY_IN_VOLUME —
+; в резидентном блоке (конец файла): ядро зовёт проверку ссылки напрямую.
+; Claude - 2026-10-01 - end
+; Claude - 2026-09-27 - begin
+; CLASSIFY_DATA (ID_CLASSIFY_DATA — DLSG ядра; FILE_CHAIN): CLASSIFY_IN_VOLUME,
+; и кластер цепочки корня недопустим. В цепочке файла и в освобождаемой
+; цепочке его быть не может, а испорченная запись файла на кластере корня
+; прежде проходила: F8 освобождал корень — том терял все имена, F5 копировал
+; сектор корня (Codex R28-01). С 2026-09-27 — любой кластер корня, не только
+; первый (Codex R27-04): таблицу строит ROOT_BUILD в начале DLSG
+; (NOTE_FREED_CHAIN) и FILE_CHAIN. Прочие кластеры чужих цепочек так не
+; ловятся (docs/01, 7.1). Выход — как у CLASSIFY_FAT_LINK; HL, DE сохраняются.
+CLASSIFY_DATA:
+        CALL CLASSIFY_IN_VOLUME
+        RET C                                   ; недопустимая
+        RET Z                                   ; EOC
+        CALL ROOT_MEMBER                        ; Z — кластер корня (0 уже отвергнут)
+; Claude - 2026-10-01 - begin
+        JP NZ,CLASSIFY_ORDINARY
+        JP CLASSIFY_INVALID
+; Claude - 2026-10-01 - end
+; Claude - 2026-09-27 - end
+
+; Claude - 2026-09-27 - begin
+; DIR_CHAIN: цепочка каталога DE:HL (0 — корень, BROOTC) конечна и в томе:
+; первый кластер — обычный, ссылки допустимы (0 — свободный кластер,
+; недопустимые, за областью данных — порча), конец (EOC) — не дальше 4096
+; секторов (каталог FAT32 — не больше 65536 записей; больше — цикл). Z —
+; цела; NZ — нет, в том числе при отказе чтения FAT. Сектор FAT читается,
+; только когда сменился: каталогу в одном секторе FAT — одно чтение (первое
+; — всегда, SECBU до обхода мог быть чужим). Зовут NXTINI (DIR_LIST_OPEN),
+; FNDSN и SVHDFL (DIR_STREAM_OPEN), TREE_CHILD: замкнутая цепочка каталога
+; вешала панель, поиск и создание (Codex R26-02). У подкаталога в цепочке нет
+; кластеров корня (ROOT_BUILD, с 2026-09-27): хвост, ушедший в корень, вёл
+; F8 дерева по именам корня (Codex R27-04). Разрушает AF, BC, DE, HL.
+DIR_CHAIN:
+        LD A,H:OR L:OR D:OR E
+        JR NZ,.first
+        LD HL,(@WDOS.BROOTC),DE,(@WDOS.BROOTC+2)
+.first:
+        CALL CLASSIFY_IN_VOLUME
+        JR C,.bad
+        JR Z,.bad                               ; маркер конца вместо кластера
+        LD BC,4096
+        LD (DIR_CHAIN_LEFT),BC
+        XOR A:LD (DIR_CHAIN_READ),A
+        LD (DIR_CHAIN_SUB),A
+        CALL IS_ROOT_CLUSTER              ; Z — сам корень: сверять не с чем
+        JR Z,.link
+        PUSH HL
+        PUSH DE
+        CALL ROOT_BUILD                         ; сектор FAT корня — в SECBU
+        POP DE
+        POP HL
+        JR C,.bad
+        LD A,1:LD (DIR_CHAIN_SUB),A
+.link:
+        LD A,(DIR_CHAIN_SUB):OR A
+        JR Z,.own
+        CALL ROOT_MEMBER
+        JR Z,.bad                               ; кластер корня в цепочке подкаталога
+.own:
+        PUSH HL
+        LD HL,(DIR_CHAIN_LEFT)
+        LD A,(@WDOS.BSECPC):LD C,A:LD B,0
+        OR A:SBC HL,BC
+        LD (DIR_CHAIN_LEFT),HL
+        POP HL
+        JR C,.bad                               ; длиннее 4096 секторов — цикл
+        CALL CHAIN_VALUE                        ; DE:HL — ссылка
+        JR C,.bad
+        CALL CLASSIFY_IN_VOLUME
+        JR C,.bad                               ; свободный, недопустимый, за томом
+        JR NZ,.link
+        RET                                     ; конец цепочки: Z
+.bad:
+        OR 1
+        RET
+
+; CHAIN_VALUE: значение записи FAT кластера DE:HL (DIR_CHAIN, FILE_CHAIN).
+; Сектор FAT читается CURIT в первый раз и затем, только когда сменился
+; (DIR_CHAIN_READ; SECBU до обхода мог быть чужим). Выход: DE:HL —
+; значение, CF=0; CF=1 — отказ чтения. Разрушает AF, BC.
+CHAIN_VALUE:
+        LD A,(DIR_CHAIN_READ):OR A
+        JR Z,.read
+        PUSH DE
+        PUSH HL
+        CALL @WDOS.STREAM_CACHE_SECTOR          ; Z — тот же сектор FAT, A — запись
+        POP HL
+        POP DE
+        JR NZ,.read
+        LD L,A:LD H,@WDOS.SECBU/1024
+        ADD HL,HL:ADD HL,HL                     ; её адрес в SECBU
+        JR .value
+.read:
+        CALL @WDOS.CURIT                        ; HL — запись FAT кластера
+        RET C
+        LD A,1:LD (DIR_CHAIN_READ),A
+.value:
+        LD E,(HL):INC HL:LD D,(HL):INC HL
+        LD A,(HL):INC HL:LD H,(HL):LD L,A
+        EX DE,HL
+        OR A                                    ; CF=0
+        RET
+
+; DIR_LIST_OPEN (ID_DIR_LIST_OPEN, NXTINI): каталог LSTCAT — DIR_CHAIN, затем
+; GIPAG, как прежде. Испорчен — как отказ GIPAG: ABT=#FE, EOC=#FF, CF=1.
+DIR_LIST_OPEN:
+        LD HL,(@WDOS.LSTCAT),DE,(@WDOS.LSTCAT+2)
+        CALL DIR_CHAIN
+        JP NZ,FAT_LINK_ERROR
+        LD HL,@WDOS.LSTCAT
+        JP @WDOS.GIPAG
+
+; DIR_STREAM_OPEN (ID_DIR_STREAM_OPEN, FNDSN и SVHDFL): каталог LSTCAT —
+; DIR_CHAIN, затем поток на его начало: LSTCAT → CUHL/CUDE, TOS (NSDC=EOC=0),
+; выход CF=0. Испорчен — ABT=#FE, EOC=#FF, CF=1: поиск — FIND_IO_ERROR,
+; создание — SVHDFL_READ_ERROR (отказ носителя до любой записи).
+DIR_STREAM_OPEN:
+        LD HL,(@WDOS.LSTCAT),DE,(@WDOS.LSTCAT+2)
+        CALL DIR_CHAIN
+        JP NZ,FAT_LINK_ERROR
+        LD HL,@WDOS.LSTCAT,DE,@WDOS.CUHL,BC,4:LDIR
+        JP @WDOS.TOS
+
+; STREAM_LINK (ID_STREAM_LINK): переход потока по записи FAT, HL — запись в
+; SECBU (попадание кэша STREAM_NEXT_CACHED; промах — хвост STREAM_NEXT_CLUSTER).
+; Ноль там — свободный кластер: GIPAG понял бы его как корень (0 — вход
+; открытия корня), и поток шёл бы по корневому каталогу: чтение файла молча
+; подменялось (F5 копировал байты корня), SAVE512 писал в корень (Codex
+; R26-03). Ноль — порча ссылки, как недопустимые значения; иначе GIPAG.
+STREAM_LINK:
+; Claude - 2026-10-10: проверки ссылки (ноль, первый кластер корня) — одни на
+; оба пути, в резидентном блоке.
+        JP STREAM_LINK_RESIDENT
+
+; CLASSIFY_FAT_LINK для ядра (ID_CLASSIFY_FAT_LINK: GIPAG — первый кластер и
+; каждый переход потока, DLSG, GIPP): обычный кластер за концом области
+; данных тома (FAT_DATA_CLUSTER_LIMIT) — тоже недопустимая ссылка. Последний
+; сектор FAT держит слоты за концом данных, и испорченная цепочка вела чтение
+; и запись за границу тома (Codex R25-03). Граница не задана (не больше 2:
+; том не монтирован HDD) — без проверки, как прежде. Прямые вызовы внутри
+; расширения — прежний CLASSIFY_FAT_LINK.
+; Claude - 2026-10-01: код CLASSIFY_IN_VOLUME — в резидентном блоке (конец файла).
+; Claude - 2026-09-27 - end
+
+; Проверить четыре байта непосредственно перед HL, не меняя указатель.
+; Z означает точный маркер EOC, NZ — обычное значение или кластер.
+IS_EOC_BEFORE_HL:
+        PUSH HL
+        DEC HL
+        LD A,(HL):AND #0F:CP #0F:JR NZ,.no
+        DEC HL
+        LD A,(HL):CP #FF:JR NZ,.no
+        DEC HL
+        LD A,(HL):CP #FF:JR NZ,.no
+        DEC HL
+        LD A,(HL):CP #F8:JR C,.no
+        POP HL
+        XOR A
+        RET
+.no:
+        POP HL
+        LD A,1:OR A
+        RET
+
+; Зафиксировать повреждённую ссылку FAT и остановить текущую цепочку.
+RECORD_FAT_LINK_ERROR:
+        LD A,#FE
+        LD (@WDOS.ABT),A
+; Codex - 2026-07-16 - begin
+        ; ABT хранит точный код повреждения, а EOC унифицирован с обычным
+        ; концом цепочки: компактные исторические проверки ожидают #FF.
+        INC A
+; Codex - 2026-07-16 - end
+        LD (@WDOS.EOC),A
+        OR A
+        RET
+
+FAT_LINK_ERROR:
+        CALL RECORD_FAT_LINK_ERROR
+        SCF
+        RET
+
+; Claude - 2026-09-27 - begin
+
+; Claude - 2026-10-10 - begin
+; IS_ROOT_CLUSTER: Z — DE:HL корень, 0 либо BROOTC. HL и DE сохраняются. В
+; загрузочной части: её зовёт DIR_CHAIN (поиск wc.ini при старте, оверлея FILEX
+; ещё нет) и TREE_CHILD_ENTRY оверлея; прежде — локальная .root последнего.
+IS_ROOT_CLUSTER:
+        LD A,H:OR L:OR D:OR E:RET Z
+        PUSH HL
+        LD BC,(@WDOS.BROOTC):OR A:SBC HL,BC
+        POP HL
+        RET NZ
+        PUSH HL
+        LD H,D:LD L,E
+        LD BC,(@WDOS.BROOTC+2):OR A:SBC HL,BC
+        POP HL
+        RET
+; Claude - 2026-10-10 - end
+
+; ROOT_BUILD: кластеры цепочки корня (от BROOTC) — в ROOT_CLUSTERS, их число —
+; в ROOT_COUNT, бит каждого (младшие 11 бит номера) — в ROOT_FILTER. Дальше
+; ROOT_MAX (768) не записываются: корень FAT32 — до 4096 секторов, и при
+; кластере от 4 КиБ (SPC ≥ 8, до 512 кластеров) таблица держит его целиком;
+; длиннее бывает только при SPC 1..4 и корне больше 768 кластеров (больше
+; 12288 записей при SPC=1) — дальние кластеры такого корня не защищены
+; (docs/04). Обход — до конца цепочки, недопустимой ссылки (свободный, за
+; томом) или до ROOT_MAX. Отказ чтения FAT — CF=1 и ROOT_FAILED≠0: ROOT_MEMBER
+; тогда считает корнем любой кластер. Таблица одна на все тома и панели,
+; поэтому строится заново перед каждым использованием: DLSG ядра
+; (NOTE_FREED_CHAIN), FILE_CHAIN, DIR_CHAIN подкаталога. Сектор FAT корня
+; остаётся в SECBU (DIR_CHAIN_READ=1). Разрушает AF, BC, DE, HL.
+ROOT_BUILD:
+        XOR A
+        LD (ROOT_FAILED),A
+        LD (DIR_CHAIN_READ),A                   ; первый сектор FAT — читать
+        LD HL,0:LD (ROOT_COUNT),HL
+        LD HL,ROOT_FILTER
+        LD DE,ROOT_FILTER+1
+        LD BC,255
+        LD (HL),A
+        LDIR
+        LD HL,(@WDOS.BROOTC),DE,(@WDOS.BROOTC+2)
+        LD BC,ROOT_CLUSTERS
+.cluster:
+        PUSH BC
+        CALL CLASSIFY_IN_VOLUME
+        POP BC
+        JR C,.done                              ; недопустимая ссылка
+        JR Z,.done                              ; конец цепочки
+        PUSH HL
+        LD HL,(ROOT_COUNT)
+        INC HL
+        LD (ROOT_COUNT),HL
+        PUSH BC
+        LD BC,ROOT_MAX+1
+        OR A:SBC HL,BC                          ; CF — место в таблице ещё было
+        POP BC
+        POP HL
+        JR NC,.full
+        LD A,L:LD (BC),A:INC BC
+        LD A,H:LD (BC),A:INC BC
+        LD A,E:LD (BC),A:INC BC
+        LD A,D:LD (BC),A:INC BC
+        PUSH HL
+        PUSH BC
+        CALL ROOT_BIT
+        LD A,(HL):OR B:LD (HL),A
+        POP BC
+        POP HL
+        PUSH BC
+        CALL CHAIN_VALUE
+        POP BC
+        JR NC,.cluster
+        LD A,1:LD (ROOT_FAILED),A
+        RET                                     ; CF=1
+.full:
+        LD HL,ROOT_MAX
+        LD (ROOT_COUNT),HL
+.done:
+        OR A
+        RET
+
+; Claude - 2026-10-10 - begin
+; FILE_START_CHECK (ID_FILE_START_CHECK, GIPAG_FILE резидента): первый кластер
+; файла (HL → 4 байта, не ноль) не из цепочки корня. CF=1 — из неё, или корень
+; не прочитался (ROOT_BUILD; ROOT_MEMBER считает тогда корнем любой) —
+; FAT_LINK_ERROR: ABT=#FE, EOC=#FF. CF=0 — можно открывать. В загрузочной
+; части, не в оверлее: GFILE — чтение, оно не должно зависеть от FILEX
+; (ранний плагин выше FILEX в [PLUGINS], Codex, третий круг).
+FILE_START_CHECK:
+        LD E,(HL):INC HL:LD D,(HL):INC HL
+        LD A,(HL):INC HL:LD H,(HL):LD L,A
+        EX DE,HL                                ; DE:HL — кластер
+        LD A,D:AND #0F:LD D,A
+        PUSH HL
+        PUSH DE
+        CALL ROOT_BUILD
+        POP DE
+        POP HL
+        CALL ROOT_MEMBER
+        JP Z,FAT_LINK_ERROR
+        OR A
+        RET
+; Claude - 2026-10-10 - end
+
+; ROOT_MEMBER: Z — кластер DE:HL (нормализованный) из цепочки корня
+; (ROOT_BUILD; при ROOT_FAILED≠0 — любой). Сначала бит фильтра: нет его — не
+; корень, таблица не просматривается. HL, DE сохраняются; разрушает AF, BC.
+ROOT_MEMBER:
+        LD A,(ROOT_FAILED):OR A
+        JR Z,.table
+        XOR A                                   ; FAT корня не прочиталась
+        RET
+.table:
+        PUSH HL
+        CALL ROOT_BIT
+        LD A,(HL):AND B
+        POP HL
+        JR Z,.no
+        LD BC,(ROOT_COUNT)
+        LD A,B:OR C:JR Z,.no
+        PUSH IX
+        LD IX,ROOT_CLUSTERS
+.next:
+        LD A,(IX+0):CP L:JR NZ,.skip
+        LD A,(IX+1):CP H:JR NZ,.skip
+        LD A,(IX+2):CP E:JR NZ,.skip
+        LD A,(IX+3):CP D:JR Z,.found
+.skip:
+        INC IX:INC IX:INC IX:INC IX
+        DEC BC:LD A,B:OR C:JR NZ,.next
+        POP IX
+.no:
+        OR 1
+        RET
+.found:
+        POP IX
+        RET
+
+; ROOT_BIT: бит фильтра корня для младшего слова кластера HL: HL — байт
+; ROOT_FILTER, B — маска. Разрушает AF.
+ROOT_BIT:
+        LD A,L:AND 7:LD B,A
+        LD A,H:AND 7:LD H,A
+        SRL H:RR L
+        SRL H:RR L
+        SRL H:RR L                              ; (кластер & 2047) / 8
+        PUSH DE
+        LD DE,ROOT_FILTER:ADD HL,DE
+        POP DE
+        LD A,B
+        LD B,1
+        OR A:RET Z
+.shift:
+        SLA B
+        DEC A:JR NZ,.shift
+        RET
+
+; Claude - 2026-09-27 - end
+
+; Уточнить результат штатного анализатора SN/LN. Если исходное имя содержит
+; хотя бы один пробел, короткая 8.3-запись недопустима: ENTRY[0]=0 заставляет
+; генератор и поисковик использовать длинное имя.
+REFINE_NAME_CLASSIFICATION:
+        PUSH HL
+        LD HL,(@WDOS.CGDE)
+        INC HL
+.scan:
+; Claude - 2026-10-10 - begin
+        LD A,(HL):OR A:JR Z,.end
+; Claude - 2026-10-10 - end
+        CP " ":JR Z,.force_lfn
+        INC HL
+        JR .scan
+; Claude - 2026-10-10 - begin
+; Точка в конце (кроме служебных «.» и «..») — тоже длинное имя: прежде она
+; терялась, «foo.» давало ту же форму 8.3, что «foo», и поиск, удаление и
+; переименование отсутствующего «foo.» брали файл FOO, а «алиас.» — файл с
+; этим коротким алиасом (драйвер FAT32, R12-1). Имя не длиннее 255: перед
+; точками стоит байт типа (CGDE), только если имя — «.» или «..».
+.end:
+        DEC HL
+        LD A,(HL):CP ".":JR NZ,.done
+        DEC HL
+        CP (HL):JR NZ,.dots
+        DEC HL
+.dots:
+        LD A,(@WDOS.CGDE):CP L
+        JR Z,.done
+; Claude - 2026-10-10 - end
+.force_lfn:
+        XOR A:LD (@WDOS.ENTRY),A
+.done:
+        POP HL
+        LD A,1:OR A
+        RET
+
+; Codex - 2026-07-16 - begin
+; Проверить имя длиной 1..255 байт. DE запоминает позицию после последнего
+; значимого символа, поэтому конечная смесь пробелов и точек удаляется целиком.
+; Z означает корректное имя; NZ — пустое, длиннее 255 или содержащее
+; запрещённый символ.
+VALIDATE_NAME:
+        LD B,255
+        LD DE,0
+.scan:
+        LD A,(HL):OR A:JR Z,.terminated
+        CALL @WDOS.ENCEN:JR Z,.bad
+        CP " ":JR Z,.next
+        CP ".":JR Z,.next
+        LD DE,HL
+        INC DE
+.next:
+        INC HL
+        DJNZ .scan
+        LD A,(HL):OR A:JR NZ,.bad
+.terminated:
+        LD A,D:OR E:JR Z,.bad
+        XOR A
+        LD (DE),A
+; Claude - 2026-09-25 - begin
+; Имя — копия в NXTBU (зовёт только ENTREZ, с 2026-09-26 прямо, без ENVAL): ENTREZ копирует
+; 256 байт, и за концом имени лежал хвост буфера вызывающего — остатки
+; прежнего имени. Основа короткого имени (LONG) читает 8 знаков подряд и
+; брала их: у «A» выходило «AZPRIV~1». Хвост до конца страницы NXTBU — нули.
+        EX DE,HL
+.zero:
+        INC HL
+        LD A,H:OR A
+        JR NZ,.zeroed
+        LD (HL),A
+        JR .zero
+.zeroed:
+        XOR A                                   ; Z — имя годно
+; Claude - 2026-09-25 - end
+        RET
+.bad:
+        JP CLASSIFY_ORDINARY
+; Codex - 2026-07-16 - end
+
+; Claude - 2026-10-10 - begin
+; Слот шлюза оставлен ради нумерации входов; ядро его больше не зовёт (LNEB —
+; четыре NOP на месте вызова).
+BEGIN_LFN_COMPARE:
+        RET
+
+; Совместимый заменитель ULNP: знак запроса (DE) против знака длинного имени
+; на диске, без учёта регистра. Начальные пробелы значимы, как в самом имени
+; (создание их сохраняет): прежде они пропускались и в запросе, и в имени, и
+; « name» и «name» считались одним файлом — поиск, удаление, переименование и
+; проверка занятости попадали в соседний файл (драйвер FAT32, R11-1; в WC так
+; было с аудита E17). Конец имени на диске (#0000, UCS даёт #FF) не совпадает
+; ни с каким знаком: прежде знак запроса #FF совпадал с ним, и запрос длиннее
+; на этот знак находил имя, чей конец приходился на последний знак записи LFN.
+; CF=1 — текущий символ совпал и сравнение надо продолжить;
+; CF=0,Z=1 — несовпадение; CF=0,NZ — оба имени закончились одновременно.
+COMPARE_LFN_CHAR:
+        LD A,(DE):INC DE:OR A:JR Z,.query_end
+        CALL @WDOS.ACS:LD C,A
+        CALL @WDOS.UCS:OR A:JR Z,.mismatch
+        CP #FF:JR Z,.mismatch                   ; имя на диске кончилось
+        CALL @WDOS.ACS:CP C:JR Z,.continue
+.mismatch:
+        XOR A
+        RET
+.continue:
+        SCF
+        RET
+.query_end:
+        CALL @WDOS.UCS:INC A:JR NZ,.mismatch
+        XOR A:INC A
+        RET
+; Claude - 2026-10-10 - end
+
+; Загрузить параметры FAT, включая BPB_ExtFlags. FATFLAGS хранит младший байт:
+; бит 7 отключает зеркалирование, младшие четыре бита задают активную FAT.
+LOAD_FAT_CONFIG:
+        LD A,(@WDOS.LOBU+16)
+        LD (@WDOS.BFATS),A
+        OR A:JR Z,.bad
+
+        LD A,(@WDOS.LOBU+40)
+        LD (@WDOS.FATFLAGS),A
+        BIT 7,A:JR Z,.flags_ok
+        AND #0F
+        LD B,A
+        LD A,(@WDOS.BFATS)
+        CP B:JR Z,.bad:JR C,.bad
+.flags_ok:
+        LD HL,(@WDOS.LOBU+36)
+        LD (@WDOS.BFTSZ),HL
+        LD HL,(@WDOS.LOBU+38)
+        LD (@WDOS.BFTSZ+2),HL
+; Claude - 2026-10-10 - begin
+        ; FATSz32 не меньше 2^24 — порча: годной FAT32 больше #200000 секторов
+        ; FAT не бывает, а произведение на число FAT в ядре (UMN4B, ADD4B)
+        ; теряло перенос — данные ложились поверх FAT (драйвер FAT32).
+        LD A,H:OR A:JR NZ,.bad
+; Claude - 2026-10-10 - end
+
+        LD HL,(@WDOS.LOBU+44)
+        LD (@WDOS.BROOTC),HL
+        LD HL,(@WDOS.LOBU+46)
+        LD A,H:AND #0F:LD H,A
+        LD (@WDOS.BROOTC+2),HL
+
+; Claude - 2026-10-11 - begin
+        CALL BOOT_DRIVE_NOTE
+; Claude - 2026-10-11 - end
+        XOR A
+        RET
+.bad:
+        LD A,1:OR A
+        RET
+
+; Claude - 2026-10-11 - begin
+; BOOT_DRIVE_NOTE: первое монтирование после старта — загрузочное устройство
+; (LINI: GBD, TSBC). У SD-ZC запомнить CS его слота, серийный номер тома
+; (BPB +#43) и сектор BPB (ADDTOP — HDD уже поставил): по ним ZCG_RECOVER
+; узнаёт вставленную обратно карту. Иначе BOOT_CS=#FF — загрузочное
+; устройство не SD-ZC. Разрушает AF, BC, DE, HL.
+BOOT_DRIVE_NOTE:
+        LD A,(BOOT_CS)
+        OR A
+        RET NZ                                  ; уже записано
+        LD HL,(@WDOS.DRVR+1)
+        LD DE,ZC_SELDEV
+        SBC HL,DE                               ; CF=0 после OR A
+        LD A,#FF
+        JR NZ,.store
+        LD HL,@WDOS.LOBU+#43
+        LD DE,BOOT_SERIAL
+        LD BC,4
+        LDIR
+        LD HL,@WDOS.ADDTOP                      ; HDD: сектор этого BPB
+        LD C,4                                  ; DE — BOOT_LBA (за серийным)
+        LDIR
+        LD A,(ZC_CS_OPERAND)
+.store:
+        LD (BOOT_CS),A
+        RET
+; Claude - 2026-10-11 - end
+
+; Проверить значение DE:HL как начальную подсказку поиска. Допустимы только
+; настоящие data-кластеры, для которых существует сектор внутри текущей FAT.
+; Регистры DE:HL сохраняются; Z означает допустимое значение.
+VALIDATE_FREE_HINT:
+        PUSH HL,DE
+        LD A,D:OR E:OR H:JR NZ,.minimum_ok
+        LD A,L:CP 2:JR C,.bad_restore
+.minimum_ok:
+        LD BC,(FAT_DATA_CLUSTER_LIMIT)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(FAT_DATA_CLUSTER_LIMIT+2)
+        SBC HL,BC
+        EX DE,HL
+        JR NC,.bad_restore
+        POP DE,HL
+
+        PUSH HL,DE
+        CALL @WDOS.DEL128
+        CALL FAT_SECTOR_IN_RANGE
+        POP DE,HL
+        JR NC,.bad
+        XOR A
+        RET
+.bad_restore:
+        POP DE,HL
+.bad:
+        LD A,1:OR A
+        RET
+
+; Прочитать FSI_Nxt_Free. FSInfo является подсказкой: плохой сектор, сигнатуры,
+; #FFFFFFFF, занятый кластер или выход за область данных не мешают монтированию.
+; Для такого холодного старта RAM-курсор ставится в 15/16 области данных:
+; штатный SRHFCL всё равно проверяет FAT и при необходимости делает полный wrap.
+LOAD_FREE_HINT:
+        LD HL,2:LD (@WDOS.FSTFRC),HL
+        LD (FAT_DATA_CLUSTER_LIMIT),HL
+        LD HL,0:LD (@WDOS.FSTFRC+2),HL
+        LD (FAT_DATA_CLUSTER_LIMIT+2),HL
+
+        ; SDFAT уже вычислен основной частью как первый data-сектор. Получить
+        ; верхнюю границу кластеров непосредственно из ещё сохранённого BPB.
+        LD HL,(@WDOS.LOBU+19)
+        LD A,H:OR L:JR Z,.total32
+        LD DE,0
+        JR .total_ready
+.total32:
+        LD HL,(@WDOS.LOBU+32),DE,(@WDOS.LOBU+34)
+.total_ready:
+; Claude - 2026-10-10 - begin
+        ; Конец тома — не дальше 2^32 (ровно 2^32 можно): прежде сложение
+        ; ADDTOP с числом секторов теряло перенос, и последние сектора тома
+        ; ложились в начало носителя. Том не длиннее своего раздела MBR (длина
+        ; — DAHL:DADE от HDD; у superfloppy — #FFFFFFFF); раздел нулевой длины
+        ; — пустой (драйвер FAT32).
+        LD (GEO_TOTAL),HL
+        LD (GEO_TOTAL+2),DE
+        LD BC,(@WDOS.ADDTOP):ADD HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.ADDTOP+2):ADC HL,BC
+        JR NC,.end_ok
+        LD A,H:OR L:OR D:OR E
+        JP NZ,LOAD_FAT_CONFIG.bad               ; дальше 2^32
+.end_ok:
+        LD HL,(@WDOS.DAHL),DE,(@WDOS.DADE)
+        LD A,H:OR L:OR D:OR E
+        JP Z,LOAD_FAT_CONFIG.bad                ; пустой раздел
+        LD BC,(GEO_TOTAL):OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(GEO_TOTAL+2):SBC HL,BC
+        JP C,LOAD_FAT_CONFIG.bad                ; том длиннее раздела
+        LD HL,(GEO_TOTAL),DE,(GEO_TOTAL+2)
+; Claude - 2026-10-10 - end
+        LD BC,(@WDOS.SDFAT)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.SDFAT+2)
+        SBC HL,BC
+        EX DE,HL
+; Claude - 2026-10-10 - begin
+        ; Том кончается до области данных — порча BPB: отказ монтирования
+        ; (прежде выход с успехом и границей кластеров «не задана»).
+        JP C,LOAD_FAT_CONFIG.bad
+; Claude - 2026-10-10 - end
+        LD A,(@WDOS.BSECPC)
+.divide:
+        CP 1:JR Z,.limit_ready
+        SRL D:RR E:RR H:RR L
+        SRL A
+        JR .divide
+.limit_ready:
+; Claude - 2026-10-10 - begin
+        ; Ни одного кластера данных — отказ (драйвер FAT32).
+        LD A,D:OR E:OR H:OR L:JP Z,LOAD_FAT_CONFIG.bad
+; Claude - 2026-10-10 - end
+        LD BC,2:CALL @WDOS.ADD4B
+; Claude - 2026-10-10 - begin
+        ; Граница номеров кластеров — меньше 2^28: прежде номер #10000003
+        ; после маски становился номером 3 чужого файла (драйвер FAT32).
+        LD A,D:CP #10:JP NC,LOAD_FAT_CONFIG.bad
+        ; Точно: граница не дальше #0FFFFFF0 — номера #0FFFFFF0..#0FFFFFF6
+        ; ссылки FAT считаются зарезервированными, созданный на них файл
+        ; потом не открывался бы.
+        CP #0F:JR NZ,.fat_size
+        LD A,E:AND H:INC A:JR NZ,.fat_size      ; E=H=#FF?
+        LD A,L:CP #F1:JP NC,LOAD_FAT_CONFIG.bad
+.fat_size:
+        ; Одна FAT держит запись на каждый номер ниже границы (128 на сектор):
+        ; прежде том с короткой FAT монтировался, и номера без записи в FAT
+        ; считались годными.
+        PUSH HL
+        PUSH DE
+        LD BC,127:CALL @WDOS.ADD4B
+        LD B,7
+.need:
+        SRL D:RR E:RR H:RR L
+        DJNZ .need
+        LD B,H:LD C,L
+        LD HL,(@WDOS.BFTSZ):OR A:SBC HL,BC
+        LD HL,(@WDOS.BFTSZ+2):SBC HL,DE
+        POP DE
+        POP HL
+        JP C,LOAD_FAT_CONFIG.bad                ; FAT короче
+; Claude - 2026-10-10 - end
+        LD (FAT_DATA_CLUSTER_LIMIT),HL
+        LD (FAT_DATA_CLUSTER_LIMIT+2),DE
+        CALL SET_COLD_FREE_HINT
+
+; Claude - 2026-10-10: FSInfo — только внутри резервной области (FSINFO_POSITION).
+        CALL FSINFO_POSITION
+        JR C,.done
+        CALL @WDOS.XPOZI
+        LD HL,@WDOS.LOBU,A,1
+        CALL READ_SECTORS
+        JR NZ,.done
+        CALL VALIDATE_FSINFO_SECTOR
+        JR NZ,.done
+        LD HL,(@WDOS.LOBU+492),DE,(@WDOS.LOBU+494)
+        CALL VALIDATE_FREE_HINT
+        JR NZ,.done
+        LD (@WDOS.CAHL),HL
+        LD (@WDOS.CADE),DE
+        CALL @WDOS.CURIT
+        JR C,.done
+        LD A,(HL):INC HL
+        OR (HL):INC HL
+        OR (HL):INC HL
+        OR (HL):JR NZ,.used
+        LD HL,(@WDOS.CAHL),DE,(@WDOS.CADE)
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
+.done:
+        XOR A
+        LD (@WDOS.ABT),A
+        RET
+; Claude - 2026-10-11 - begin
+; Подсказка занята: FSInfo пишет Windows, WC его не обновляет — после записей
+; WC в прежнем сеансе она указывает на его же файлы. Холодная точка 15/16
+; свободна — поиск от неё, как прежде; занята и она — от подсказки, как
+; велит спецификация FAT32: свободное место обычно сразу за последней
+; записью. Прежде шли от 15/16 до конца тома и с wrap — через всю FAT от
+; начала: первая после загрузки запись на заполненной карте шла минуту.
+.used:
+        LD HL,(@WDOS.CAHL):PUSH HL
+        LD HL,(@WDOS.CADE):PUSH HL
+        LD HL,(@WDOS.FSTFRC),DE,(@WDOS.FSTFRC+2)
+        LD (@WDOS.CAHL),HL
+        LD (@WDOS.CADE),DE
+        CALL @WDOS.CURIT                        ; запись холодной точки
+        JR C,.cold_unread
+        LD A,(HL):INC HL
+        OR (HL):INC HL
+        OR (HL):INC HL
+        OR (HL)
+        POP DE
+        POP HL
+        JR Z,.done                              ; 15/16 свободна — от неё
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
+        JR .done
+.cold_unread:
+        POP DE
+        POP HL
+        JR .done
+; Claude - 2026-10-11 - end
+
+; Выбрать безопасную read-only стартовую точку рядом с концом тома. CADE:CAHL
+; здесь служит только временной копией limit/16; перед первым SRHFCL курсор всё
+; равно заново загружается из FSTFRC.
+SET_COLD_FREE_HINT:
+        LD HL,(FAT_DATA_CLUSTER_LIMIT),DE,(FAT_DATA_CLUSTER_LIMIT+2)
+        LD (@WDOS.FSTFRC),HL
+        LD (@WDOS.FSTFRC+2),DE
+        LD B,4
+.divide:
+        SRL D:RR E:RR H:RR L
+        DJNZ .divide
+        LD (@WDOS.CAHL),HL
+        LD (@WDOS.CADE),DE
+        LD HL,(@WDOS.FSTFRC),BC,(@WDOS.CAHL)
+        OR A:SBC HL,BC
+        LD (@WDOS.FSTFRC),HL
+        LD HL,(@WDOS.FSTFRC+2),BC,(@WDOS.CADE)
+        SBC HL,BC
+        LD (@WDOS.FSTFRC+2),HL
+        RET
+
+GET_DATA_CLUSTER_LIMIT:
+        LD HL,(FAT_DATA_CLUSTER_LIMIT),DE,(FAT_DATA_CLUSTER_LIMIT+2)
+        XOR A
+        RET
+
+; Позиционировать устройство на сектор DE:HL относительно начала FAT с индексом
+; A. После добавления FAT size, reserved sectors и partition base вызывается
+; штатный XPOZI.
+POSITION_FAT_INDEX:
+        OR A:JR Z,.base
+.next:
+        LD BC,(@WDOS.BFTSZ)
+        ADD HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.BFTSZ+2)
+        ADC HL,BC
+        EX DE,HL
+        DEC A:JR NZ,.next
+.base:
+        LD BC,(@WDOS.SFAT)
+        CALL @WDOS.ADD4B
+        CALL @WDOS.XSPOZ
+; Claude - 2026-10-10 - begin
+        ; PROZ, не XPOZI: обмен с FAT не трогает базу потока LTHL. Прежде любой
+        ; CURIT (DELETE, FILEX, проверки цепочек) переставлял её на сектор FAT,
+        ; и SAVE512 потока, остановленного посреди кластера, продолжал писать в
+        ; FAT (драйвер FAT32). Следующий кластер потока ставит GIPAG.
+        JP @WDOS.PROZ
+; Claude - 2026-10-10 - end
+
+; Позиционирование чтения: при отключённом зеркалировании использовать только
+; активную FAT, иначе FAT0.
+POSITION_FAT_READ:
+        LD A,(@WDOS.FATFLAGS)
+        BIT 7,A:JR Z,.fat0
+        AND #0F
+        JP POSITION_FAT_INDEX
+.fat0:
+        XOR A
+        JP POSITION_FAT_INDEX
+
+; Проверить полный 32-битный относительный сектор FAT в DE:HL.
+; CF=1 означает DE:HL < BFTSZ, CF=0 — сектор находится на границе или за ней.
+FAT_SECTOR_IN_RANGE:
+        PUSH HL,DE
+        LD BC,(@WDOS.BFTSZ)
+        OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.BFTSZ+2)
+        SBC HL,BC
+        POP DE,HL
+        RET
+
+; Сбросить историю секторного окна перед новым поиском по каталогу.
+RESET_DIR_HISTORY:
+        XOR A
+        LD (DIR_OLDER_VALID),A
+        RET
+
+; Сохранить реальный LBA предыдущего секторного буфера каталога. Это позволяет
+; удалить LFN даже при переходе через границу кластера, где LBA не обязаны быть
+; соседними.
+SAVE_PREVIOUS_DIR_LBA:
+; Codex - 2026-07-16 - begin
+        PUSH HL
+; Codex - 2026-07-16 - end
+        LD HL,(@WDOS.LLHL)
+        LD (DIR_PREVIOUS_LBA),HL
+        LD HL,(@WDOS.LLHL+2)
+        LD (DIR_PREVIOUS_LBA+2),HL
+; Codex - 2026-07-16 - begin
+        POP HL
+; Codex - 2026-07-16 - end
+        RET
+
+; Перед сдвигом LOBU2 -> LOBU сохранить ещё более старый сектор. Максимальное
+; FAT32-LFN занимает 20 записей, поэтому SFN и весь его LFN-прогон могут
+; пересечь три сектора каталога.
+PRESERVE_OLDER_DIR_SECTOR:
+        PUSH AF,BC,DE,HL
+        LD HL,@WDOS.LOBU,DE,DIR_OLDER_BUFFER,BC,512
+        LDIR
+        LD HL,(DIR_PREVIOUS_LBA)
+        LD (DIR_OLDER_LBA),HL
+        LD HL,(DIR_PREVIOUS_LBA+2)
+        LD (DIR_OLDER_LBA+2),HL
+        LD A,1:LD (DIR_OLDER_VALID),A
+        POP HL,DE,BC,AF
+        RET
+
+; Codex - 2026-07-16 - begin
+; Продолжить обратное сравнение максимального LFN в третьем секторе. Обычные
+; указатели #3200..#35FF остаются без изменений; переход ниже #3200 допустим
+; только на сохранённый последний слот более старого сектора #2000..#21FF.
+MAP_OLDER_LFN_POINTER:
+        LD A,H:CP high @WDOS.LOBU:JR NC,.ok
+; Claude - 2026-10-10 - begin
+        ; Дальше первой записи сохранённого сектора (#21E0) указатель идёт уже
+        ; по самому буферу #2000..#21FF: прежде принимался только первый
+        ; переход #31xx, и длинное имя, чьи записи занимают три сектора (от
+        ; 222 знаков), не находилось (драйвер FAT32, R1).
+        CP high @WDOS.LOBU-1:JR NZ,.older
+        SUB #10:LD H,A
+.older:
+        AND #FE:CP high DIR_OLDER_BUFFER:JR NZ,.bad
+        LD A,(DIR_OLDER_VALID):OR A:JR Z,.bad
+; Claude - 2026-10-10 - end
+.ok:
+        OR A
+        RET
+.bad:
+        SCF
+        RET
+; Codex - 2026-07-16 - end
+
+; Безопасно обновить FSInfo: проверить три сигнатуры, пометить Free_Count как
+; неизвестный и записать Next_Free (либо #FFFFFFFF для нулевой подсказки).
+RFRH_SAFE:
+; Claude - 2026-10-10 - begin
+        ; FSInfo вне резервной области (испорченный BPB_FSInfo): не писать —
+        ; прежде RFRH переписывал там чужой сектор, если в нём нашлись
+        ; подписи FSInfo. Это не отказ: FSInfo — лишь подсказка.
+        CALL FSINFO_POSITION
+        JR NC,.at
+        XOR A
+        RET
+.at:
+; Claude - 2026-10-10 - end
+        CALL @WDOS.PROZ                         ; Claude - 2026-10-10: не XPOZI
+        LD HL,@WDOS.LOBU,A,1
+        CALL READ_SECTORS
+        RET NZ
+
+        CALL VALIDATE_FSINFO_SECTOR
+        JR NZ,.bad
+
+        LD HL,#FFFF
+        LD (@WDOS.LOBU+488),HL
+        LD (@WDOS.LOBU+490),HL
+        LD HL,(@WDOS.FSTFRC),DE,(@WDOS.FSTFRC+2)
+        CALL VALIDATE_FREE_HINT
+        JR Z,.have_hint
+        LD HL,#FFFF,DE,HL
+.have_hint:
+        LD (@WDOS.LOBU+492),HL
+        LD (@WDOS.LOBU+494),DE
+        LD HL,@WDOS.LOBU,A,1
+        JP WRITE_SECTORS
+.bad:
+        LD A,1:OR A
+        RET
+
+; Claude - 2026-10-10 - begin
+; FSINFO_POSITION: FSINF (абсолютный LBA) — внутри резервной области тома:
+; 0 < FSINF-ADDTOP < BREZS. Выход: CF=0 и DE:HL = FSINF; CF=1 — вне её (порча
+; BPB_FSInfo): FSInfo не читается и не пишется (драйвер FAT32).
+FSINFO_POSITION:
+        LD HL,(@WDOS.FSINF),DE,(@WDOS.FSINF+2)
+        PUSH HL
+        PUSH DE
+        LD BC,(@WDOS.ADDTOP):OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.ADDTOP+2):SBC HL,BC
+        LD A,H:OR L:JR NZ,.outside               ; за 2^16 от начала тома или до него
+        LD A,D:OR E:JR Z,.outside                ; сектор загрузки
+        LD HL,(@WDOS.BREZS):SBC HL,DE            ; CF=0 после OR выше
+        JR C,.outside
+        JR Z,.outside                            ; не меньше резерва
+        POP DE
+        POP HL
+        OR A
+        RET
+.outside:
+        POP DE
+        POP HL
+        SCF
+        RET
+; Claude - 2026-10-10 - end
+
+; Claude - 2026-09-26 - begin
+; Сигнатуры FSInfo в LOBU: «RRaA» в +0, «rrAa» в +484, 00 00 55 AA в +508 —
+; побайтно по таблице (прежде — шесть сравнений слов, те же значения).
+; Выход: Z — сектор FSInfo, NZ — нет. Портит A, B, DE, HL.
+VALIDATE_FSINFO_SECTOR:
+        LD HL,FSINFO_SIGNATURES
+        LD DE,@WDOS.LOBU
+        CALL .four
+        RET NZ
+        LD DE,@WDOS.LOBU+484
+        CALL .four
+        RET NZ
+        LD DE,@WDOS.LOBU+508
+.four:
+        LD B,4
+.byte:
+        LD A,(DE)
+        CP (HL)
+        RET NZ
+        INC HL
+        INC DE
+        DJNZ .byte
+        RET                                     ; Z: все четыре совпали
+
+FSINFO_SIGNATURES:
+        DB "RRaA","rrAa",0,0,#55,#AA
+; Claude - 2026-09-26 - end
+
+; Общий выход потоковой операции при ошибке драйвера. Адрес/сектор потока ещё
+; не продвинуты; EOC=#FF заставляет вызывающий код остановиться.
+STREAM_IO_ERROR:
+        LD A,#FF
+        LD (@WDOS.ABT),A
+        LD (@WDOS.EOC),A
+; Codex - 2026-07-16 - begin
+        ; Отличить ошибку I/O от штатного достижения EOC=#FF.
+        SCF
+; Codex - 2026-07-16 - end
+        RET
+
+; Codex - 2026-07-16 - begin
+; Codex - 2026-07-17 - begin
+; Все четыре блока распаковываются одинаково. SD-ZC уже упакован из конечного
+; проверенного runtime, поэтому прежняя большая таблица наложения не нужна.
+DSDZC_RUNTIME_READS EQU #393F
+DSDZC_RUNTIME_CSH   EQU #3B17
+DSDZC_RUNTIME_CMD18 EQU #3BB5
+DSDZC_RUNTIME_CMD25 EQU #3BEA
+DSDZC_RUNTIME_WAIT  EQU #3C6D
+
+UNPACK_DRIVER:
+        PUSH BC
+; Claude - 2026-09-27 - begin
+        ; Драйверы с установки лежат в DRIVERS_E8 этой страницы, а DOS_SWP
+        ; передаёт прежний адрес в ядре (DR1..DR4 с #5176): тот же сдвиг.
+        LD BC,DRIVERS_E8-@WDOS.DR1
+        ADD HL,BC
+; Claude - 2026-09-27 - end
+        CALL @WDOS.DEHR
+; Claude - 2026-10-11 - begin
+        CALL ZC_GUARD_PATCH
+; Claude - 2026-10-11 - end
+        POP BC
+        LD A,B
+        RET
+; Codex - 2026-07-17 - end
+
+; Claude - 2026-10-11 - begin
+; Точный штатный SD-ZC (DOSpSDZC35, адреса его распакованного образа) ждёт
+; карту без предела: CMD18 без ответа — JR NZ,$ в RDDSE, токен данных — WTDO,
+; ответ записи — DRESP. Вынули загрузочную карту — WC висел навсегда, и после
+; возврата карты тоже (её надо заново инициализировать). Байты драйвера не
+; меняются (сборка сверяет их с эталоном); после распаковки входы чтения и
+; записи его таблицы (#380F, #3812, #3815) ведут через проверку карты
+; резидентного блока (ZCG_*), а та зовёт прежние адреса.
+ZC_SELDEV                     EQU #3C7A         ; JP SELDEV — #3800 таблицы
+ZC_SDINI                      EQU #3803         ; вход таблицы, не подменяется
+ZC_PROZ                       EQU #380C         ; вход таблицы, не подменяется
+ZC_RDDSE                      EQU #38E4
+ZC_SDDSE                      EQU #390E
+ZC_RDD256                     EQU #3A01
+ZC_CS_OPERAND                 EQU #3B39         ; LD A,n в CSL: CS слота (SELDEV)
+ZC_BLKNUM                     EQU #38D0         ; позиция (PROZ: LD (BLKNUM),HL)
+
+; ZC_GUARD_PATCH: распакован точный SD-ZC (JP SELDEV и JP RDDSE таблицы —
+; его) — подменить три входа. Другой драйвер — выход. Разрушает AF, DE, HL.
+ZC_GUARD_PATCH:
+        LD HL,(@WDOS.DRVR+1)
+        LD DE,ZC_SELDEV
+        OR A
+        SBC HL,DE
+        RET NZ
+        LD HL,(@WDOS.DRVR+16)
+        LD DE,ZC_RDDSE
+        SBC HL,DE                               ; CF=0: прошлое вычитание дало 0
+        RET NZ
+        LD HL,ZCG_RDDSE
+        LD (@WDOS.DRVR+16),HL
+        LD HL,ZCG_SDDSE
+        LD (@WDOS.DRVR+19),HL
+        LD HL,ZCG_RDD256
+        LD (@WDOS.DRVR+22),HL
+        RET
+; Claude - 2026-10-11 - end
+
+; Боевой CORE32 распаковывает точный штатный DOSpSDZC35.CPD и не вызывает эти
+; экспериментальные точки. Их реализация и дополнительные номера шлюза
+; добавляются только специальной диагностической сборкой.
+        IFDEF WDOS_EXPERIMENTAL_ZC_RUNTIME
+
+; Общий аварийный выход SD-ZC: зафиксировать ошибку и снять chip-select.
+ZC_MARK_ERROR:
+        LD A,1
+        LD (@WDOS.ABT),A
+        CALL DSDZC_RUNTIME_CSH
+        LD A,1
+        OR A
+        RET
+
+; WAIT: дождаться #FF с конечным лимитом. Исходный AF восстанавливается,
+; поскольку старые командные процедуры не использовали флаги WAIT.
+ZC_WAIT_READY:
+        PUSH AF,BC,DE,HL
+        LD E,8
+.outer:
+        LD HL,0
+        LD BC,#0057
+.poll:
+        IN A,(C)
+        INC A
+        JR Z,.ready
+        DEC HL
+        LD A,H:OR L
+        JR NZ,.poll
+        DEC E
+        JR NZ,.outer
+        CALL ZC_MARK_ERROR
+.ready:
+        POP HL,DE,BC,AF
+        RET
+
+; WTDO: дождаться первого байта, отличного от #FF. При тайм-ауте возвращается
+; #FF, ABT устанавливается, а chip-select снимается.
+ZC_WAIT_TOKEN:
+        PUSH BC,DE,HL
+        LD E,8
+.outer:
+        LD HL,0
+        LD BC,#0057
+.poll:
+        IN A,(C)
+        CP #FF
+        JR NZ,.received
+        DEC HL
+        LD A,H:OR L
+        JR NZ,.poll
+        DEC E
+        JR NZ,.outer
+        CALL ZC_MARK_ERROR
+        POP HL,DE,BC
+        LD A,#FF
+        OR A
+        RET
+.received:
+        POP HL,DE,BC
+        RET
+
+; WTBY: дождаться снятия busy. Z означает успех, NZ — конечный тайм-аут.
+ZC_WAIT_BUSY:
+        PUSH BC,DE,HL
+        LD E,8
+.outer:
+        LD HL,0
+        LD BC,#0057
+.poll:
+        IN A,(C)
+        OR A
+        JR NZ,.ready
+        DEC HL
+        LD A,H:OR L
+        JR NZ,.poll
+        DEC E
+        JR NZ,.outer
+        CALL ZC_MARK_ERROR
+        POP HL,DE,BC
+        LD A,1
+        OR A
+        RET
+.ready:
+        POP HL,DE,BC
+        XOR A
+        RET
+
+; Проверить ответ записи и дождаться снятия busy. При успехе счётчик блоков
+; переносится из AF' в AF, как это делал прежний участок SDDSE.
+ZC_DATA_RESPONSE:
+        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
+        CALL ZC_WAIT_TOKEN
+        LD C,A
+        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
+        LD A,C:AND #1F:CP 5:JR NZ,.mark
+        CALL ZC_WAIT_BUSY
+        JR NZ,.failed
+        EX AF,AF'
+        CP A
+        RET
+.mark:
+        CALL ZC_MARK_ERROR
+.failed:
+        LD A,1
+        OR A
+        RET
+
+; Ограничить оба ожидания DMA. A сохраняется, CF=1 означает тайм-аут.
+ZC_DMA_WAIT:
+; Codex - 2026-07-16 - begin
+; BC намеренно не восстанавливается: исходная последовательность оставляла
+; BC=#27AF, и следующий OUT меняет только B, сохраняя обязательный C=#AF.
+        PUSH AF,DE
+        LD BC,#27AF
+        LD DE,0
+.poll:
+        INF
+        JP P,.ready
+        DEC DE
+        LD A,D:OR E
+        JR NZ,.poll
+        CALL ZC_MARK_ERROR
+        POP DE,AF
+        SCF
+        RET
+.ready:
+        POP DE,AF
+        OR A
+        RET
+; Codex - 2026-07-16 - end
+
+; Начать многоблочное чтение. Счётчик остаётся в AF'; Z означает готовность.
+ZC_START_READ:
+        XOR A
+        LD (@WDOS.ABT),A
+        CALL DSDZC_RUNTIME_CMD18
+        LD C,A
+        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
+        LD A,C:OR A:JR NZ,.mark
+        XOR A
+        RET
+.mark:
+        CALL ZC_MARK_ERROR
+.failed:
+        LD A,1
+        OR A
+        RET
+
+; Прочитать блок штатной процедурой с уже ограниченными DMA-ожиданиями.
+; При успехе вернуть счётчик из AF' и Z, при ошибке оставить AF' нетронутым.
+ZC_READ_BLOCK:
+        CALL DSDZC_RUNTIME_READS
+        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
+        EX AF,AF'
+        CP A
+        RET
+.failed:
+        CALL DSDZC_RUNTIME_CSH
+        LD A,1
+        OR A
+        RET
+
+; Проверить аппаратный запрет записи и одновременно начать новый результат I/O.
+ZC_WRITE_READY:
+        XOR A
+        LD (@WDOS.ABT),A
+        IN A,(#77)
+        AND 2
+        JR NZ,.failed
+        XOR A
+        RET
+.failed:
+        JP ZC_MARK_ERROR
+
+; Начать многоблочную запись и дождаться готовности к первому блоку. При успехе
+; счётчик переносится из AF' в AF для существующего цикла SDDSE.
+ZC_START_WRITE:
+        CALL DSDZC_RUNTIME_CMD25
+        LD C,A
+        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
+        LD A,C:OR A:JR NZ,.mark
+        CALL DSDZC_RUNTIME_WAIT
+        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
+        EX AF,AF'
+        CP A
+        RET
+.mark:
+        CALL ZC_MARK_ERROR
+.failed:
+        LD A,1
+        OR A
+        RET
+
+; Токен данных чтения обязан быть #FE. Любой иной ответ завершает операцию.
+ZC_CHECK_TOKEN:
+        CP #FE
+        JR NZ,.failed
+        XOR A
+        RET
+.failed:
+        JP ZC_MARK_ERROR
+; Codex - 2026-07-16 - end
+
+        ENDIF
+
+; Claude - 2026-09-27 - begin
+; EXT_INSTALL_TAIL (ID_INSTALL_TAIL; только установщик boot.$C, страница #E8 в
+; окне #C000, обе части распакованы): упакованные драйверы ядра #5176..#5AA9 —
+; в DRIVERS_E8, на их место — резидентный блок. Порядок важен: блок затирает
+; драйверы.
+EXT_INSTALL_TAIL:
+        LD HL,@WDOS.DR1
+        LD DE,DRIVERS_E8
+        LD BC,DRIVERS_LENGTH
+        LDIR
+        LD HL,RESIDENT_SOURCE
+        LD DE,RESIDENT_BASE
+        LD BC,RESIDENT_LENGTH
+        LDIR
+; Claude - 2026-10-10 - begin
+        LD HL,RESIDENT2_SOURCE
+        LD DE,RESIDENT2_BASE
+        LD BC,RESIDENT2_LENGTH
+        LDIR
+; Claude - 2026-10-10 - end
+        ; Одноразовый образ WMF распакован на месте будущих рабочих таблиц.
+        ; До FINI/ROOT_BUILD переносим его в постоянный диапазон #5300.
+        LD HL,WMF_INSTALL_SOURCE
+        LD DE,@WMF_RUNTIME_BASE
+        LD BC,WMF_INSTALL_LENGTH
+        LDIR
+; Claude - 2026-10-10 - begin
+        ; Место оверлея до установщика FILEX — HALT: вход сюда до FILEX
+        ; (ошибка старта) останавливает машину, а не исполняет образ WMF.
+        LD HL,OVERLAY_START
+        LD DE,OVERLAY_START+1
+        LD BC,OVERLAY_LENGTH-1
+        LD (HL),#76
+        LDIR
+; Claude - 2026-10-10 - end
+        RET
+DRIVERS_LENGTH                EQU @WDOS.DEHR-@WDOS.DR1
+        ASSERT RESIDENT_BASE == @WDOS.DR1, резидентный блок не на месте драйверов
+
+; Claude - 2026-09-27 - end
+
+; Геометрия FAT32 и временное состояние подсказки аллокатора. Верхняя граница
+; является исключительной: допустимы кластеры 2..limit-1.
+; Claude - 2026-09-25 - begin
+; Граница — свойство тома, а не страницы расширения: прежде одна ячейка здесь
+; служила всем панелям, и после монтирования большего тома на другом
+; устройстве аллокатор меньшего выдавал кластеры за концом его раздела. Теперь
+; она лежит в странице потока рядом с FSTFRC/SDFAT (поле RECCAT драйвера, не
+; используемое ни ядром, ни драйверами), своя у каждой панели и её клона.
+FAT_DATA_CLUSTER_LIMIT        EQU @WDOS.RECCAT
+; Claude - 2026-09-25 - end
+
+; Последняя запись, найденная FENTRY (TENTRY): поток (страница окна #0000),
+; адрес имени, по которому её искали, и копия этого имени.
+; Claude - 2026-10-10: число секторов тома на время проверки геометрии.
+GEO_TOTAL:                    DS 4
+FOUND_STREAM:                 DS 1
+FOUND_NAME:                   DS 2
+FOUND_TEXT:                   DS 256
+
+; RENAME: место короткой записи прежнего имени (смещение #FFFF — неизвестно).
+; Новое имя после SVHDFL — в NXTBU ядра. ENTRY_LANDED хранит FCTS на время
+; поиска; DIR_ALIVE — кластер каталога и его родителя.
+RENAME_OLD_LBA:               DS 4
+RENAME_OLD_OFFSET:            DS 2
+LANDED_CLUSTER:               DS 4
+DIR_ALIVE_CLUSTER:            DS 4
+DIR_ALIVE_PARENT:             DS 4
+
+; Поля часов CMOS в двоичном виде: секунды, минуты, часы, день, месяц, год;
+; второй снимок для сверки.
+RTC_VALUES:                   DS 6
+RTC_CHECK:                    DS 6
+
+; Цифры размера для строки информации, младшая первой.
+STATUS_DIGITS:                DS 10
+STATUS_NARROW:                DS 1                ; #FF — строка в 38 знаков, 0 — в 43
+        ; Последний байт таблицы — RTC_FIELDS+17: при начале с #xxEE она
+        ; кончается на #xxFF, добивка (условие > 256-18) не нужна.
+        ASSERT high RTC_FIELDS == high (RTC_FIELDS+17), конец полей ловится по младшему байту
+
+; Codex - 2026-07-17 - begin
+; Постоянный контекст APPEND хранится в выделенной странице расширения и не
+; занимает рабочие буферы CORE32. Рабочая копия меняется во время вызова и
+; становится постоянной только после успешной записи каталожной ENTRY.
+APPEND_VALID:                 DS 1
+APPEND_READY:                 DS 1
+APPEND_FOUND_POINTER:         DS 2
+APPEND_DIRECTORY_LBA:         DS 4
+APPEND_DIRECTORY_OFFSET:      DS 2
+APPEND_ENTRY:                 DS 32
+
+APPEND_CONTEXT:
+APPEND_SIZE:                  DS 4
+APPEND_FIRST_CLUSTER:         DS 4
+APPEND_CURRENT_CLUSTER:       DS 4
+APPEND_SECTOR:                DS 1
+APPEND_OFFSET:                DS 2
+APPEND_NEEDS_CLUSTER:         DS 1
+; Codex - 2026-07-28 - begin
+; Постоянный ключ и значение LBA-кэша. Ключ защищает межвызовное
+; переиспользование от смены кластера и параметров отображения FAT.
+APPEND_LBA_VALID:             DS 1
+APPEND_LBA_CLUSTER:           DS 4
+APPEND_LBA_BSECPC:            DS 1
+APPEND_LBA_SDFAT:             DS 4
+APPEND_LBA_ADDTOP:            DS 4
+APPEND_LBA:                   DS 4
+; Codex - 2026-07-28 - end
+APPEND_CONTEXT_END:
+APPEND_CONTEXT_SIZE           EQU APPEND_CONTEXT_END-APPEND_CONTEXT
+
+APPEND_WORK_CONTEXT:
+APPEND_WORK_SIZE:             DS 4
+APPEND_WORK_FIRST:            DS 4
+APPEND_WORK_CURRENT:          DS 4
+APPEND_WORK_SECTOR:           DS 1
+APPEND_WORK_OFFSET:           DS 2
+APPEND_WORK_NEEDS_CLUSTER:    DS 1
+; Codex - 2026-07-28 - begin
+APPEND_WORK_LBA_VALID:        DS 1
+APPEND_WORK_LBA_CLUSTER:      DS 4
+APPEND_WORK_LBA_BSECPC:       DS 1
+APPEND_WORK_LBA_SDFAT:        DS 4
+APPEND_WORK_LBA_ADDTOP:       DS 4
+APPEND_WORK_LBA:              DS 4
+; Codex - 2026-07-28 - end
+        ASSERT $-APPEND_WORK_CONTEXT == APPEND_CONTEXT_SIZE, различается контекст APPEND
+
+APPEND_SOURCE:                DS 2
+APPEND_REMAINING:             DS 2
+APPEND_CHUNK:                 DS 2
+; Codex - 2026-07-27 - begin
+APPEND_RUN:                   DS 1
+; Codex - 2026-07-27 - end
+APPEND_SKIP_COUNT:            DS 4
+APPEND_PENDING_NEW:           DS 1
+APPEND_LINKED_NEW:            DS 1
+; Codex - 2026-07-27 - begin
+APPEND_NEW_ACTIVE:            DS 1
+; Codex - 2026-07-27 - end
+APPEND_PENDING_OLD_TAIL:      DS 4
+APPEND_NEW_CLUSTER:           DS 4
+APPEND_OLD_LINK:              DS 4
+APPEND_FAT_POINTER:           DS 2
+APPEND_SLOT_POINTER:          DS 2
+APPEND_LAST_ERROR:            DS 1
+; Claude - 2026-09-25 - begin
+APPEND_NEW_ENTRY:             DS 32               ; запись каталога после дозаписи
+APPEND_DIR_ATTEMPTED:         DS 1                ; 1 — запись каталога начата
+; Claude - 2026-09-25 - end
+; Claude - 2026-09-26 - begin
+FREE_SCAN_IO_FAILED:          DS 1                ; ≠0 — поиск места отказал на чтении FAT
+; Claude - 2026-09-26 - end
+; Claude - 2026-09-27 - begin
+DIR_CHAIN_LEFT:               DS 2                ; DIR_CHAIN: секторов в запасе
+DIR_CHAIN_READ:               DS 1                ; ≠0 — сектор FAT в обходе уже читан
+FILE_CHAIN_LEFT:              DS 4                ; FILE_CHAIN: кластеров данных осталось
+FILE_CHAIN_CUR:               DS 4                ; FILE_CHAIN: кластер после порции
+; Claude - 2026-09-27 - end
+; Codex - 2026-07-17 - end
+
+; Служебное состояние лежит в сохранённом нулевом промежутке CORE32.
+; Секторный буфер #2000 остаётся в штатном файловом окне #0000; код расширения
+; исполняется независимо в окне #C000.
+LFN_LEADING            EQU @WDOS.EXT_LFN_LEADING
+DIR_PREVIOUS_LBA       EQU @WDOS.EXT_DIR_PREVIOUS_LBA
+DIR_OLDER_LBA          EQU @WDOS.EXT_DIR_OLDER_LBA
+DIR_OLDER_VALID        EQU @WDOS.EXT_DIR_OLDER_VALID
+DIR_PREVIOUS_DIRTY     EQU @WDOS.EXT_DIR_PREVIOUS_DIRTY
+DIR_OLDER_DIRTY        EQU @WDOS.EXT_DIR_OLDER_DIRTY
+DIR_EXPECTED_SEQUENCE  EQU @WDOS.EXT_DIR_EXPECTED_SEQUENCE
+DIR_LFN_CHECKSUM       EQU @WDOS.EXT_DIR_LFN_CHECKSUM
+DIR_OLDER_BUFFER       EQU #2000
+
+; Claude - 2026-10-10 - begin
+; Штамп сборки: первые 4 байта SHA-256 загрузочной части и оверлея (при
+; нулевом штампе). Ставит build.ps1 после сборки; FILEX.WMF несёт тот же и
+; ставит оверлей, только если они совпали.
+EXT_STAMP:                    DS 4
+; Claude - 2026-10-10 - end
+
+; Claude - 2026-09-27 - begin
+; Упакованные драйверы ядра (DR1..DR4): сюда их переносит EXT_INSTALL_TAIL,
+; отсюда распаковывает UNPACK_DRIVER. В потоке части 2 — одни нули.
+DRIVERS_E8:                   DS DRIVERS_LENGTH
+; Claude - 2026-09-27 - end
+
+RUNTIME_END:
+        ASSERT RUNTIME_END <= #10000, расширение вышло за пределы физической страницы
+; Одноразовые данные перекрывают BSS только во время установки. Все таблицы
+; ниже заполняются перед использованием; они не обязаны начинаться с нулей.
+; Совместный HR-поток даёт место в boot.$C, сохраняя прежний лимит 32768 байт.
+WMF_INSTALL_SOURCE:
+        INCBIN "../Build/WMF_RUNTIME.bin"
+WMF_INSTALL_LENGTH EQU $-WMF_INSTALL_SOURCE
+; Claude - 2026-09-27 - begin
+; Claude - 2026-10-10: исходники резидентных блоков — здесь, в одноразовой
+; зоне за RUNTIME_END: EXT_INSTALL_TAIL копирует их в #05 до HALT на месте
+; оверлея, потом это место занимает оверлей FILEX (в #E8 они не держатся).
+; Резидентный блок: код, который исполняется при снятой странице расширения,
+; — в странице ядра #05 (всегда в окне #4000). Собран для RESIDENT_BASE,
+; хранится здесь; EXT_INSTALL_TAIL копирует его на место драйверов.
+;
+; CORE_MKSG, CORE_SRHFCL (Codex R29-01): MKSG и SRHFCL — поиск свободного
+; кластера, до ~2330 тактов на запись FAT, — из функций расширения (MKDIR,
+; APPEND, рост каталога DIR_GROW) шли внутри шлюза, то есть при DI: на почти
+; полном томе минуты без прерываний. Теперь на время поиска #E8 снимается: в
+; окно #C000 возвращается страница внешнего вызывающего и его IFF
+; (OUTER_PAGE/OUTER_IFF, их записывает GATE_CONTINUE при входе в шлюз не из
+; расширения), процедура ядра исполняется при его прерываниях, а её вложенные
+; вызовы шлюза подключают #E8 сами. Затем DI и снова #E8. Оба набора
+; регистров проходят насквозь.
+RESIDENT_SOURCE:
+        DISP RESIDENT_BASE
+RESIDENT_START:
+; Claude - 2026-10-10 - begin
+        ASSERT $ == OVERLAY_STATE, байт состояния оверлея сдвинулся
+        DB 0                                    ; пишет установщик FILEX.WMF
+        ASSERT $ == FILEX_REQUIRED, вход проверки FILEX сдвинулся
+        JP FILEX_REQUIRED_CODE
+; Claude - 2026-10-10 - end
+; Claude - 2026-10-01 - begin
+; Входы резидентного кода для ядра — по постоянным адресам (CORE32_EXT_API).
+; Всё, что ниже до CORE_MKSG, исполняется без шлюза: страница окна #C000 и
+; прерывания — вызывающего. Прежде чтение файла на каждом переходе к
+; следующему кластеру и на каждом вызове LOAD256/LOADNON входило в шлюз, а
+; он закрывает прерывания: кадровое прерывание TS-Conf (короткий импульс)
+; терялось, плеер TGV без VDAC2 не сменял кадры. В исходном WC чтение идёт
+; при разрешённых прерываниях.
+        ASSERT $ == STREAM_RESIDENT, вход потока сдвинулся
+        JP STREAM_RESIDENT_CODE
+        ASSERT $ == CLASSIFY_RESIDENT, вход проверки ссылки сдвинулся
+        JP CLASSIFY_IN_VOLUME
+; Claude - 2026-10-10 - begin
+        ASSERT $ == GIPAG_FILE, вход выбора файла сдвинулся
+        JP GIPAG_FILE_CODE
+; Claude - 2026-10-10 - end
+        ASSERT $ == STREAM_LINK_RESIDENT, вход перехода потока сдвинулся
+; Переход потока по записи FAT в SECBU (HL), попадание кэша STREAM_NEXT_CACHED,
+; и (с 2026-10-10) промах — STREAM_LINK расширения сюда же. Ноль — свободный
+; кластер: порча ссылки (см. STREAM_LINK расширения), учёт ошибки — в
+; расширении; иначе GIPAG.
+        PUSH HL
+        LD A,(HL):INC HL:OR (HL):INC HL:OR (HL):INC HL:OR (HL)
+; Claude - 2026-10-10 - begin
+        ; Ссылка на первый кластер корня — тоже порча: цепочка файла или
+        ; каталога ушла в корень, и поток читал бы корень, а SAVE512 писал бы в
+        ; него (драйвер FAT32). Сравнение — от старшего байта (HL — на нём).
+        JR Z,.bad
+        LD A,(@WDOS.BROOTC+3):XOR (HL):AND #0F:JR NZ,.link
+        DEC HL:LD A,(@WDOS.BROOTC+2):CP (HL):JR NZ,.link
+        DEC HL:LD A,(@WDOS.BROOTC+1):CP (HL):JR NZ,.link
+        DEC HL:LD A,(@WDOS.BROOTC):CP (HL):JR NZ,.link
+.bad:
+        POP HL
+        CALL @WDOS.EXTENSION_GATE
+        DB ID_FAT_LINK_ERROR
+        RET
+.link:
+        POP HL
+        JP @WDOS.GIPAG
+; Claude - 2026-10-10 - end
+; Нормализовать и классифицировать значение FAT32 в DE:HL.
+; Старшие четыре служебных бита отбрасываются. Обычный кластер возвращает
+; NZ/CF=0, EOC #0FFFFFF8..#0FFFFFFF — Z/CF=0, недопустимые 0, 1,
+; #0FFFFFF0..#0FFFFFF7 — NZ/CF=1.
+CLASSIFY_FAT_LINK:
+        LD A,D:AND #0F:LD D,A
+        OR E:OR H
+        JR NZ,CLASSIFY_HIGH
+
+CLASSIFY_LOW:
+        LD A,L:CP 2:JR C,CLASSIFY_INVALID
+        JR CLASSIFY_ORDINARY
+CLASSIFY_HIGH:
+        LD A,D:CP #0F:JR NZ,CLASSIFY_ORDINARY
+        LD A,E:CP #FF:JR NZ,CLASSIFY_ORDINARY
+        LD A,H:CP #FF:JR NZ,CLASSIFY_ORDINARY
+        LD A,L:CP #F0:JR C,CLASSIFY_ORDINARY
+        CP #F8:JR C,CLASSIFY_INVALID
+        XOR A
+        RET
+CLASSIFY_ORDINARY:
+; Codex - 2026-07-16 - begin
+        ; Тот же A=1, NZ и сброшенный CF одним байтом короче. Освобождённый
+        ; байт сохраняет точный физический размер после нормализации EOC.
+        XOR A:INC A
+; Codex - 2026-07-16 - end
+        RET
+CLASSIFY_INVALID:
+        LD A,1:OR A
+        SCF
+        RET
+; CLASSIFY_FAT_LINK с границей области данных тома (см. описание у прежнего
+; места в расширении): GIPAG, GIPP ядра и ID_CLASSIFY_FAT_LINK шлюза.
+CLASSIFY_IN_VOLUME:
+        CALL CLASSIFY_FAT_LINK
+        RET C                                   ; недопустимая
+        RET Z                                   ; EOC
+        PUSH HL
+        PUSH DE
+        LD BC,(FAT_DATA_CLUSTER_LIMIT):OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(FAT_DATA_CLUSTER_LIMIT+2):SBC HL,BC   ; CF — кластер ниже границы
+        POP DE
+        POP HL
+        JR C,.inside
+        PUSH HL                                 ; граница задана?
+        LD HL,(FAT_DATA_CLUSTER_LIMIT+2):LD A,H:OR L
+        LD HL,(FAT_DATA_CLUSTER_LIMIT):OR H
+        JR NZ,.set
+        LD A,L:CP 3                             ; CF — не задана
+.set:
+        POP HL
+        JP NC,CLASSIFY_INVALID                  ; за областью данных
+.inside:
+        XOR A:INC A                             ; обычный: A=1, NZ, CF=0
+        RET
+; LOAD256/LOADNON ядра: вызвать LOAD512 с временным обработчиком сектора DE и
+; вернуть прежний.
+STREAM_RESIDENT_CODE:
+        PUSH HL
+        LD HL,(@WDOS.NW0+1)
+        EX (SP),HL
+        LD (@WDOS.NW0+1),DE
+        CALL @WDOS.LOAD512
+        POP DE
+        LD (@WDOS.NW0+1),DE
+        RET
+; Claude - 2026-10-01 - end
+CORE_MKSG:
+        CALL LEAVE_EXT
+        CALL @WDOS.MKSG
+        JR ENTER_EXT
+CORE_SRHFCL:
+        CALL LEAVE_EXT
+        CALL @WDOS.SRHFCL
+ENTER_EXT:                              ; назад в расширение: DI, затем #E8
+        DI
+        PUSH AF
+        PUSH BC
+        LD A,@WC_PHYS_CORE32_EXT_PAGE
+        LD BC,#13AF
+        OUT (C),A
+        POP BC
+        POP AF
+        RET
+LEAVE_EXT:                              ; наружу: страница, затем IFF вызывающего
+        PUSH AF
+        PUSH BC
+        LD A,(OUTER_PAGE)
+        LD BC,#13AF
+        OUT (C),A
+        LD A,(OUTER_IFF)
+        OR A
+        POP BC
+        JR Z,.keep_di
+        POP AF
+        EI
+        RET
+.keep_di:
+        POP AF
+        RET
+; Claude - 2026-10-11 - begin
+; Вынутая карта SD-ZC: входы, проверка и CMD16 — здесь, окно, сверка и
+; перемонтирование — во втором резидентном блоке (общее описание — перед
+; ZCG_RECOVER).
+ZCG_RDDSE:
+        CALL ZCG_CHECK
+        JP Z,ZC_RDDSE
+        RET
+ZCG_SDDSE:
+        CALL ZCG_CHECK
+        JP Z,ZC_SDDSE
+        RET
+ZCG_RDD256:
+        CALL ZCG_CHECK
+        JP Z,ZC_RDD256
+        RET
+
+; ZCG_CHECK: Z — звать драйвер: A, BC, DE, HL — как на входе; флаги и (после
+; ZCG_RECOVER) AF' — нет: входы драйвера их не читают, AF' они ставят сами
+; (Codex, шестой круг). NZ — обмена не будет: ABT=1, A=#FF.
+ZCG_CHECK:
+        PUSH HL
+        PUSH DE
+        PUSH BC
+        PUSH AF
+        LD A,(ZC_CS_OPERAND)
+        LD HL,BOOT_CS
+        CP (HL)
+        JR NZ,.other                            ; слот не загрузочной карты
+        LD A,(MEDIA_FENCE)
+        OR A
+        JR NZ,.fail                             ; её вынимали: до MAIN — отказ
+        CALL ZCG_PROBE
+        JR Z,.ok
+        CALL ZCG_RECOVER
+        JR Z,.ok                                ; старт WC: обмен повторить
+        JR .fail
+.other:
+        CALL ZCG_PROBE
+        JR Z,.ok
+.fail:
+        LD A,1
+        LD (@WDOS.ABT),A
+        POP AF
+        POP BC
+        POP DE
+        POP HL
+        LD A,#FF
+        OR A
+        RET
+.ok:
+        POP AF
+        POP BC
+        POP DE
+        POP HL
+        CP A
+        RET
+
+; ZCG_PROBE: CMD16 с длиной блока 512 (её же ставит SDINI; SDHC она не
+; меняет). Ответ R1 (бит 7 = 0) за 10 байт — карта на месте и в режиме SPI.
+; Нет ответа — карты нет или её вставили заново и она ещё не в SPI. CS — как
+; у CSH/CSL драйвера (слот — из операнда CSL), и как CSL — сперва дождаться
+; готовности (#FF): RDD256 кончает CMD12 без WTBY, и занятая карта (R1b)
+; теряла начало CMD16 — «вынута» (Codex, пятый круг). Предел — 65536 опросов:
+; карты нет — #FF сразу; занята дольше предела — тоже «не отвечает» (Codex,
+; шестой круг: прежде следующий #00 принимался за R1). Z — ответ. Разрушает
+; AF, BC, DE.
+ZCG_PROBE:
+        LD BC,#0077
+        LD A,3:OUT (C),A                        ; CS снят
+        LD C,#57
+        LD A,#FF:OUT (C),A
+        LD A,(ZC_CS_OPERAND)
+        LD C,#77:OUT (C),A                      ; CS слота
+        LD C,#57
+        LD A,#FF:OUT (C),A
+        LD DE,0
+.ready:
+        IN A,(C)
+        INC A
+        JR Z,.command                           ; #FF — не занята (или карты нет)
+        DEC DE
+        LD A,D:OR E
+        JR NZ,.ready
+        INC A                                   ; занята дольше предела: NZ
+        JR .done
+.command:
+        LD A,#50:OUT (C),A                      ; CMD16, аргумент #00000200
+        XOR A:OUT (C),A:OUT (C),A
+        LD A,2:OUT (C),A
+        XOR A:OUT (C),A
+        LD A,#FF:OUT (C),A                      ; CRC: в SPI не проверяется
+        LD D,10
+.resp:
+        IN A,(C)
+        BIT 7,A
+        JR Z,.done
+        DEC D
+        JR NZ,.resp
+        INC D                                   ; нет ответа: NZ
+.done:
+        PUSH AF
+        LD C,#77
+        LD A,3:OUT (C),A
+        LD C,#57
+        LD A,#FF:OUT (C),A
+        POP AF
+        RET
+
+; Claude - 2026-10-11 - end
+OUTER_PAGE:     DB 0                    ; страница окна #C000 внешнего вызова
+OUTER_IFF:      DB 0                    ; ≠0 — прерывания у него разрешены
+RESIDENT_END:
+        ASSERT RESIDENT_END <= @WMF_RUNTIME_BASE, резидент CORE32 пересёк обработчик WMF
+        ENT
+RESIDENT_LENGTH               EQU RESIDENT_END-RESIDENT_START
+        ASSERT RESIDENT_BASE+RESIDENT_LENGTH <= @WDOS.DEHR, резидентный блок налез на DEHR
+; Claude - 2026-10-10 - begin
+; Второй резидентный блок — в свободном месте страницы #05 за кодом WMF #11
+; (#5300..WMF_INSTALL_LENGTH) и до DEHR: первый (#5176) упирается в #5300.
+; Копирует EXT_INSTALL_TAIL.
+RESIDENT2_SOURCE:
+        DISP RESIDENT2_BASE
+RESIDENT2_START:
+        ASSERT $ == OEM_UCS_RESIDENT, вход перевода CP866-UTF-16 сдвинулся
+        JP OEM_UCS_CODE
+        ASSERT $ == UCS_RESIDENT, вход перевода UTF-16-CP866 сдвинулся
+        JP UCS_CODE
+        ASSERT $ == UCH_RESIDENT, вход перевода имени для списка сдвинулся
+        JP UCH_CODE
+        ASSERT $ == LOAD256_RESIDENT, вход LOAD256 сдвинулся
+        JP LOAD256_CODE
+; Claude - 2026-10-11 - begin
+        ASSERT $ == MEDIA_IDLE, вход проверки вынутой карты сдвинулся
+        JP MEDIA_IDLE_CODE
+        ASSERT $ == SPG_FAIL, вход отказа загрузки SPG сдвинулся
+        JP SPG_FAIL_CODE
+; Claude - 2026-10-11 - end
+
+; LOAD256 (#4051, API 60): B секторов по 256 байт, каждый — на 1024 байта
+; адресов от HL (RDD256: INC H четырежды; SMUC пишет по HL и по HL+512).
+; Буфер — от #4000 и последний байт (HL+1024·(B−1)+767) — не дальше #FFFF; B —
+; 1..64 (Codex, третий круг: прежде проверялось +255). Иначе обмена нет: A=#FF,
+; CF=1. Прежде DMA шёл и за #FFFF — в #0000.. файловой страницы (NXTBU, GENBU),
+; а при HL ниже #4000 — в SECBU и LOBU, которые затем пишутся на носитель
+; (драйвер FAT32). HL и B — как у LOAD512; DE — обработчик сектора.
+LOAD256_CODE:
+        LD A,H:CP #40:JR C,.bad
+        LD A,B:DEC A:CP 64:JR NC,.bad
+        ADD A,A:ADD A,A
+        ADD A,2
+        LD D,A:LD E,#FF                         ; 1024·(B−1)+767
+        PUSH HL
+        ADD HL,DE
+        POP HL
+        JR C,.bad
+        LD DE,@WDOS.RDD256
+        JP STREAM_RESIDENT_CODE
+.bad:
+        LD A,#FF
+        SCF
+        RET
+
+; ORU ядра (OEM2UC, запись LFN): A=C — знак CP866 от #80, B=0. Выход: B:C —
+; UTF-16. HL (куда пишется запись) и DE (имя) сохраняются.
+OEM_UCS_CODE:
+        LD B,4
+        CP #F0:LD C,#01:RET Z                   ; Ё
+        CP #F1:LD C,#51:RET Z                   ; ё
+        CP #B0:JR C,.low                        ; А..п
+        CP #E0:JR C,.table                      ; псевдографика
+        CP #F0:JR C,.high                       ; р..я
+        SUB #F2-48                              ; #F2..#FF — 48..61
+        JR .lookup
+.table:
+        SUB #B0
+.lookup:
+        PUSH HL
+        ADD A,A
+        LD L,A:LD H,0
+        LD BC,OEM_TABLE:ADD HL,BC
+        LD C,(HL):INC HL:LD B,(HL)
+        POP HL
+        RET
+.low:
+        SUB #70:LD C,A:RET
+.high:
+        SUB #A0:LD C,A:RET
+
+; UCS ядра (сравнение длинного имени, COMPARE_LFN_CHAR): HL — младший байт
+; знака UTF-16. Выход: A — CP866, 0 — не переводится, #FF — конец имени
+; (#0000); HL — на следующем знаке. BC, DE сохраняются.
+UCS_CODE:
+        INC L
+        LD A,(HL):OR A:JR NZ,.wide
+        DEC L:LD A,(HL):INC L:INC L
+        OR A:JR Z,.end
+        CP #80:RET C
+        PUSH BC
+        LD B,0:LD C,A
+        JR .convert
+.wide:
+        PUSH BC
+        LD B,A
+        DEC L:LD C,(HL):INC L:INC L
+.convert:
+        CALL UTF_TO_OEM
+        POP BC
+        RET
+.end:
+        LD A,#FF
+        RET
+
+; UCH ядра (имя для списка, NXTETY2 через UCHN): HL — младший байт знака,
+; DE — куда класть. Знак переведён — в (DE), DE+1, CF=1; конец (#0000) — A=1,
+; NZ, CF=0; не переводится — Z, CF=0 (NXTETY покажет короткое имя). HL — на
+; следующем знаке. BC сохраняется.
+UCH_CODE:
+        INC L
+        LD A,(HL):OR A:JR NZ,.wide
+        DEC L:LD A,(HL):INC L:INC L
+        OR A:JR Z,.end
+        CP #80:JR NC,.latin
+        LD (DE),A:INC DE                        ; CF=1 от CP
+        RET
+.latin:
+        PUSH BC
+        LD B,0:LD C,A
+        JR .convert
+.wide:
+        PUSH BC
+        LD B,A
+        DEC L:LD C,(HL):INC L:INC L
+.convert:
+        CALL UTF_TO_OEM
+        POP BC
+        OR A:RET Z                              ; Z, CF=0 — не переводится
+        LD (DE),A:INC DE
+        SCF
+        RET
+.end:
+        XOR A:INC A
+        RET
+
+; UTF-16 в BC -> знак CP866 в A (0 — нет такого). Кириллица — как прежде
+; (А..я, Ё, ё), остальное — по OEM_TABLE, кроме #FF: неразрывный пробел даёт
+; #FF, а это в сравнении имён — конец имени. HL, DE сохраняются.
+UTF_TO_OEM:
+        LD A,B:CP 4:JR NZ,.scan
+        LD A,C
+        CP #01:LD A,#F0:RET Z
+        LD A,C
+        CP #51:LD A,#F1:RET Z
+        LD A,C
+        CP #10:JR C,.scan
+        CP #40:JR NC,.upper
+        ADD A,#70:RET                           ; А..п
+.upper:
+        CP #50:JR NC,.scan
+        ADD A,#A0:RET                           ; р..я
+.scan:
+        PUSH HL
+        PUSH DE
+        LD HL,OEM_TABLE
+        LD D,#B0                                ; знак записи
+        LD E,61                                 ; без #FF
+.next:
+        LD A,(HL):INC HL
+        CP C:LD A,(HL):INC HL
+        JR NZ,.skip
+        CP B:JR Z,.found
+.skip:
+        INC D
+        LD A,D:CP #E0:JR NZ,.more
+        LD D,#F2
+.more:
+        DEC E:JR NZ,.next
+        XOR A
+        JR .done
+.found:
+        LD A,D
+.done:
+        POP DE
+        POP HL
+        RET
+
+; UTF-16 знаков CP866 #B0..#DF и #F2..#FF (кодек cp866 Python).
+OEM_TABLE:
+        DW #2591,#2592,#2593,#2502,#2524,#2561,#2562,#2556   ; B0..B7
+        DW #2555,#2563,#2551,#2557,#255D,#255C,#255B,#2510   ; B8..BF
+        DW #2514,#2534,#252C,#251C,#2500,#253C,#255E,#255F   ; C0..C7
+        DW #255A,#2554,#2569,#2566,#2560,#2550,#256C,#2567   ; C8..CF
+        DW #2568,#2564,#2565,#2559,#2558,#2552,#2553,#256B   ; D0..D7
+        DW #256A,#2518,#250C,#2588,#2584,#258C,#2590,#2580   ; D8..DF
+        DW #0404,#0454,#0407,#0457,#040E,#045E,#00B0,#2219   ; F2..F9
+        DW #00B7,#221A,#2116,#00A4,#25A0,#00A0               ; FA..FF
+        ASSERT $-OEM_TABLE == 62*2, таблица CP866 не той длины
+; FILEX_REQUIRED (AX_RUN, до автозапуска плагинов #06): оверлей FILEX стоит —
+; выход. Иначе — окно в манере сообщений WCINI (IERP) и останов: без
+; оверлея нет создания, переименования, удаления и APPEND, а его место до
+; FILEX занято HALT. FILEX стоит первой строкой [PLUGINS] и ставит оверлей
+; сразу после своей загрузки (ранняя установка), так что к AX_RUN он уже
+; стоит, если FILEX вообще есть.
+FILEX_REQUIRED_CODE:
+        LD A,(OVERLAY_STATE)
+        DEC A
+        RET Z
+        PUSH AF                                 ; #FF — FILEX нет, 1 — чужой
+        LD IX,FX_WINDOW
+        CALL FX_PRWOW
+        LD HL,FX_LINE1
+        LD DE,#0100+(FX_W-FX_LINE1_LEN)/2
+        LD BC,FX_LINE1_LEN
+        CALL FX_PRSRW
+        POP AF
+        LD HL,FX_MISSING
+        LD DE,#0200+(FX_W-FX_MISSING_LEN)/2
+        LD BC,FX_MISSING_LEN
+        DEC A
+        JR NZ,.line2                            ; FILEX нет
+        LD HL,FX_FOREIGN                        ; FILEX от другой сборки
+        LD DE,#0200+(FX_W-FX_FOREIGN_LEN)/2
+        LD BC,FX_FOREIGN_LEN
+.line2:
+        CALL FX_PRSRW
+        LD HL,FX_LINE3
+        LD DE,#0300+(FX_W-FX_LINE3_LEN)/2
+        LD BC,FX_LINE3_LEN
+        CALL FX_PRSRW
+        LD A,%11110001                          ; как заголовок IERP
+        CALL FX_PRIAT
+FILEX_HALT:
+        DI
+        HALT
+FX_PRWOW                      EQU #792C         ; входы WCIF (сверка — AUTOEXEC.ASM)
+FX_PRSRW                      EQU #7D25
+FX_PRIAT                      EQU #7D39
+; Claude - 2026-10-11 - begin
+; Входы и данные WC страницы #05 для ZCG_RECOVER и MEDIA_IDLE_CODE (сверка —
+; AUTOEXEC.ASM).
+WC_PRWOW                      EQU #792C
+WC_PRSRW                      EQU #7D25
+WC_RRESB                      EQU #7ACE
+WC_CURSOR                     EQU #7CD5
+WC_DRACT                      EQU #6868
+WC_ORIGA                      EQU #63ED         ; MD20 L6011_46: DEVINI, HDD, корень, FOLD
+WC_WINDOW                     EQU #7EA0         ; описатели панелей (WCVLS)
+WC_WINDO2                     EQU #7EC4
+WC_XPAN                       EQU #6149         ; MD20 Xpan: IX — другая панель
+WC_STATUS                     EQU #8723         ; WCFX.STATUS (страница WC в #8000 у MAIN)
+; Claude - 2026-10-11 - end
+FX_W                          EQU 44
+; Описатель — как IMWND с продолжением INIWND (WCINI): PRWOW читает поля до
+; +#15. Окно на строку выше IMWND и на две строки выше ростом.
+FX_WINDOW:
+        DB 3+16,0
+        DB 18,12                                ; X,Y
+        DB FX_W,3+2                             ; W,H
+        DB %00011111                            ; цвета фона и текста
+        DB 0
+        DW #0000                                ; буфер окна
+        DB 0,0                                  ; число строк
+        DB 0,0,0,0,0,0,0,0
+        DW #FFFF
+FX_LINE1:       DB "Core extension plugin: FILEX.WMF"
+FX_LINE1_LEN                  EQU $-FX_LINE1
+FX_MISSING:     DB "was not found in folder /WC."
+FX_MISSING_LEN                EQU $-FX_MISSING
+FX_FOREIGN:     DB "in folder /WC doesn't match boot.$C."
+FX_FOREIGN_LEN                EQU $-FX_FOREIGN
+FX_LINE3:       DB "Commander cannot work. HALT."
+FX_LINE3_LEN                  EQU $-FX_LINE3
+        ; Строки — по центру, отступы поровну (длины чётные, как FX_W).
+        ASSERT (FX_W-FX_LINE1_LEN)%2 == 0 && (FX_W-FX_MISSING_LEN)%2 == 0
+        ASSERT (FX_W-FX_FOREIGN_LEN)%2 == 0 && (FX_W-FX_LINE3_LEN)%2 == 0
+; Claude - 2026-10-10 - begin
+; GIPAG_FILE (GFILE — API 62 и выбор файла L6011_228 в MD20, вместо GIPAG):
+; выбрать поток файла. Кластер 0 у файла — пустой файл: поток сразу в конце
+; (TOS и EOC=#0F, как GIPAG у метки конца — NZ, CF=0), а не корень: прежде
+; SAVE512 писал в корень. Первый кластер из цепочки корня — порча (файл на
+; кластере корня): ABT=#FE, EOC=#FF, CF=1 (ID_FILE_START_CHECK). Иначе GIPAG.
+; HL — указатель на кластер — сохраняется вокруг шлюза: функция оставляет в HL
+; сам номер, и GIPAG прочитал бы кластер не оттуда (стенд F5 2026-10-10: поток
+; копии вставал не на её цепочку, SAVE512 отказывал, копия откатывалась).
+; GIPAGPL (API 50, #7F28) сюда не ведёт: WC сам ставит им поток и на каталог,
+; в том числе на корень (кластер 0).
+GIPAG_FILE_CODE:
+        PUSH HL
+        LD A,(HL):INC HL:OR (HL):INC HL:OR (HL):INC HL:OR (HL)
+        POP HL
+        JR Z,.empty
+        PUSH HL
+        CALL @WDOS.EXTENSION_GATE
+        DB ID_FILE_START_CHECK
+        POP HL
+        JP NC,@WDOS.GIPAG
+        RET
+.empty:
+        CALL @WDOS.TOS
+        JP @WDOS.MDC
+; Claude - 2026-10-10 - end
+; Claude - 2026-10-11 - begin
+; Вынутая карта SD-ZC (ZC_GUARD_PATCH ставит эти входы в таблицу драйвера).
+; Перед каждым чтением и записью — проверка, отвечает ли карта (ZCG_PROBE).
+; Не загрузочная карта не отвечает — отказ обмена (ABT=1), как у отказа
+; носителя. Загрузочная — окно «Insert boot drive» до её возврата
+; (ZCG_RECOVER), затем отказ этого и всех следующих обменов с ней до MAIN
+; (MEDIA_FENCE): карту могли менять на ПК, и прерванная операция не должна
+; писать по прежним номерам кластеров. MAIN перемонтирует её панели
+; (MEDIA_IDLE_CODE). Карту, вынутую посреди обмена (между проверкой и концом
+; команды), драйвер по-прежнему ждёт без предела.
+; ZCG_RECOVER: загрузочная карта не отвечает. Окно и попытки SDINI (без карты
+; каждая — 8000 CMD0, около секунды на 3,5 МГц) до её ответа; затем BPB
+; загрузочного тома (BOOT_LBA: ADDTOP при перемонтировании мог быть уже сброшен
+; — читался MBR, своя карта «чужая», Codex, пятый круг) — в свою страницу,
+; серийный номер (+#43) сверяется с запомненным при старте (BOOT_DRIVE_NOTE).
+; Чужая карта — «Wrong drive», ждать, пока её вынут. Своя — кэш FAT
+; недействителен (карта могла измениться), окно убрано, позиция драйвера
+; (BLKNUM, её сменил PROZ) — прежняя, буферы вызывающего не тронуты. Пока
+; MAIN_SEEN=0 — при старте WC и на время перемонтирования в MEDIA_IDLE — Z:
+; прерванный обмен повторить (снять забор там некому). Иначе MEDIA_FENCE=1 и
+; NZ. Страницы окон #8000/#C000, их копии #6002/#6003 и IX — как на входе;
+; прерывания не трогаются. Разрушает AF, BC, DE, HL и AF'.
+ZCG_RECOVER:
+        LD HL,(ZC_BLKNUM)
+        PUSH HL
+        LD HL,(ZC_BLKNUM+2)
+        PUSH HL
+        LD BC,#12AF
+        IN D,(C)
+        INC B
+        IN E,(C)
+        PUSH DE
+        LD HL,(#6002)
+        PUSH HL
+        PUSH IX
+        LD IX,ZCG_WINDOW
+        CALL .open
+.init:
+        CALL ZC_SDINI
+        JR NZ,.init
+        LD HL,(BOOT_LBA)
+        LD DE,(BOOT_LBA+2)
+        CALL ZC_PROZ
+        ; BPB — в свою страницу (WC_PHYS_MEDIA_PAGE в окне #8000), а не в
+        ; SECBU: там мог ждать записи сектор FAT, и повтор обмена писал бы BPB
+        ; в FAT (Codex, шестой круг). Пул фона окон тоже не годился: полный
+        ; пул оставлял без сверки, и чужая карта сходила за свою (седьмой
+        ; круг). Буферы вызывающего и пул не трогаются.
+        LD A,@WC_PHYS_MEDIA_PAGE
+        LD (#6002),A                            ; копия — для DMA драйвера
+        LD BC,#12AF
+        OUT (C),A
+        LD HL,#8000
+        LD A,1
+        CALL ZC_RDDSE
+        CALL @WDOS.FAT_CACHE_BUMP               ; карта могла измениться
+        LD HL,#8000+#43                         ; серийный номер тома
+        LD DE,BOOT_SERIAL
+        LD B,4
+.serial:
+        LD A,(DE)
+        CP (HL)
+        JR NZ,.wrong
+        INC HL
+        INC DE
+        DJNZ .serial
+        CALL WC_RRESB
+        POP IX
+        POP HL
+        LD (#6002),HL
+        POP DE
+        LD BC,#12AF
+        OUT (C),D
+        INC B
+        OUT (C),E
+        POP HL
+        LD (ZC_BLKNUM+2),HL
+        POP HL
+        LD (ZC_BLKNUM),HL
+        LD A,(MAIN_SEEN)
+        OR A
+        RET Z                                   ; старт WC: повторить обмен
+        LD (MEDIA_FENCE),A                      ; NZ
+        RET
+.wrong:
+        LD HL,ZCG_WRONG                         ; та же строка: текст длиннее
+        LD DE,ZCG_ROW*256+(ZCG_W-ZCG_WRONG_LEN)/2 ; и закрывает прежний
+        LD BC,ZCG_WRONG_LEN
+        CALL WC_PRSRW
+.out:
+        CALL ZCG_PROBE
+        JR Z,.out                               ; чужая карта ещё на месте
+        CALL WC_RRESB                           ; окно заново — с прежним текстом
+        CALL .open
+        JR .init
+.open:
+        CALL WC_PRWOW
+        LD HL,ZCG_INSERT
+        LD DE,ZCG_ROW*256+(ZCG_W-ZCG_INSERT_LEN)/2
+        LD BC,ZCG_INSERT_LEN
+        JP WC_PRSRW
+
+; MEDIA_IDLE (MAIN вместо CALL CURSOR): загрузочную карту вынимали и вернули —
+; снять MEDIA_FENCE и перемонтировать каждую панель на ней, как выбор диска
+; (WCFX.SLM: (IX+#1C)=0, DRACT, ORIGA — DEVINI, HDD, корень, список), затем
+; DRACT своей панели и строку состояния второй. Перемонтирование только
+; читает, поэтому на его время MAIN_SEEN=0: вынутую ещё раз карту ZCG_RECOVER
+; не обносит забором, а повторяет обмен — иначе цикл выбора диска в ORIGA к
+; MAIN не выходил, и забор не снимался (Codex, шестой круг). Дальше — CURSOR.
+MEDIA_IDLE_CODE:
+        LD A,(MEDIA_FENCE)
+        OR A
+        JR NZ,.remount
+        INC A
+        LD (MAIN_SEEN),A                        ; старт WC позади (ZCG_RECOVER)
+        JP WC_CURSOR
+.remount:
+        XOR A
+        LD (MEDIA_FENCE),A
+        LD (MAIN_SEEN),A                        ; на время перемонтирования — повтор
+        LD A,(BOOT_CS)
+        LD E,1                                  ; DOS_SWP: SD ZC
+        CP ZC_CS_SLOT1
+        JR Z,.code
+        LD E,6                                  ; второй SD ZC
+.code:
+        PUSH IX
+        LD IX,WC_WINDOW
+        CALL .panel
+        LD IX,WC_WINDO2
+        CALL .panel
+        POP IX
+        CALL WC_DRACT
+        CALL WC_XPAN                            ; строка состояния второй
+        CALL WC_STATUS                          ; панели — как в WC_ENTRY:
+        CALL WC_XPAN                            ; ORIGA рисует только список
+        LD A,1
+        LD (MAIN_SEEN),A
+        JP WC_CURSOR
+.panel:
+        LD A,(IX+#1D)                           ; устройство панели (DOS_SWP)
+        CP E
+        RET NZ
+        PUSH DE
+        LD (IX+#1C),0
+        CALL WC_DRACT
+        CALL WC_ORIGA
+        POP DE
+        RET
+
+ZC_CS_SLOT1                   EQU %00000001     ; SELDEV: первый слот ZC
+ZCG_W                         EQU 37
+; Описатель — как ERWND (окно ошибки WC, «UNKNOWN ERROR!!»): красное, по
+; центру экрана (X/Y 255 — PRWOW вычисляет). Две строки: первая пустая, текст
+; во второй (ZCG_ROW) — над ним пустая строка под полосой заголовка, под ним
+; нижняя рамка: по вертикали симметрично (пожелание пользователя).
+ZCG_ROW                       EQU 2
+ZCG_WINDOW:
+        DB 4+16+128,0
+        DB 255,255                              ; X,Y
+        DB ZCG_W,2+2                            ; W,H
+        DB %00101111                            ; фон красный, текст белый
+        DB 0
+        DW #0000                                ; буфер фона — даст PRWOW
+        DB 0,0
+        DB 0,0,0,0,0,0,0,0
+        DW #FFFF
+ZCG_INSERT:     DB "Insert boot drive"
+ZCG_INSERT_LEN                EQU $-ZCG_INSERT
+ZCG_WRONG:      DB "Wrong drive - insert boot drive"
+ZCG_WRONG_LEN                 EQU $-ZCG_WRONG
+ZCG_SPG:        DB "SPG load failed - press reset"
+ZCG_SPG_LEN                   EQU $-ZCG_SPG
+        ; Строки — по центру окна, отступы поровну.
+        ASSERT (ZCG_W-ZCG_INSERT_LEN)%2 == 0 && (ZCG_W-ZCG_WRONG_LEN)%2 == 0
+        ASSERT (ZCG_W-ZCG_SPG_LEN)%2 == 0
+
+; Загрузчик SPG (WCVW: KOVR, SPGPKD) не прочитал блок — LOAD512 с CF=1:
+; отказ носителя или вынутая загрузочная карта (после её возврата обмены до
+; MAIN отказывают, ZCG_RECOVER). Прежде загрузчик ошибку не смотрел и
+; запускал программу без блока; а окно восстановления, его фон (пул #1D) и
+; BPB в #EA могли лечь поверх уже прочитанных блоков (Codex, восьмой круг).
+; Вернуться в WC нельзя: блоки SPG уже затёрли его страницы, загрузчик — окно
+; #0000. Красное окно и останов: нужен сброс. Страница #05 с WC и этим кодом
+; до конца чтения цела (её блок SPG ждёт в D5PG).
+SPG_FAIL_CODE:
+        LD IX,ZCG_WINDOW
+        CALL WC_PRWOW
+        LD HL,ZCG_SPG
+        LD DE,ZCG_ROW*256+(ZCG_W-ZCG_SPG_LEN)/2
+        LD BC,ZCG_SPG_LEN
+        CALL WC_PRSRW
+        DI
+        HALT
+BOOT_CS:        DB 0                    ; 0 — не записан; #FF — не SD-ZC
+BOOT_SERIAL:    DS 4
+BOOT_LBA:       DS 4                    ; сектор BPB загрузочного тома
+        ASSERT BOOT_LBA == BOOT_SERIAL+4, BOOT_DRIVE_NOTE пишет их одним LDIR
+MEDIA_FENCE:    DB 0                    ; ≠0 — до MAIN обмен с ней — отказ
+MAIN_SEEN:      DB 0                    ; ≠0 — MAIN уже прошёл (MEDIA_IDLE)
+; Claude - 2026-10-11 - end
+RESIDENT2_END:
+        ENT
+RESIDENT2_LENGTH              EQU RESIDENT2_END-RESIDENT2_START
+        ASSERT RESIDENT2_BASE+RESIDENT2_LENGTH <= @WDOS.DEHR, второй резидентный блок налез на DEHR
+        ASSERT @WMF_RUNTIME_BASE+WMF_INSTALL_LENGTH <= RESIDENT2_BASE, код WMF налез на второй резидентный блок
+; Claude - 2026-10-10 - end
+; Claude - 2026-09-27 - end
+INSTALL_IMAGE_END:
+        ASSERT INSTALL_IMAGE_END <= #10000, установочный образ вышел за страницу #E8
+        ASSERT @WMF_RUNTIME_BASE+WMF_INSTALL_LENGTH <= @WMF_RUNTIME_LIMIT, WMF пересёк DEHR
+
+; Claude - 2026-10-10 - begin
+; Оверлей FILEX. Код ниже нужен только после того, как WC загрузил
+; обязательный FILEX.WMF: создание, переименование и удаление записей,
+; APPEND, выделение места и запись FAT, псевдонимы ~N, дерево F5/F8, часы
+; штампов и строка состояния. Он собран здесь, по адресам с RUNTIME_END,
+; но в boot.$C не входит: build.ps1 отрезает его байты от загрузочной части
+; (Build/CORE32_EXT_OVL.bin), их везёт FILEX.WMF, и его установщик (ранняя
+; установка, сразу после загрузки FILEX) копирует их сюда, сверив штамп
+; EXT_STAMP. До этого на месте оверлея — установочный образ WMF, затем HALT
+; (EXT_INSTALL_TAIL): старт WC до FILEX сюда не заходит — монтирование,
+; чтение каталогов и файлов остаются в загрузочной части. Без FILEX или с
+; чужим FILEX ядро останавливается с сообщением (FILEX_REQUIRED).
+        ORG RUNTIME_END
+OVERLAY_START:
+; Claude - 2026-10-10 - end
+
+; Codex - 2026-07-17 - begin
 ; GENTRY (ID_COPY_TO_ENTRY): перенос 32 байт из HL в рабочую ENTRY — ровно
 ; то, что GENTRY делал всегда. Внешние плагины зовут его напрямую (#4033) и
 ; ждут простого переноса, поэтому время здесь не ставится.
@@ -404,10 +2744,15 @@ RENAME_ENTRY:
         POP HL                                  ; новое имя
         POP DE                                  ; прежний запрос
         RET Z                                   ; прежней записи нет
+; Claude - 2026-10-10 - begin
+        ; «.» и «..» не переименовываются: «..» → «x» создавал подкаталог,
+        ; указывающий на родителя (петля), и стирал «..» (API 74; драйвер, R9).
+        LD A,(BC):CP ".":LD A,8:RET Z
+; Claude - 2026-10-10 - end
         CALL RENAME_MARK_OLD                    ; где лежит прежняя SFN (BC — она)
-        LD A,(@WDOS.ENTRY+11)
-        LD (RENAME_ATTR),A                      ; атрибут целиком — ENTREZ его урежет
         PUSH DE
+        ; Claude - 2026-10-10: атрибут прежней записи (ENTRY+11 = EFLG) SVHDFL
+        ; пишет в новую целиком сам; RENAME_KEEP_ATTR с отдельной записью убран.
         CALL @WDOS.SVHDFL                       ; запись с новым именем из ENTRY
         POP HL                                  ; прежний запрос
         JR NZ,.not_created
@@ -417,7 +2762,6 @@ RENAME_ENTRY:
         CALL @WDOS.DELEN
         JR Z,.recheck
 .done:
-        CALL RENAME_KEEP_ATTR                   ; вернуть атрибут новой записи
         XOR A
         INC A
         RET                                     ; NZ — переименовано
@@ -429,6 +2773,9 @@ RENAME_ENTRY:
 ; находит. Поэтому сектор прежней SFN читается заново: новая запись остаётся,
 ; только если на месте прежней лежит #E5. Не читается или место неизвестно —
 ; откат: потерянная цепочка лучше двух записей на одной.
+; Claude - 2026-10-10: прежняя SFN не просто перечитывается, а добивается по
+; месту (RENAME_OLD_GONE): переименование доводится, откат — лишь если её не
+; пометить и тремя записями.
 .recheck:
         CALL RENAME_OLD_GONE
         JR Z,.done
@@ -437,9 +2784,22 @@ RENAME_ENTRY:
 ; valid!»). DELEN при ошибке чтения каталога возвращает A=8 с CF=1 — это не
 ; «новой нет», а неизвестность: A=#FF.
 .undo:
+; Claude - 2026-10-10 - begin
+        ; Каталог не прочитался — до трёх попыток. Отказ записи не повторяется:
+        ; DELETE_ENTRY_WITH_LFN пишет LFN раньше SFN, и после частичной записи
+        ; повторный поиск не нашёл бы имени при живой SFN — «откатано» при двух
+        ; записях на цепочке. Там честнее A=#FF.
+        LD B,3
+.undo_try:
+        PUSH BC
         LD HL,@WDOS.NXTBU
         CALL @WDOS.DELEN                        ; только запись, цепочку не освобождать
-        JR C,.lost                              ; каталог не прочитан
+        POP BC
+        JR NC,.undo_read
+        DJNZ .undo_try
+        JR .lost                                ; каталог не прочитан
+.undo_read:
+; Claude - 2026-10-10 - end
         JR NZ,.rolled                           ; новая удалена
         CP 8:JR NZ,.lost                        ; новая не удалена
 .rolled:
@@ -487,42 +2847,47 @@ RENAME_MARK_OLD:
         LD (RENAME_OLD_OFFSET),HL
         RET
 
-; Claude - 2026-09-26 - begin
-; Смещение короткой записи в её секторе. Вход: BC — запись в LOBU/LOBU2 (после
-; SRHDRN или XFENTRY). Выход: CF=0, HL — смещение 0..511; CF=1 — BC не
-; указывает на начало записи в этих буферах. Портит A.
-ENTRY_OFFSET:
-        LD A,C:AND #1F:JR NZ,.no
-        LD A,B:SUB high @WDOS.LOBU:CP 4:JR NC,.no
-        AND 1:LD H,A,L,C                        ; AND сбросил CF
-        RET
-.no:
-        SCF
-        RET
-; Claude - 2026-09-26 - end
-
-; Z — короткая запись прежнего имени на носителе помечена удалённой (#E5).
-; NZ — она на месте, её сектор не читается или место неизвестно.
+; Claude - 2026-10-10 - begin
+; Z — короткая запись прежнего имени на носителе удалена (#E5): уже была или
+; помечена здесь по месту — до трёх записей «прочитать — пометить — записать»
+; с перечитыванием (драйвер FAT32: ENTRY_KILL_AT, R8-1). Прежде только
+; проверялось, и при отказе удаления сразу шёл откат одной попыткой DELEN:
+; второй отказ подряд оставлял на цепочке две записи, и удаление любой
+; освобождало данные другой. Записи LFN прежнего имени в том же секторе здесь
+; не трогаются (DELETE_ENTRY_WITH_LFN метит их в той же неудавшейся записи):
+; осиротевшие LFN без короткой записи читатели пропускают.
+; NZ — запись не пометить, сектор не читается или место неизвестно.
 RENAME_OLD_GONE:
         LD A,(RENAME_OLD_OFFSET+1):CP 2:RET NC  ; #FF — место неизвестно, NZ
-        LD C,3                                  ; попытки чтения
-.read:
+        LD C,4                                  ; три записи и проверка
+.try:
         PUSH BC
+        CALL .position
+        CALL READ_SECTORS
+        POP BC
+        JR NZ,.next                             ; не прочитан — ещё раз
+        LD HL,@WDOS.LOBU,DE,(RENAME_OLD_OFFSET)
+        ADD HL,DE
+        LD A,(HL):CP #E5:RET Z                  ; удалена
+        LD A,C:DEC A:JR Z,.fail                 ; записей больше не будет
+        LD (HL),#E5
+        PUSH BC
+        CALL .position
+        CALL WRITE_SECTORS
+        POP BC
+        RET Z                                   ; легла
+.next:
+        DEC C
+        JR NZ,.try
+.fail:
+        OR 1
+        RET
+.position:
         LD HL,(RENAME_OLD_LBA),DE,(RENAME_OLD_LBA+2)
         CALL @WDOS.PROZ
         LD HL,@WDOS.LOBU,A,1
-        CALL READ_SECTORS
-        POP BC
-        JR Z,.got
-        DEC C
-        JR NZ,.read
-        OR 1                                    ; не читается: NZ
         RET
-.got:
-        LD HL,@WDOS.LOBU,DE,(RENAME_OLD_OFFSET)
-        ADD HL,DE
-        LD A,(HL):CP #E5
-        RET
+; Claude - 2026-10-10 - end
 
 ; MKDIR (ID_MKDIR, вход ядра #403C): создать каталог. Вход: HL — имя с нулём.
 ; Выход: Z — создан; NZ — ошибка, A — код (16 — нет места, 1–4 — имя, из них 2
@@ -628,13 +2993,37 @@ MKDIR_ENTRY:
 ; кластером); иначе NZ — запись есть и указывает на FCTS, Z — записи нет.
 ; FCTS (первый кластер для DELCHA) сохраняется.
 ENTRY_LANDED:
+; Claude - 2026-10-10 - begin
+        ; ABT=#FE — SVHDFL отказал на испорченной цепочке каталога (открытие
+        ; или обход, до любой записи): записи нет. Прежде поиск по тому же
+        ; каталогу отказывал, исход «неизвестен», и выделенная MKFILE/MKDIR
+        ; цепочка оставалась потерянной (драйвер FAT32, утечка).
+        LD A,(@WDOS.ABT)
+        CP #FE
+        JR NZ,.search
+        XOR A                                   ; Z, CF=0 — записи нет
+        RET
+.search:
+        ; Отказ чтения — до трёх попыток (драйвер FAT32): одиночный отказ после
+        ; легшей с ошибкой записи оставлял RENAME с двумя записями на одной
+        ; цепочке и A=#FF (Codex, двойной отказ 13 land + 14 drop).
+        LD B,3
+.try:
+        PUSH BC
+; Claude - 2026-10-10 - end
         LD HL,@WDOS.FCTS,DE,LANDED_CLUSTER,BC,4:LDIR
         LD HL,@WDOS.NXTBU
         CALL @WDOS.SRHDRN
         PUSH AF,HL,DE
         LD HL,LANDED_CLUSTER,DE,@WDOS.FCTS,BC,4:LDIR
         POP DE,HL,AF
-        RET C                                   ; ошибка чтения
+; Claude - 2026-10-10 - begin
+        POP BC
+        JR NC,.read
+        DJNZ .try
+        RET                                     ; CF=1 — каталог так и не прочитался
+.read:
+; Claude - 2026-10-10 - end
         RET Z                                   ; записи нет
         LD BC,(LANDED_CLUSTER):OR A:SBC HL,BC:JR NZ,.foreign
         LD HL,(LANDED_CLUSTER+2):SBC HL,DE:JR NZ,.foreign
@@ -745,54 +3134,11 @@ DIR_ALIVE_ENTRY:
         POP HL
         OR 1
         RET
-
-; ENTREZ пишет в байт атрибута новой записи только бит каталога: «только
-; чтение», «скрытый», «системный» и «архив» переименованного файла терялись
-; (так было и в исходном ядре). Новая запись ищется по NXTBU — имени в том
-; виде, в каком его записал SVHDFL; её сектор читается заново, и лишь если по
-; вычисленному месту лежат те же 11 байт короткого имени, что нашёл поиск, в
-; нём правится один байт атрибута и сектор пишется обратно: соседние записи в
-; нём — ровно те, что на диске. Любая неясность — атрибут остаётся урезанным,
-; но ничего чужого не трогается. Итог правки не проверяется: переименование
-; уже состоялось, и RENAME сообщает NZ, даже если байт атрибута не записан.
-RENAME_KEEP_ATTR:
-        LD HL,@WDOS.NXTBU                       ; [тип, новое имя, 0] от SVHDFL
-        CALL @WDOS.SRHDRN
-        RET Z                                   ; новая запись не нашлась
-        LD A,(RENAME_ATTR)
-        LD HL,@WDOS.ENTRY+11
-        CP (HL)
-        RET Z                                   ; атрибут и так прежний
-        CALL ENTRY_OFFSET                       ; BC — запись в LOBU/LOBU2
-        RET C
-        LD (RENAME_OFFSET),HL                   ; смещение записи в её секторе
-        LD HL,(@WDOS.LLHL),DE,(@WDOS.LLHL+2)
-        LD (RENAME_LBA),HL,(RENAME_LBA+2),DE
-        CALL @WDOS.PROZ
-        LD HL,@WDOS.LOBU,A,1
-        CALL READ_SECTORS
-        RET NZ
-        LD HL,@WDOS.LOBU,DE,(RENAME_OFFSET)
-        ADD HL,DE
-        PUSH HL
-        LD DE,@WDOS.ENTRY,B,11
-.same:
-        LD A,(DE):CP (HL):JR NZ,.other
-        INC DE,HL
-        DJNZ .same
-        POP HL
-        LD DE,11:ADD HL,DE
-        LD A,(RENAME_ATTR)
-        LD (HL),A
-        LD (@WDOS.ENTRY+11),A
-        LD HL,(RENAME_LBA),DE,(RENAME_LBA+2)
-        CALL @WDOS.PROZ
-        LD HL,@WDOS.LOBU,A,1
-        JP WRITE_SECTORS
-.other:
-        POP HL
-        RET
 ; Claude - 2026-09-25 - end
+
+; Claude - 2026-10-10: RENAME_KEEP_ATTR (атрибут новой записи — отдельной
+; записью сектора после переименования) убран: SVHDFL пишет полный атрибут
+; сразу (SVHDFL_ATTR ядра).
 
 ; Текущие время и дата FAT из часов CMOS. Выход: HL — время, DE — дата.
 ; У каждого поля проверяются BCD и диапазон, у дня — длина месяца
@@ -826,10 +3172,10 @@ CLOCK_NOW:
 .moved:
         DEC C
         JR NZ,.snapshot
-        JR CLOCK_BROKEN                         ; так и не встали — считаем сбитыми
+        JP CLOCK_BROKEN                         ; так и не встали — считаем сбитыми
 .broken_pop:
         POP BC
-        JR CLOCK_BROKEN
+        JP CLOCK_BROKEN
 .stable:
 ; Дата FAT: (год-1980)<<9 | месяц<<5 | день; год часов считается от 2000.
         LD A,(RTC_VALUES+5)
@@ -878,79 +3224,10 @@ CLOCK_NOW:
 ; проверкой, что у CHECK_STAMP (провал — 2026-01-01 00:00), — выполнение
 ; переходит в неё. Время часов уже в пределах, его проверка ничего не меняет.
 
-; Claude - 2026-09-26 - begin
-; CHECK_STAMP (ID_CHECK_STAMP): штамп FAT с носителя — для программы. Вход:
-; HL — время, DE — дата. Выход: CF=0 — штамп есть в календаре, HL и DE прежние;
-; CF=1 — нет (STAMP_IN_CALENDAR): HL=0, DE — 2026-01-01. Портит A, BC. Зовут
-; API 58 ядра (NXTETY2) и FILEX.
-CHECK_STAMP:
-        CALL STAMP_IN_CALENDAR
-        RET NC
-CLOCK_BROKEN:
-        LD HL,0                                 ; 00:00:00
-        LD DE,STAMP_FALLBACK_DATE
-        RET
+; Claude - 2026-10-10: CHECK_STAMP и календарь — в загрузочной части (их
+; зовёт и NXTETY2 — список каталога, который не должен зависеть от FILEX).
+        JP CHECK_STAMP
 
-STAMP_FALLBACK_DATE EQU (2026-1980)<<9 | 1<<5 | 1
-
-; Есть ли штамп FAT в календаре. Вход: DE — дата, HL — время. Выход: CF=0 —
-; есть; CF=1 — нет: месяц не 1..12, день не 1..длина месяца (февраль года,
-; кратного 4, — 29 дней; 2100-й тоже считается високосным, до него счёт
-; точен), часы больше 23, минуты или секунды больше 59. Год FAT — любой
-; (1980..2107). HL и DE сохраняются, портит A, BC.
-STAMP_IN_CALENDAR:
-        LD A,E
-        AND 31
-        JR Z,.bad                               ; дня 0 нет
-        LD C,A                                  ; день
-        LD A,D
-        RRA                                     ; CF — старший бит месяца
-        LD B,A                                  ; год от 1980: AND сбросил CF
-        LD A,E
-        RRA
-        RRCA
-        RRCA
-        RRCA
-        RRCA
-        AND 15                                  ; месяц
-        DEC A
-        CP 12
-        JR NC,.bad                              ; месяцев 0 и 13..15 нет
-        CP 1
-        JR Z,.february
-; Месяц k+1 (k = 0..11) длиной 31 день, если k+[k<7] нечётно: январь, март,
-; май, июль, август, октябрь, декабрь; остальные — 30.
-        CP 7
-        ADC A,0
-        AND 1
-        ADD A,30
-.days:
-        CP C
-        RET C                                   ; день больше длины месяца
-; Время: часы<<11 | минуты<<5 | секунды/2.
-        LD A,L
-        AND 31
-        CP 30
-        JR NC,.bad                              ; секунды 60..63
-        LD A,H
-        CP 24<<3
-        JR NC,.bad                              ; часы 24..31
-        OR #F8                                  ; CF=0; #FF — минуты от 56
-        INC A
-        RET NZ
-        BIT 7,L
-        RET Z                                   ; минуты 56..59
-.bad:
-        SCF
-        RET
-.february:
-        LD A,B
-        AND 3
-        LD A,28
-        JR NZ,.days
-        INC A                                   ; високосный
-        JR .days
-; Claude - 2026-09-26 - end
 
 ; Прочитать шесть полей часов в DE — двоичные значения в порядке RTC_FIELDS —
 ; с проверкой BCD и диапазонов. Выход: CF=1 — поле испорчено.
@@ -1243,6 +3520,7 @@ APPEND_ERROR_SIZE_OVERFLOW EQU #24
 APPEND_ERROR_BAD_CHAIN     EQU #25
 APPEND_ERROR_IS_DIRECTORY  EQU #26
 APPEND_ERROR_INTERNAL      EQU #27
+APPEND_ERROR_READ_ONLY     EQU #28                  ; Claude - 2026-10-10
 APPEND_ERROR_ROLLBACK      EQU #2A
 
 ; Codex - 2026-07-27 - begin
@@ -1448,12 +3726,25 @@ APPEND_BYTES:
         ; Z — лёг (фиксация состоялась); CF — не прочитать: цепочку не трогать.
         CALL APPEND_DIR_OUTCOME
         JR Z,.committed
-        JR C,.restore_original_error
 ; Claude - 2026-09-25 - end
+; Claude - 2026-10-10 - begin
+        ; Исход неизвестен (запись каталога не прочитать) или откат не удался:
+        ; контекст FENTRY/APPEND снимается. Прежде он оставался, и повторный
+        ; APPEND сначала писал данные по старому EOF и лишь потом получал #23
+        ; (драйвер FAT32, R6).
+        JR C,.unknown
         CALL APPEND_ROLLBACK
         JR Z,.restore_original_error
         LD A,APPEND_ERROR_ROLLBACK
+        JR .forget
+.unknown:
+        LD A,(APPEND_LAST_ERROR)
+.forget:
+        PUSH AF
+        CALL FILEX_CONTEXT_BRIDGE.invalidate
+        POP AF
         JR .return_error
+; Claude - 2026-10-10 - end
 .restore_original_error:
         LD A,(APPEND_LAST_ERROR)
         JR .return_error
@@ -1488,6 +3779,18 @@ APPEND_PREPARE:
         LD A,(APPEND_ENTRY+11):BIT 4,A
         LD A,APPEND_ERROR_IS_DIRECTORY
         RET NZ
+; Claude - 2026-10-10 - begin
+        ; Файл «только для чтения» не дописывается (драйвер FAT32): прежде
+        ; проверялся лишь бит каталога.
+        LD A,(APPEND_ENTRY+11):BIT 0,A
+        LD A,APPEND_ERROR_READ_ONLY
+        RET NZ
+        ; Кластеры цепочки — в томе и не кластеры корня (CLASSIFY_DATA, таблица
+        ; корня — ROOT_BUILD): прежде APPEND к файлу, чья цепочка уходила в
+        ; корень или за том, писал туда (драйвер FAT32, R5).
+        CALL ROOT_BUILD
+        JP C,.bad_chain
+; Claude - 2026-10-10 - end
 
         LD HL,(APPEND_ENTRY+28),DE,(APPEND_ENTRY+30)
         LD (APPEND_SIZE),HL
@@ -1501,7 +3804,7 @@ APPEND_PREPARE:
         LD A,B:OR C:OR D:OR E:JR NZ,.nonzero_size
         LD HL,(APPEND_FIRST_CLUSTER),DE,(APPEND_FIRST_CLUSTER+2)
         LD A,D:OR E:OR H:OR L:JR Z,.empty_without_cluster
-        CALL CLASSIFY_FAT_LINK
+        CALL CLASSIFY_DATA                      ; Claude - 2026-10-10
         JP C,.bad_chain
         JP Z,.bad_chain
         LD (APPEND_CURRENT_CLUSTER),HL
@@ -1527,7 +3830,7 @@ APPEND_PREPARE:
 
 .nonzero_size:
         LD HL,(APPEND_FIRST_CLUSTER),DE,(APPEND_FIRST_CLUSTER+2)
-        CALL CLASSIFY_FAT_LINK
+        CALL CLASSIFY_DATA                      ; Claude - 2026-10-10
         JP C,.bad_chain
         JP Z,.bad_chain
         LD (APPEND_CURRENT_CLUSTER),HL
@@ -1571,6 +3874,8 @@ APPEND_PREPARE:
         CALL APPEND_READ_FAT_LINK
         JR C,.bad_chain
         JR Z,.bad_chain
+        CALL CLASSIFY_DATA                      ; Claude - 2026-10-10
+        JR C,.bad_chain
         LD (APPEND_CURRENT_CLUSTER),HL
         LD (APPEND_CURRENT_CLUSTER+2),DE
         LD HL,(APPEND_SKIP_COUNT),DE,(APPEND_SKIP_COUNT+2)
@@ -1583,6 +3888,29 @@ APPEND_PREPARE:
         JR .walk_chain
 
 .ready:
+; Claude - 2026-10-10 - begin
+; От кластера EOF до конца цепочки — не больше 255 ссылок: из цикла конец
+; недостижим, поэтому это ловит цикл где угодно в цепочке. Прежде APPEND при
+; цикле 3→4→3 писал в начало файла (драйвер FAT32, R5). Хвост длиннее 255
+; кластеров за EOF — тоже порча (потерянные кластеры).
+        LD HL,(APPEND_CURRENT_CLUSTER),DE,(APPEND_CURRENT_CLUSTER+2)
+        LD A,D:OR E:OR H:OR L:JR Z,.tail_done   ; пустой без кластера
+        LD B,255
+.tail:
+        PUSH BC                                 ; CURIT и CLASSIFY_DATA портят BC
+        CALL APPEND_READ_FAT_LINK
+        JR C,.tail_checked
+        JR Z,.tail_end                          ; конец цепочки
+        CALL CLASSIFY_DATA
+.tail_checked:
+        POP BC
+        JR C,.bad_chain
+        DJNZ .tail
+        JR .bad_chain
+.tail_end:
+        POP BC
+.tail_done:
+; Claude - 2026-10-10 - end
 ; Codex - 2026-07-28 - begin
         ; Новый FENTRY заново вычислил EOF. Старый LBA мог относиться к другому
         ; файлу, кластеру или геометрии тома и не переносится в новый контекст.
@@ -2016,31 +4344,6 @@ APPEND_ROLLBACK:
 ; Codex - 2026-07-27 - end
 ; Codex - 2026-07-17 - end
 
-; Вызвать драйвер чтения/записи с единым признаком результата в ABT.
-; Старые драйверы ABT не меняют и считаются успешными; исправленные драйверы
-; записывают туда ненулевой код ошибки. На выходе ошибка даёт NZ, CF=1 и
-; A=#FF (с 2026-09-26): прежде A был сырым кодом драйвера, и отказ записи FAT
-; в MKSG доходил до окна F7/F5 как код имени 1 — «Long Name is not valid!».
-READ_SECTORS:
-        PUSH AF
-        XOR A:LD (@WDOS.ABT),A
-        POP AF
-        CALL @WDOS.RDDSE
-        JR IO_RESULT
-
-WRITE_SECTORS:
-        PUSH AF
-        XOR A:LD (@WDOS.ABT),A
-        POP AF
-        CALL @WDOS.SDDSE
-
-IO_RESULT:
-        LD A,(@WDOS.ABT)
-        OR A:RET Z
-        LD A,#FF                                ; отказ носителя, NZ уже стоит
-        SCF
-        RET
-
 ; Записать нулевым буфером оставшиеся после первого секторы кластера.
 ; Вход: A — полное число секторов в кластере, HL — 512-байтовый нулевой
 ; буфер. LTHL:LTDE указывает на первый сектор. Каждый следующий LBA вычисляется
@@ -2066,113 +4369,7 @@ ZERO_CLUSTER_BUFFER_LOAD:
         LD A,B
         JR ZERO_CLUSTER_TAIL_NEXT
 
-; Claude - 2026-10-01 - begin
-; CLASSIFY_FAT_LINK, CLASSIFY_ORDINARY, CLASSIFY_INVALID и CLASSIFY_IN_VOLUME —
-; в резидентном блоке (конец файла): ядро зовёт проверку ссылки напрямую.
-; Claude - 2026-10-01 - end
 ; Claude - 2026-09-27 - begin
-; CLASSIFY_DATA (ID_CLASSIFY_DATA — DLSG ядра; FILE_CHAIN): CLASSIFY_IN_VOLUME,
-; и кластер цепочки корня недопустим. В цепочке файла и в освобождаемой
-; цепочке его быть не может, а испорченная запись файла на кластере корня
-; прежде проходила: F8 освобождал корень — том терял все имена, F5 копировал
-; сектор корня (Codex R28-01). С 2026-09-27 — любой кластер корня, не только
-; первый (Codex R27-04): таблицу строит ROOT_BUILD в начале DLSG
-; (NOTE_FREED_CHAIN) и FILE_CHAIN. Прочие кластеры чужих цепочек так не
-; ловятся (docs/01, 7.1). Выход — как у CLASSIFY_FAT_LINK; HL, DE сохраняются.
-CLASSIFY_DATA:
-        CALL CLASSIFY_IN_VOLUME
-        RET C                                   ; недопустимая
-        RET Z                                   ; EOC
-        CALL ROOT_MEMBER                        ; Z — кластер корня (0 уже отвергнут)
-; Claude - 2026-10-01 - begin
-        JP NZ,CLASSIFY_ORDINARY
-        JP CLASSIFY_INVALID
-; Claude - 2026-10-01 - end
-; Claude - 2026-09-27 - end
-
-; Claude - 2026-09-27 - begin
-; DIR_CHAIN: цепочка каталога DE:HL (0 — корень, BROOTC) конечна и в томе:
-; первый кластер — обычный, ссылки допустимы (0 — свободный кластер,
-; недопустимые, за областью данных — порча), конец (EOC) — не дальше 4096
-; секторов (каталог FAT32 — не больше 65536 записей; больше — цикл). Z —
-; цела; NZ — нет, в том числе при отказе чтения FAT. Сектор FAT читается,
-; только когда сменился: каталогу в одном секторе FAT — одно чтение (первое
-; — всегда, SECBU до обхода мог быть чужим). Зовут NXTINI (DIR_LIST_OPEN),
-; FNDSN и SVHDFL (DIR_STREAM_OPEN), TREE_CHILD: замкнутая цепочка каталога
-; вешала панель, поиск и создание (Codex R26-02). У подкаталога в цепочке нет
-; кластеров корня (ROOT_BUILD, с 2026-09-27): хвост, ушедший в корень, вёл
-; F8 дерева по именам корня (Codex R27-04). Разрушает AF, BC, DE, HL.
-DIR_CHAIN:
-        LD A,H:OR L:OR D:OR E
-        JR NZ,.first
-        LD HL,(@WDOS.BROOTC),DE,(@WDOS.BROOTC+2)
-.first:
-        CALL CLASSIFY_IN_VOLUME
-        JR C,.bad
-        JR Z,.bad                               ; маркер конца вместо кластера
-        LD BC,4096
-        LD (DIR_CHAIN_LEFT),BC
-        XOR A:LD (DIR_CHAIN_READ),A
-        LD (DIR_CHAIN_SUB),A
-        CALL TREE_CHILD_ENTRY.root              ; Z — сам корень: сверять не с чем
-        JR Z,.link
-        PUSH HL
-        PUSH DE
-        CALL ROOT_BUILD                         ; сектор FAT корня — в SECBU
-        POP DE
-        POP HL
-        JR C,.bad
-        LD A,1:LD (DIR_CHAIN_SUB),A
-.link:
-        LD A,(DIR_CHAIN_SUB):OR A
-        JR Z,.own
-        CALL ROOT_MEMBER
-        JR Z,.bad                               ; кластер корня в цепочке подкаталога
-.own:
-        PUSH HL
-        LD HL,(DIR_CHAIN_LEFT)
-        LD A,(@WDOS.BSECPC):LD C,A:LD B,0
-        OR A:SBC HL,BC
-        LD (DIR_CHAIN_LEFT),HL
-        POP HL
-        JR C,.bad                               ; длиннее 4096 секторов — цикл
-        CALL CHAIN_VALUE                        ; DE:HL — ссылка
-        JR C,.bad
-        CALL CLASSIFY_IN_VOLUME
-        JR C,.bad                               ; свободный, недопустимый, за томом
-        JR NZ,.link
-        RET                                     ; конец цепочки: Z
-.bad:
-        OR 1
-        RET
-
-; CHAIN_VALUE: значение записи FAT кластера DE:HL (DIR_CHAIN, FILE_CHAIN).
-; Сектор FAT читается CURIT в первый раз и затем, только когда сменился
-; (DIR_CHAIN_READ; SECBU до обхода мог быть чужим). Выход: DE:HL —
-; значение, CF=0; CF=1 — отказ чтения. Разрушает AF, BC.
-CHAIN_VALUE:
-        LD A,(DIR_CHAIN_READ):OR A
-        JR Z,.read
-        PUSH DE
-        PUSH HL
-        CALL @WDOS.STREAM_CACHE_SECTOR          ; Z — тот же сектор FAT, A — запись
-        POP HL
-        POP DE
-        JR NZ,.read
-        LD L,A:LD H,@WDOS.SECBU/1024
-        ADD HL,HL:ADD HL,HL                     ; её адрес в SECBU
-        JR .value
-.read:
-        CALL @WDOS.CURIT                        ; HL — запись FAT кластера
-        RET C
-        LD A,1:LD (DIR_CHAIN_READ),A
-.value:
-        LD E,(HL):INC HL:LD D,(HL):INC HL
-        LD A,(HL):INC HL:LD H,(HL):LD L,A
-        EX DE,HL
-        OR A                                    ; CF=0
-        RET
-
 ; FILE_CHAIN (ID_FILE_CHAIN, WCINI.CP_SOURCE — F5 файла): цепочка файла цела
 ; на всю длину данных. Первый вызов — A=0: HL → первый кластер, DE → размер
 ; (по 4 байта). Кластер 0 — только у пустого файла. Нужно ⌈размер/(512·SPC)⌉
@@ -2281,27 +4478,9 @@ FILE_CHAIN:
         LD HL,(FILE_CHAIN_LEFT+2):OR H:OR L
         POP HL
         RET
+; Claude - 2026-09-27 - end
 
-; DIR_LIST_OPEN (ID_DIR_LIST_OPEN, NXTINI): каталог LSTCAT — DIR_CHAIN, затем
-; GIPAG, как прежде. Испорчен — как отказ GIPAG: ABT=#FE, EOC=#FF, CF=1.
-DIR_LIST_OPEN:
-        LD HL,(@WDOS.LSTCAT),DE,(@WDOS.LSTCAT+2)
-        CALL DIR_CHAIN
-        JP NZ,FAT_LINK_ERROR
-        LD HL,@WDOS.LSTCAT
-        JP @WDOS.GIPAG
-
-; DIR_STREAM_OPEN (ID_DIR_STREAM_OPEN, FNDSN и SVHDFL): каталог LSTCAT —
-; DIR_CHAIN, затем поток на его начало: LSTCAT → CUHL/CUDE, TOS (NSDC=EOC=0),
-; выход CF=0. Испорчен — ABT=#FE, EOC=#FF, CF=1: поиск — FIND_IO_ERROR,
-; создание — SVHDFL_READ_ERROR (отказ носителя до любой записи).
-DIR_STREAM_OPEN:
-        LD HL,(@WDOS.LSTCAT),DE,(@WDOS.LSTCAT+2)
-        CALL DIR_CHAIN
-        JP NZ,FAT_LINK_ERROR
-        LD HL,@WDOS.LSTCAT,DE,@WDOS.CUHL,BC,4:LDIR
-        JP @WDOS.TOS
-
+; Claude - 2026-09-27 - begin
 ; DIR_GROW (ID_DIR_GROW, FIIL в SVHDFL): свободного места в каталоге нет.
 ; Z — цепочка ещё не кончилась (EOC=0): читать дальше, как прежде. Кончилась —
 ; продлить: каталог не больше 4096 секторов (65536 записей FAT32; запас —
@@ -2332,67 +4511,7 @@ DIR_GROW:
         OR A
         SCF
         RET
-
-; STREAM_LINK (ID_STREAM_LINK): переход потока по записи FAT, HL — запись в
-; SECBU (попадание кэша STREAM_NEXT_CACHED; промах — хвост STREAM_NEXT_CLUSTER).
-; Ноль там — свободный кластер: GIPAG понял бы его как корень (0 — вход
-; открытия корня), и поток шёл бы по корневому каталогу: чтение файла молча
-; подменялось (F5 копировал байты корня), SAVE512 писал в корень (Codex
-; R26-03). Ноль — порча ссылки, как недопустимые значения; иначе GIPAG.
-STREAM_LINK:
-        PUSH HL
-        LD A,(HL):INC HL:OR (HL):INC HL:OR (HL):INC HL:OR (HL)
-        POP HL
-        JP NZ,@WDOS.GIPAG
-        JP FAT_LINK_ERROR
-
-; CLASSIFY_FAT_LINK для ядра (ID_CLASSIFY_FAT_LINK: GIPAG — первый кластер и
-; каждый переход потока, DLSG, GIPP): обычный кластер за концом области
-; данных тома (FAT_DATA_CLUSTER_LIMIT) — тоже недопустимая ссылка. Последний
-; сектор FAT держит слоты за концом данных, и испорченная цепочка вела чтение
-; и запись за границу тома (Codex R25-03). Граница не задана (не больше 2:
-; том не монтирован HDD) — без проверки, как прежде. Прямые вызовы внутри
-; расширения — прежний CLASSIFY_FAT_LINK.
-; Claude - 2026-10-01: код CLASSIFY_IN_VOLUME — в резидентном блоке (конец файла).
 ; Claude - 2026-09-27 - end
-
-; Проверить четыре байта непосредственно перед HL, не меняя указатель.
-; Z означает точный маркер EOC, NZ — обычное значение или кластер.
-IS_EOC_BEFORE_HL:
-        PUSH HL
-        DEC HL
-        LD A,(HL):AND #0F:CP #0F:JR NZ,.no
-        DEC HL
-        LD A,(HL):CP #FF:JR NZ,.no
-        DEC HL
-        LD A,(HL):CP #FF:JR NZ,.no
-        DEC HL
-        LD A,(HL):CP #F8:JR C,.no
-        POP HL
-        XOR A
-        RET
-.no:
-        POP HL
-        LD A,1:OR A
-        RET
-
-; Зафиксировать повреждённую ссылку FAT и остановить текущую цепочку.
-RECORD_FAT_LINK_ERROR:
-        LD A,#FE
-        LD (@WDOS.ABT),A
-; Codex - 2026-07-16 - begin
-        ; ABT хранит точный код повреждения, а EOC унифицирован с обычным
-        ; концом цепочки: компактные исторические проверки ожидают #FF.
-        INC A
-; Codex - 2026-07-16 - end
-        LD (@WDOS.EOC),A
-        OR A
-        RET
-
-FAT_LINK_ERROR:
-        CALL RECORD_FAT_LINK_ERROR
-        SCF
-        RET
 
 ; Claude - 2026-09-27 - begin
 ; TREE_CHILD (ID_TREE_CHILD): можно ли обходу дерева F5/F8 (WCINI.DL_ENTER,
@@ -2412,7 +4531,7 @@ FAT_LINK_ERROR:
 TREE_CHILD_ENTRY:
         LD (DIR_ALIVE_CLUSTER),HL
         LD (DIR_ALIVE_CLUSTER+2),DE
-        CALL .root
+        CALL IS_ROOT_CLUSTER
         JP Z,.no                                ; 0 или сам корень — не подкаталог
         PUSH HL                                 ; сам текущий каталог (Codex R26-01)
         LD BC,(@WDOS.LSTCAT):OR A:SBC HL,BC
@@ -2448,7 +4567,7 @@ TREE_CHILD_ENTRY:
         JR NZ,.no                               ; «..» и 9 пробелов
         LD A,(@WDOS.LOBU+43):AND #10:JR Z,.no   ; «..» — не каталог
         LD HL,(@WDOS.LSTCAT),DE,(@WDOS.LSTCAT+2)
-        CALL .root
+        CALL IS_ROOT_CLUSTER
         JR Z,.at_root
         LD (DIR_ALIVE_CLUSTER),HL
         LD (DIR_ALIVE_CLUSTER+2),DE
@@ -2456,7 +4575,7 @@ TREE_CHILD_ENTRY:
         JP DIR_ALIVE_ENTRY.match                ; Z — «..» на родителя
 .at_root:
         LD HL,(@WDOS.LOBU+58),DE,(@WDOS.LOBU+52)   ; кластер «..»
-        CALL .root
+        CALL IS_ROOT_CLUSTER
         RET Z                                   ; «..» — корень
 .no:
         OR 1
@@ -2467,135 +4586,9 @@ TREE_CHILD_ENTRY:
         INC HL
         DJNZ .spaces
         RET
-; Z — DE:HL корень: 0 либо BROOTC. HL и DE сохраняются.
-.root:
-        LD A,H:OR L:OR D:OR E:RET Z
-        PUSH HL
-        LD BC,(@WDOS.BROOTC):OR A:SBC HL,BC
-        POP HL
-        RET NZ
-        PUSH HL
-        LD H,D:LD L,E
-        LD BC,(@WDOS.BROOTC+2):OR A:SBC HL,BC
-        POP HL
-        RET
+; Claude - 2026-09-27 - end
 
-; ROOT_BUILD: кластеры цепочки корня (от BROOTC) — в ROOT_CLUSTERS, их число —
-; в ROOT_COUNT, бит каждого (младшие 11 бит номера) — в ROOT_FILTER. Дальше
-; ROOT_MAX (768) не записываются: корень FAT32 — до 4096 секторов, и при
-; кластере от 4 КиБ (SPC ≥ 8, до 512 кластеров) таблица держит его целиком;
-; длиннее бывает только при SPC 1..4 и корне больше 768 кластеров (больше
-; 12288 записей при SPC=1) — дальние кластеры такого корня не защищены
-; (docs/04). Обход — до конца цепочки, недопустимой ссылки (свободный, за
-; томом) или до ROOT_MAX. Отказ чтения FAT — CF=1 и ROOT_FAILED≠0: ROOT_MEMBER
-; тогда считает корнем любой кластер. Таблица одна на все тома и панели,
-; поэтому строится заново перед каждым использованием: DLSG ядра
-; (NOTE_FREED_CHAIN), FILE_CHAIN, DIR_CHAIN подкаталога. Сектор FAT корня
-; остаётся в SECBU (DIR_CHAIN_READ=1). Разрушает AF, BC, DE, HL.
-ROOT_BUILD:
-        XOR A
-        LD (ROOT_FAILED),A
-        LD (DIR_CHAIN_READ),A                   ; первый сектор FAT — читать
-        LD HL,0:LD (ROOT_COUNT),HL
-        LD HL,ROOT_FILTER
-        LD DE,ROOT_FILTER+1
-        LD BC,255
-        LD (HL),A
-        LDIR
-        LD HL,(@WDOS.BROOTC),DE,(@WDOS.BROOTC+2)
-        LD BC,ROOT_CLUSTERS
-.cluster:
-        PUSH BC
-        CALL CLASSIFY_IN_VOLUME
-        POP BC
-        JR C,.done                              ; недопустимая ссылка
-        JR Z,.done                              ; конец цепочки
-        PUSH HL
-        LD HL,(ROOT_COUNT)
-        INC HL
-        LD (ROOT_COUNT),HL
-        PUSH BC
-        LD BC,ROOT_MAX+1
-        OR A:SBC HL,BC                          ; CF — место в таблице ещё было
-        POP BC
-        POP HL
-        JR NC,.full
-        LD A,L:LD (BC),A:INC BC
-        LD A,H:LD (BC),A:INC BC
-        LD A,E:LD (BC),A:INC BC
-        LD A,D:LD (BC),A:INC BC
-        PUSH HL
-        PUSH BC
-        CALL ROOT_BIT
-        LD A,(HL):OR B:LD (HL),A
-        POP BC
-        POP HL
-        PUSH BC
-        CALL CHAIN_VALUE
-        POP BC
-        JR NC,.cluster
-        LD A,1:LD (ROOT_FAILED),A
-        RET                                     ; CF=1
-.full:
-        LD HL,ROOT_MAX
-        LD (ROOT_COUNT),HL
-.done:
-        OR A
-        RET
-
-; ROOT_MEMBER: Z — кластер DE:HL (нормализованный) из цепочки корня
-; (ROOT_BUILD; при ROOT_FAILED≠0 — любой). Сначала бит фильтра: нет его — не
-; корень, таблица не просматривается. HL, DE сохраняются; разрушает AF, BC.
-ROOT_MEMBER:
-        LD A,(ROOT_FAILED):OR A
-        JR Z,.table
-        XOR A                                   ; FAT корня не прочиталась
-        RET
-.table:
-        PUSH HL
-        CALL ROOT_BIT
-        LD A,(HL):AND B
-        POP HL
-        JR Z,.no
-        LD BC,(ROOT_COUNT)
-        LD A,B:OR C:JR Z,.no
-        PUSH IX
-        LD IX,ROOT_CLUSTERS
-.next:
-        LD A,(IX+0):CP L:JR NZ,.skip
-        LD A,(IX+1):CP H:JR NZ,.skip
-        LD A,(IX+2):CP E:JR NZ,.skip
-        LD A,(IX+3):CP D:JR Z,.found
-.skip:
-        INC IX:INC IX:INC IX:INC IX
-        DEC BC:LD A,B:OR C:JR NZ,.next
-        POP IX
-.no:
-        OR 1
-        RET
-.found:
-        POP IX
-        RET
-
-; ROOT_BIT: бит фильтра корня для младшего слова кластера HL: HL — байт
-; ROOT_FILTER, B — маска. Разрушает AF.
-ROOT_BIT:
-        LD A,L:AND 7:LD B,A
-        LD A,H:AND 7:LD H,A
-        SRL H:RR L
-        SRL H:RR L
-        SRL H:RR L                              ; (кластер & 2047) / 8
-        PUSH DE
-        LD DE,ROOT_FILTER:ADD HL,DE
-        POP DE
-        LD A,B
-        LD B,1
-        OR A:RET Z
-.shift:
-        SLA B
-        DEC A:JR NZ,.shift
-        RET
-
+; Claude - 2026-09-27 - begin
 ; Записи одного каталога на кластерах отмеченных объектов F8 (Codex R27-04,
 ; частичная защита; WCINI.DL_ALIAS до первого удаления). Испорченная запись
 ; на первом кластере соседа, или каталог, чья цепочка проходит через первый
@@ -2898,6 +4891,25 @@ ALIAS_SCAN:
 ; «BOOT    $C», как у Windows, и ПЗУ находит boot.$C после замены файла;
 ; прежде выходило «BOOTJ$~1.$C».
 PLAIN_ALIAS:
+; Claude - 2026-10-10 - begin
+; Знаки CP866 #B0..#DF (псевдографика) и #F2..#FF в длинное имя не переводятся
+; (ORU знает латиницу, русские буквы и Ё/ё) — имя недопустимо, код 1. Прежде
+; они становились «ё»: F7 «Папка №2» создавал «Папка ё2», RENAME сообщал успех
+; под чужим именем, а MOVE не находил созданную ссылку и оставлял вторую запись
+; на цепочке (драйвер FAT32, R10-2). Короткое имя такие знаки хранит как есть
+; («№2»), поэтому проверка — только на пути длинного имени. Выход как у
+; VALIDATE_NAME: A=1, NZ (CF=1 — ENTREZ выходит по RET C; ABT=0 — не носитель).
+        ; С 2026-10-10 таблица переводит и #B0..#DF, #F2..#FE (OEM_TABLE):
+        ; под запретом остаётся #FF — неразрывный пробел даёт в сравнении имён
+        ; #FF, то есть конец имени.
+        LD HL,@WDOS.NXTBU
+.cp866:
+        INC HL
+        LD A,(HL):OR A:JR Z,.cp866_ok
+        INC A:JR NZ,.cp866
+        JP CLASSIFY_INVALID
+.cp866_ok:
+; Claude - 2026-10-10 - end
         LD HL,@WDOS.ENTRY
         LD A,(HL)
         CP " "+1
@@ -2929,117 +4941,6 @@ PLAIN_ALIAS:
         RET
 ; Claude - 2026-09-26 - end
 
-; Уточнить результат штатного анализатора SN/LN. Если исходное имя содержит
-; хотя бы один пробел, короткая 8.3-запись недопустима: ENTRY[0]=0 заставляет
-; генератор и поисковик использовать длинное имя.
-REFINE_NAME_CLASSIFICATION:
-        PUSH HL
-        LD HL,(@WDOS.CGDE)
-        INC HL
-.scan:
-        LD A,(HL):OR A:JR Z,.done
-        CP " ":JR Z,.force_lfn
-        INC HL
-        JR .scan
-.force_lfn:
-        XOR A:LD (@WDOS.ENTRY),A
-.done:
-        POP HL
-        LD A,1:OR A
-        RET
-
-; Codex - 2026-07-16 - begin
-; Проверить имя длиной 1..255 байт. DE запоминает позицию после последнего
-; значимого символа, поэтому конечная смесь пробелов и точек удаляется целиком.
-; Z означает корректное имя; NZ — пустое, длиннее 255 или содержащее
-; запрещённый символ.
-VALIDATE_NAME:
-        LD B,255
-        LD DE,0
-.scan:
-        LD A,(HL):OR A:JR Z,.terminated
-        CALL @WDOS.ENCEN:JR Z,.bad
-        CP " ":JR Z,.next
-        CP ".":JR Z,.next
-        LD DE,HL
-        INC DE
-.next:
-        INC HL
-        DJNZ .scan
-        LD A,(HL):OR A:JR NZ,.bad
-.terminated:
-        LD A,D:OR E:JR Z,.bad
-        XOR A
-        LD (DE),A
-; Claude - 2026-09-25 - begin
-; Имя — копия в NXTBU (зовёт только ENTREZ, с 2026-09-26 прямо, без ENVAL): ENTREZ копирует
-; 256 байт, и за концом имени лежал хвост буфера вызывающего — остатки
-; прежнего имени. Основа короткого имени (LONG) читает 8 знаков подряд и
-; брала их: у «A» выходило «AZPRIV~1». Хвост до конца страницы NXTBU — нули.
-        EX DE,HL
-.zero:
-        INC HL
-        LD A,H:OR A
-        JR NZ,.zeroed
-        LD (HL),A
-        JR .zero
-.zeroed:
-        XOR A                                   ; Z — имя годно
-; Claude - 2026-09-25 - end
-        RET
-.bad:
-        JP CLASSIFY_ORDINARY
-; Codex - 2026-07-16 - end
-
-; Начать симметричное сравнение LFN: начальные пробелы пропускаются и в
-; поисковом запросе, и в сохранённом UTF-16 имени. Внутренние пробелы остаются
-; значимыми.
-BEGIN_LFN_COMPARE:
-        LD A,1:LD (LFN_LEADING),A
-        RET
-
-; Совместимый заменитель ULNP.
-; CF=1 — текущий символ совпал и сравнение надо продолжить;
-; CF=0,Z=1 — несовпадение; CF=0,NZ — оба имени закончились одновременно.
-COMPARE_LFN_CHAR:
-        LD A,(LFN_LEADING):OR A:JR Z,.normal
-.skip_query_spaces:
-        LD A,(DE):CP " ":JR NZ,.leading_stored
-        INC DE
-        JR .skip_query_spaces
-.leading_stored:
-        CALL @WDOS.UCS
-        OR A:JR Z,.mismatch
-        CP " ":JR Z,.continue
-        LD C,A
-        XOR A:LD (LFN_LEADING),A
-        LD A,C:CALL @WDOS.ACS:LD C,A
-        LD A,(DE):OR A:JR Z,.decoded_end
-        INC DE
-        CALL @WDOS.ACS
-        CP C:JR Z,.continue
-        JR .mismatch
-.decoded_end:
-        LD A,C:INC A:JR NZ,.mismatch
-        JR .matched
-
-.normal:
-        LD A,(DE):INC DE:OR A:JR Z,.query_end
-        CALL @WDOS.ACS:LD C,A
-        CALL @WDOS.UCS:OR A:JR Z,.mismatch
-        CALL @WDOS.ACS:CP C:JR Z,.continue
-.mismatch:
-        XOR A
-        RET
-.continue:
-        SCF
-        RET
-.query_end:
-        CALL @WDOS.UCS:INC A:JR NZ,.mismatch
-.matched:
-        XOR A:INC A
-        RET
-
 ; ALLOCATE_FILE (MKFILE ядра): итог выделения. MKSG MKFILE с 2026-09-27 зовёт
 ; сам, вне шлюза (Codex R28-02: здесь, при DI, файл в гигабайт выделялся
 ; минуту и дольше), AF — его итог; размер 0 — MKSG не звался (пустой файл
@@ -3050,162 +4951,19 @@ COMPARE_LFN_CHAR:
 ; дополнительный I/O зависал и в F5 COPY, и в транзакционном сохранении
 ; TXTEDIT. Найденная позиция остаётся в FSTFRC для текущего сеанса.
 ALLOCATE_FILE:
+; Claude - 2026-10-10 - begin
+        ; Атрибут файла — «только чтение», «скрытый», «системный», «архив»
+        ; (#27): SVHDFL пишет его теперь целиком. Бит каталога дал бы
+        ; «каталог», чьё тело — старые данные свободных кластеров (драйвер
+        ; FAT32, R6-1); каталог создаёт MKDIR. Флаги MKSG сохраняются.
+        PUSH AF
+        LD A,(@WDOS.EFLG):AND #27:LD (@WDOS.EFLG),A
+        POP AF
+; Claude - 2026-10-10 - end
         JP NZ,MKSG_CHECKED.result               ; отказ чтения FAT — #FF, не 16
         RET C                                   ; цепочка записана
         LD (@WDOS.FCTS),HL                      ; пустой файл
         LD (@WDOS.FCTS+2),HL
-        RET
-
-; Загрузить параметры FAT, включая BPB_ExtFlags. FATFLAGS хранит младший байт:
-; бит 7 отключает зеркалирование, младшие четыре бита задают активную FAT.
-LOAD_FAT_CONFIG:
-        LD A,(@WDOS.LOBU+16)
-        LD (@WDOS.BFATS),A
-        OR A:JR Z,.bad
-
-        LD A,(@WDOS.LOBU+40)
-        LD (@WDOS.FATFLAGS),A
-        BIT 7,A:JR Z,.flags_ok
-        AND #0F
-        LD B,A
-        LD A,(@WDOS.BFATS)
-        CP B:JR Z,.bad:JR C,.bad
-.flags_ok:
-        LD HL,(@WDOS.LOBU+36)
-        LD (@WDOS.BFTSZ),HL
-        LD HL,(@WDOS.LOBU+38)
-        LD (@WDOS.BFTSZ+2),HL
-
-        LD HL,(@WDOS.LOBU+44)
-        LD (@WDOS.BROOTC),HL
-        LD HL,(@WDOS.LOBU+46)
-        LD A,H:AND #0F:LD H,A
-        LD (@WDOS.BROOTC+2),HL
-
-        XOR A
-        RET
-.bad:
-        LD A,1:OR A
-        RET
-
-; Проверить значение DE:HL как начальную подсказку поиска. Допустимы только
-; настоящие data-кластеры, для которых существует сектор внутри текущей FAT.
-; Регистры DE:HL сохраняются; Z означает допустимое значение.
-VALIDATE_FREE_HINT:
-        PUSH HL,DE
-        LD A,D:OR E:OR H:JR NZ,.minimum_ok
-        LD A,L:CP 2:JR C,.bad_restore
-.minimum_ok:
-        LD BC,(FAT_DATA_CLUSTER_LIMIT)
-        OR A:SBC HL,BC
-        EX DE,HL
-        LD BC,(FAT_DATA_CLUSTER_LIMIT+2)
-        SBC HL,BC
-        EX DE,HL
-        JR NC,.bad_restore
-        POP DE,HL
-
-        PUSH HL,DE
-        CALL @WDOS.DEL128
-        CALL FAT_SECTOR_IN_RANGE
-        POP DE,HL
-        JR NC,.bad
-        XOR A
-        RET
-.bad_restore:
-        POP DE,HL
-.bad:
-        LD A,1:OR A
-        RET
-
-; Прочитать FSI_Nxt_Free. FSInfo является подсказкой: плохой сектор, сигнатуры,
-; #FFFFFFFF, занятый кластер или выход за область данных не мешают монтированию.
-; Для такого холодного старта RAM-курсор ставится в 15/16 области данных:
-; штатный SRHFCL всё равно проверяет FAT и при необходимости делает полный wrap.
-LOAD_FREE_HINT:
-        LD HL,2:LD (@WDOS.FSTFRC),HL
-        LD (FAT_DATA_CLUSTER_LIMIT),HL
-        LD HL,0:LD (@WDOS.FSTFRC+2),HL
-        LD (FAT_DATA_CLUSTER_LIMIT+2),HL
-
-        ; SDFAT уже вычислен основной частью как первый data-сектор. Получить
-        ; верхнюю границу кластеров непосредственно из ещё сохранённого BPB.
-        LD HL,(@WDOS.LOBU+19)
-        LD A,H:OR L:JR Z,.total32
-        LD DE,0
-        JR .total_ready
-.total32:
-        LD HL,(@WDOS.LOBU+32),DE,(@WDOS.LOBU+34)
-.total_ready:
-        LD BC,(@WDOS.SDFAT)
-        OR A:SBC HL,BC
-        EX DE,HL
-        LD BC,(@WDOS.SDFAT+2)
-        SBC HL,BC
-        EX DE,HL
-        JR C,.done
-        LD A,(@WDOS.BSECPC)
-.divide:
-        CP 1:JR Z,.limit_ready
-        SRL D:RR E:RR H:RR L
-        SRL A
-        JR .divide
-.limit_ready:
-        LD BC,2:CALL @WDOS.ADD4B
-        LD (FAT_DATA_CLUSTER_LIMIT),HL
-        LD (FAT_DATA_CLUSTER_LIMIT+2),DE
-        CALL SET_COLD_FREE_HINT
-
-        LD HL,(@WDOS.FSINF),DE,(@WDOS.FSINF+2)
-        CALL @WDOS.XPOZI
-        LD HL,@WDOS.LOBU,A,1
-        CALL READ_SECTORS
-        JR NZ,.done
-        CALL VALIDATE_FSINFO_SECTOR
-        JR NZ,.done
-        LD HL,(@WDOS.LOBU+492),DE,(@WDOS.LOBU+494)
-        CALL VALIDATE_FREE_HINT
-        JR NZ,.done
-        LD (@WDOS.CAHL),HL
-        LD (@WDOS.CADE),DE
-        CALL @WDOS.CURIT
-        JR C,.done
-        LD A,(HL):INC HL
-        OR (HL):INC HL
-        OR (HL):INC HL
-        OR (HL):JR NZ,.done
-        LD HL,(@WDOS.CAHL),DE,(@WDOS.CADE)
-        LD (@WDOS.FSTFRC),HL
-        LD (@WDOS.FSTFRC+2),DE
-.done:
-        XOR A
-        LD (@WDOS.ABT),A
-        RET
-
-; Выбрать безопасную read-only стартовую точку рядом с концом тома. CADE:CAHL
-; здесь служит только временной копией limit/16; перед первым SRHFCL курсор всё
-; равно заново загружается из FSTFRC.
-SET_COLD_FREE_HINT:
-        LD HL,(FAT_DATA_CLUSTER_LIMIT),DE,(FAT_DATA_CLUSTER_LIMIT+2)
-        LD (@WDOS.FSTFRC),HL
-        LD (@WDOS.FSTFRC+2),DE
-        LD B,4
-.divide:
-        SRL D:RR E:RR H:RR L
-        DJNZ .divide
-        LD (@WDOS.CAHL),HL
-        LD (@WDOS.CADE),DE
-        LD HL,(@WDOS.FSTFRC),BC,(@WDOS.CAHL)
-        OR A:SBC HL,BC
-        LD (@WDOS.FSTFRC),HL
-        LD HL,(@WDOS.FSTFRC+2),BC,(@WDOS.CADE)
-        SBC HL,BC
-        LD (@WDOS.FSTFRC+2),HL
-        RET
-
-GET_DATA_CLUSTER_LIMIT:
-        LD HL,(FAT_DATA_CLUSTER_LIMIT),DE,(FAT_DATA_CLUSTER_LIMIT+2)
-        XOR A
         RET
 
 ; Для read-only preflight FILEX хранить уже увеличенный CADE:CAHL. Если
@@ -3229,55 +4987,18 @@ SAVE_NEXT_FREE_HINT:
 NOTE_FREED_CHAIN:
         LD HL,(@WDOS.LOBU),DE,(@WDOS.LOBU+2)
         LD A,D:OR E:OR H:OR L:RET Z
+; Claude - 2026-10-10 - begin
+        CALL VALIDATE_FREE_HINT                 ; голова испорченной цепочки (1,
+        JR NZ,.root                             ; за томом) — не подсказка (R9)
+; Claude - 2026-10-10 - end
         LD (@WDOS.FSTFRC),HL
         LD (@WDOS.FSTFRC+2),DE
+.root:
 ; Claude - 2026-09-27 - begin
         ; Кластеры корня для CLASSIFY_DATA (Codex R27-04): до первой правки
         ; SECBU в DLSG. Отказ чтения — ROOT_FAILED≠0: DLSG не освободит ничего.
         JP ROOT_BUILD
 ; Claude - 2026-09-27 - end
-
-; Позиционировать устройство на сектор DE:HL относительно начала FAT с индексом
-; A. После добавления FAT size, reserved sectors и partition base вызывается
-; штатный XPOZI.
-POSITION_FAT_INDEX:
-        OR A:JR Z,.base
-.next:
-        LD BC,(@WDOS.BFTSZ)
-        ADD HL,BC
-        EX DE,HL
-        LD BC,(@WDOS.BFTSZ+2)
-        ADC HL,BC
-        EX DE,HL
-        DEC A:JR NZ,.next
-.base:
-        LD BC,(@WDOS.SFAT)
-        CALL @WDOS.ADD4B
-        CALL @WDOS.XSPOZ
-        JP @WDOS.XPOZI
-
-; Позиционирование чтения: при отключённом зеркалировании использовать только
-; активную FAT, иначе FAT0.
-POSITION_FAT_READ:
-        LD A,(@WDOS.FATFLAGS)
-        BIT 7,A:JR Z,.fat0
-        AND #0F
-        JP POSITION_FAT_INDEX
-.fat0:
-        XOR A
-        JP POSITION_FAT_INDEX
-
-; Проверить полный 32-битный относительный сектор FAT в DE:HL.
-; CF=1 означает DE:HL < BFTSZ, CF=0 — сектор находится на границе или за ней.
-FAT_SECTOR_IN_RANGE:
-        PUSH HL,DE
-        LD BC,(@WDOS.BFTSZ)
-        OR A:SBC HL,BC
-        EX DE,HL
-        LD BC,(@WDOS.BFTSZ+2)
-        SBC HL,BC
-        POP DE,HL
-        RET
 
 ; Записать текущий SECBU/LSTSE в корректные копии FAT. При обычном режиме —
 ; во все BFATS, при BPB_ExtFlags.bit7 — только в выбранную активную FAT.
@@ -3329,32 +5050,86 @@ INIT_FREE_SCAN:
 ; Claude - 2026-09-26 - end
         RET
 
-; Проверить текущий CADE:CAHL перед чтением свободного слота. Последний
-; сектор FAT может содержать нулевые записи за концом data-области: они не
-; являются кластерами. При достижении границы сразу перейти к кластеру 2.
-; Выход: CF=1 при полном обороте; HL сохранён либо указывает на новый слот
-; после wrap. AF/BC/DE временные; BC'/DE'/HL' сохранены. VALIDATE_FREE_HINT
-; через DEL128 также меняет AF', как и обычный переход к сектору FAT.
-CHECK_FREE_SCAN_LIMIT:
-        PUSH HL
+; Claude - 2026-10-11 - begin
+; Свободная запись FAT в загруженном секторе: от HL (запись кластера
+; CADE:CAHL) до конца сектора, до границы данных и — после wrap — до
+; кластера, с которого начат поиск. Один вызов шлюза на сектор (FC): прежде
+; шлюз (CHECK_FREE_SCAN_LIMIT) звался на каждую запись, ~2330 тактов на
+; кластер, и первый после загрузки поиск места на большой карте шёл минуту.
+; Записей за вызов — не больше 128: прерывания закрыты на один сектор. HL —
+; внутри SECBU: FC зовут SRHFC (запись курсора в прочитанном секторе) и AMM
+; MKSG (только при H < high SECBE), так что записей до конца сектора не ноль.
+; Последний сектор FAT может держать нулевые записи за концом данных — это не
+; кластеры: граница данных проверяется до цикла.
+; Выход: Z — свободная: HL — за ней, CADE:CAHL — её номер; NZ, CF=0 — сектор
+; или данные кончились, курсор — за последней проверенной: SRHFC читает
+; следующий сектор, за данными — wrap к кластеру 2; CF=1 — полный оборот.
+; AF/BC/DE временные; BC'/DE'/HL' сохранены; AF' меняет DEL128 (как прежде).
+SCAN_FREE_SECTOR:
+        PUSH HL                                 ; запись курсора
         LD HL,(@WDOS.CAHL),DE,(@WDOS.CADE)
         CALL VALIDATE_FREE_HINT
-        JR Z,.valid
+        JR NZ,.next                             ; курсор за данными — wrap в SRHFC
+        POP DE
+        PUSH DE
+        LD HL,@WDOS.SECBE                       ; C — записей до конца сектора
+        OR A:SBC HL,DE
+        SRL H:RR L:SRL H:RR L
+        LD C,L
+        LD HL,(FAT_DATA_CLUSTER_LIMIT),DE,(FAT_DATA_CLUSTER_LIMIT+2)
+        CALL .left                              ; не дальше границы данных
+        LD A,(@WDOS.DUBA):OR A:JR Z,.count
+        LD HL,(@WDOS.DABC),DE,(@WDOS.DAHL)
+        CALL .left                              ; после wrap — не дальше начала
+        LD A,C:OR A:JR Z,.full                  ; курсор на начале: оборот
+.count:
         POP HL
-        JP NEXT_FREE_FAT_SECTOR.wrap
-.valid:
-        LD A,(@WDOS.DUBA):OR A:JR Z,.more
-        LD DE,(@WDOS.DABC)
-        OR A:SBC HL,DE:JR NZ,.more
-        LD HL,(@WDOS.CADE),DE,(@WDOS.DAHL)
-        OR A:SBC HL,DE:JR NZ,.more
+        LD B,C
+.entry:
+        LD A,(HL):INC HL:OR (HL):INC HL:OR (HL):INC HL:OR (HL):INC HL
+        JR Z,.found
+        DJNZ .entry
+        LD A,C                                  ; все заняты: курсор — за ними
+        CALL .advance
+        OR 1                                    ; NZ, CF=0
+        RET
+.found:
+        LD A,C:SUB B                            ; её номер от курсора
+        CALL .advance
+        XOR A                                   ; Z, CF=0
+        RET
+.full:
         POP HL
         SCF
         RET
-.more:
+.next:
         POP HL
-        OR A
+        OR 1
         RET
+; C = min(C, DE:HL − CADE:CAHL). Граница не ниже курсора: данные — по
+; VALIDATE_FREE_HINT, начало поиска — после wrap от 2.
+.left:
+        PUSH BC
+        LD BC,(@WDOS.CAHL):OR A:SBC HL,BC
+        EX DE,HL
+        LD BC,(@WDOS.CADE):SBC HL,BC            ; HL — старшее слово, DE — младшее
+        POP BC
+        RET C
+        LD A,H:OR L:OR D:RET NZ                 ; не меньше 256 — C как есть
+        LD A,E:CP C:RET NC
+        LD C,E
+        RET
+; CADE:CAHL += A. HL сохраняется.
+.advance:
+        PUSH HL
+        LD E,A:LD D,0
+        LD HL,(@WDOS.CAHL):ADD HL,DE:LD (@WDOS.CAHL),HL
+        JR NC,.advanced
+        LD HL,(@WDOS.CADE):INC HL:LD (@WDOS.CADE),HL
+.advanced:
+        POP HL
+        RET
+; Claude - 2026-10-11 - end
 
 ; Загрузить FAT-сектор текущего CADE:CAHL. Курсор уже увеличен вызывающим
 ; FC/GETZE. Одинаковый путь нужен после занятого сектора, свободного последнего
@@ -3384,7 +5159,13 @@ NEXT_FREE_FAT_SECTOR:
         LD A,H:OR L:JR NZ,.do_wrap
         LD HL,(@WDOS.DABC)
         LD A,H:OR A:JR NZ,.do_wrap
-        LD A,L:CP 3:JR C,.full
+; Claude - 2026-10-10 - begin
+        ; Поиск начат ровно с 2 — пройдено всё. С 0 или 1 (недопустимая
+        ; подсказка) от 2 ещё не искали: прежде это тоже считалось полным
+        ; обходом, и после F8 записи с кластером 1 любое выделение отвечало
+        ; «нет места» до перемонтирования (драйвер FAT32, R9).
+        LD A,L:CP 2:JR Z,.full
+; Claude - 2026-10-10 - end
 .do_wrap:
         LD A,1:LD (@WDOS.DUBA),A
         LD HL,2:LD (@WDOS.CAHL),HL
@@ -3419,64 +5200,16 @@ MKSG_CHECKED:
         RET
 ; Claude - 2026-09-26 - end
 
-; Сбросить историю секторного окна перед новым поиском по каталогу.
-RESET_DIR_HISTORY:
-        XOR A
-        LD (DIR_OLDER_VALID),A
-        RET
-
-; Сохранить реальный LBA предыдущего секторного буфера каталога. Это позволяет
-; удалить LFN даже при переходе через границу кластера, где LBA не обязаны быть
-; соседними.
-SAVE_PREVIOUS_DIR_LBA:
-; Codex - 2026-07-16 - begin
-        PUSH HL
-; Codex - 2026-07-16 - end
-        LD HL,(@WDOS.LLHL)
-        LD (DIR_PREVIOUS_LBA),HL
-        LD HL,(@WDOS.LLHL+2)
-        LD (DIR_PREVIOUS_LBA+2),HL
-; Codex - 2026-07-16 - begin
-        POP HL
-; Codex - 2026-07-16 - end
-        RET
-
-; Перед сдвигом LOBU2 -> LOBU сохранить ещё более старый сектор. Максимальное
-; FAT32-LFN занимает 20 записей, поэтому SFN и весь его LFN-прогон могут
-; пересечь три сектора каталога.
-PRESERVE_OLDER_DIR_SECTOR:
-        PUSH AF,BC,DE,HL
-        LD HL,@WDOS.LOBU,DE,DIR_OLDER_BUFFER,BC,512
-        LDIR
-        LD HL,(DIR_PREVIOUS_LBA)
-        LD (DIR_OLDER_LBA),HL
-        LD HL,(DIR_PREVIOUS_LBA+2)
-        LD (DIR_OLDER_LBA+2),HL
-        LD A,1:LD (DIR_OLDER_VALID),A
-        POP HL,DE,BC,AF
-        RET
-
-; Codex - 2026-07-16 - begin
-; Продолжить обратное сравнение максимального LFN в третьем секторе. Обычные
-; указатели #3200..#35FF остаются без изменений; переход ниже #3200 допустим
-; только на сохранённый последний слот более старого сектора #2000..#21FF.
-MAP_OLDER_LFN_POINTER:
-        LD A,H:CP high @WDOS.LOBU:JR NC,.ok
-        CP high @WDOS.LOBU-1:JR NZ,.bad
-        LD A,(DIR_OLDER_VALID):OR A:JR Z,.bad
-        LD A,H:SUB #10:LD H,A
-.ok:
-        OR A
-        RET
-.bad:
-        SCF
-        RET
-; Codex - 2026-07-16 - end
-
 ; Пометить удалёнными SFN и весь связанный LFN-прогон. Проверяются порядковые
 ; номера LFN и контрольная сумма SFN; поддерживается максимальное имя в 20
 ; LFN-записей через текущий, предыдущий и более старый сектор.
 DELETE_ENTRY_WITH_LFN:
+; Claude - 2026-10-10 - begin
+        ; «.» и «..» (с точки начинаются только служебные записи) не удаляются:
+        ; DELETE «.» освобождал цепочку самого каталога, «..» — родителя (API 75;
+        ; драйвер FAT32, R9). Выход как у отказа записи: DELEN — Z, A=0.
+        LD A,(BC):CP ".":JP Z,CLASSIFY_INVALID
+; Claude - 2026-10-10 - end
         LD H,B,L,C
         PUSH HL
         CALL @WDOS.LNCRC
@@ -3569,619 +5302,17 @@ DELETE_ENTRY_WITH_LFN:
         LD A,1:OR A
         RET
 
-; Безопасно обновить FSInfo: проверить три сигнатуры, пометить Free_Count как
-; неизвестный и записать Next_Free (либо #FFFFFFFF для нулевой подсказки).
-RFRH_SAFE:
-        LD HL,(@WDOS.FSINF),DE,(@WDOS.FSINF+2)
-        CALL @WDOS.XPOZI
-        LD HL,@WDOS.LOBU,A,1
-        CALL READ_SECTORS
-        RET NZ
-
-        CALL VALIDATE_FSINFO_SECTOR
-        JR NZ,.bad
-
-        LD HL,#FFFF
-        LD (@WDOS.LOBU+488),HL
-        LD (@WDOS.LOBU+490),HL
-        LD HL,(@WDOS.FSTFRC),DE,(@WDOS.FSTFRC+2)
-        CALL VALIDATE_FREE_HINT
-        JR Z,.have_hint
-        LD HL,#FFFF,DE,HL
-.have_hint:
-        LD (@WDOS.LOBU+492),HL
-        LD (@WDOS.LOBU+494),DE
-        LD HL,@WDOS.LOBU,A,1
-        JP WRITE_SECTORS
-.bad:
-        LD A,1:OR A
-        RET
-
-; Claude - 2026-09-26 - begin
-; Сигнатуры FSInfo в LOBU: «RRaA» в +0, «rrAa» в +484, 00 00 55 AA в +508 —
-; побайтно по таблице (прежде — шесть сравнений слов, те же значения).
-; Выход: Z — сектор FSInfo, NZ — нет. Портит A, B, DE, HL.
-VALIDATE_FSINFO_SECTOR:
-        LD HL,FSINFO_SIGNATURES
-        LD DE,@WDOS.LOBU
-        CALL .four
-        RET NZ
-        LD DE,@WDOS.LOBU+484
-        CALL .four
-        RET NZ
-        LD DE,@WDOS.LOBU+508
-.four:
-        LD B,4
-.byte:
-        LD A,(DE)
-        CP (HL)
-        RET NZ
-        INC HL
-        INC DE
-        DJNZ .byte
-        RET                                     ; Z: все четыре совпали
-
-FSINFO_SIGNATURES:
-        DB "RRaA","rrAa",0,0,#55,#AA
-; Claude - 2026-09-26 - end
-
-; Общий выход потоковой операции при ошибке драйвера. Адрес/сектор потока ещё
-; не продвинуты; EOC=#FF заставляет вызывающий код остановиться.
-STREAM_IO_ERROR:
-        LD A,#FF
-        LD (@WDOS.ABT),A
-        LD (@WDOS.EOC),A
-; Codex - 2026-07-16 - begin
-        ; Отличить ошибку I/O от штатного достижения EOC=#FF.
-        SCF
-; Codex - 2026-07-16 - end
-        RET
-
-; Codex - 2026-07-16 - begin
-; Codex - 2026-07-17 - begin
-; Все четыре блока распаковываются одинаково. SD-ZC уже упакован из конечного
-; проверенного runtime, поэтому прежняя большая таблица наложения не нужна.
-DSDZC_RUNTIME_READS EQU #393F
-DSDZC_RUNTIME_CSH   EQU #3B17
-DSDZC_RUNTIME_CMD18 EQU #3BB5
-DSDZC_RUNTIME_CMD25 EQU #3BEA
-DSDZC_RUNTIME_WAIT  EQU #3C6D
-
-UNPACK_DRIVER:
-        PUSH BC
-; Claude - 2026-09-27 - begin
-        ; Драйверы с установки лежат в DRIVERS_E8 этой страницы, а DOS_SWP
-        ; передаёт прежний адрес в ядре (DR1..DR4 с #5176): тот же сдвиг.
-        LD BC,DRIVERS_E8-@WDOS.DR1
-        ADD HL,BC
-; Claude - 2026-09-27 - end
-        CALL @WDOS.DEHR
-        POP BC
-        LD A,B
-        RET
-; Codex - 2026-07-17 - end
-
-; Боевой CORE32 распаковывает точный штатный DOSpSDZC35.CPD и не вызывает эти
-; экспериментальные точки. Их реализация и дополнительные номера шлюза
-; добавляются только специальной диагностической сборкой.
-        IFDEF WDOS_EXPERIMENTAL_ZC_RUNTIME
-
-; Общий аварийный выход SD-ZC: зафиксировать ошибку и снять chip-select.
-ZC_MARK_ERROR:
-        LD A,1
-        LD (@WDOS.ABT),A
-        CALL DSDZC_RUNTIME_CSH
-        LD A,1
-        OR A
-        RET
-
-; WAIT: дождаться #FF с конечным лимитом. Исходный AF восстанавливается,
-; поскольку старые командные процедуры не использовали флаги WAIT.
-ZC_WAIT_READY:
-        PUSH AF,BC,DE,HL
-        LD E,8
-.outer:
-        LD HL,0
-        LD BC,#0057
-.poll:
-        IN A,(C)
-        INC A
-        JR Z,.ready
-        DEC HL
-        LD A,H:OR L
-        JR NZ,.poll
-        DEC E
-        JR NZ,.outer
-        CALL ZC_MARK_ERROR
-.ready:
-        POP HL,DE,BC,AF
-        RET
-
-; WTDO: дождаться первого байта, отличного от #FF. При тайм-ауте возвращается
-; #FF, ABT устанавливается, а chip-select снимается.
-ZC_WAIT_TOKEN:
-        PUSH BC,DE,HL
-        LD E,8
-.outer:
-        LD HL,0
-        LD BC,#0057
-.poll:
-        IN A,(C)
-        CP #FF
-        JR NZ,.received
-        DEC HL
-        LD A,H:OR L
-        JR NZ,.poll
-        DEC E
-        JR NZ,.outer
-        CALL ZC_MARK_ERROR
-        POP HL,DE,BC
-        LD A,#FF
-        OR A
-        RET
-.received:
-        POP HL,DE,BC
-        RET
-
-; WTBY: дождаться снятия busy. Z означает успех, NZ — конечный тайм-аут.
-ZC_WAIT_BUSY:
-        PUSH BC,DE,HL
-        LD E,8
-.outer:
-        LD HL,0
-        LD BC,#0057
-.poll:
-        IN A,(C)
-        OR A
-        JR NZ,.ready
-        DEC HL
-        LD A,H:OR L
-        JR NZ,.poll
-        DEC E
-        JR NZ,.outer
-        CALL ZC_MARK_ERROR
-        POP HL,DE,BC
-        LD A,1
-        OR A
-        RET
-.ready:
-        POP HL,DE,BC
-        XOR A
-        RET
-
-; Проверить ответ записи и дождаться снятия busy. При успехе счётчик блоков
-; переносится из AF' в AF, как это делал прежний участок SDDSE.
-ZC_DATA_RESPONSE:
-        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
-        CALL ZC_WAIT_TOKEN
-        LD C,A
-        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
-        LD A,C:AND #1F:CP 5:JR NZ,.mark
-        CALL ZC_WAIT_BUSY
-        JR NZ,.failed
-        EX AF,AF'
-        CP A
-        RET
-.mark:
-        CALL ZC_MARK_ERROR
-.failed:
-        LD A,1
-        OR A
-        RET
-
-; Ограничить оба ожидания DMA. A сохраняется, CF=1 означает тайм-аут.
-ZC_DMA_WAIT:
-; Codex - 2026-07-16 - begin
-; BC намеренно не восстанавливается: исходная последовательность оставляла
-; BC=#27AF, и следующий OUT меняет только B, сохраняя обязательный C=#AF.
-        PUSH AF,DE
-        LD BC,#27AF
-        LD DE,0
-.poll:
-        INF
-        JP P,.ready
-        DEC DE
-        LD A,D:OR E
-        JR NZ,.poll
-        CALL ZC_MARK_ERROR
-        POP DE,AF
-        SCF
-        RET
-.ready:
-        POP DE,AF
-        OR A
-        RET
-; Codex - 2026-07-16 - end
-
-; Начать многоблочное чтение. Счётчик остаётся в AF'; Z означает готовность.
-ZC_START_READ:
-        XOR A
-        LD (@WDOS.ABT),A
-        CALL DSDZC_RUNTIME_CMD18
-        LD C,A
-        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
-        LD A,C:OR A:JR NZ,.mark
-        XOR A
-        RET
-.mark:
-        CALL ZC_MARK_ERROR
-.failed:
-        LD A,1
-        OR A
-        RET
-
-; Прочитать блок штатной процедурой с уже ограниченными DMA-ожиданиями.
-; При успехе вернуть счётчик из AF' и Z, при ошибке оставить AF' нетронутым.
-ZC_READ_BLOCK:
-        CALL DSDZC_RUNTIME_READS
-        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
-        EX AF,AF'
-        CP A
-        RET
-.failed:
-        CALL DSDZC_RUNTIME_CSH
-        LD A,1
-        OR A
-        RET
-
-; Проверить аппаратный запрет записи и одновременно начать новый результат I/O.
-ZC_WRITE_READY:
-        XOR A
-        LD (@WDOS.ABT),A
-        IN A,(#77)
-        AND 2
-        JR NZ,.failed
-        XOR A
-        RET
-.failed:
-        JP ZC_MARK_ERROR
-
-; Начать многоблочную запись и дождаться готовности к первому блоку. При успехе
-; счётчик переносится из AF' в AF для существующего цикла SDDSE.
-ZC_START_WRITE:
-        CALL DSDZC_RUNTIME_CMD25
-        LD C,A
-        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
-        LD A,C:OR A:JR NZ,.mark
-        CALL DSDZC_RUNTIME_WAIT
-        LD A,(@WDOS.ABT):OR A:JR NZ,.failed
-        EX AF,AF'
-        CP A
-        RET
-.mark:
-        CALL ZC_MARK_ERROR
-.failed:
-        LD A,1
-        OR A
-        RET
-
-; Токен данных чтения обязан быть #FE. Любой иной ответ завершает операцию.
-ZC_CHECK_TOKEN:
-        CP #FE
-        JR NZ,.failed
-        XOR A
-        RET
-.failed:
-        JP ZC_MARK_ERROR
-; Codex - 2026-07-16 - end
-
-        ENDIF
-
-; Claude - 2026-09-27 - begin
-; EXT_INSTALL_TAIL (ID_INSTALL_TAIL; только установщик boot.$C, страница #E8 в
-; окне #C000, обе части распакованы): упакованные драйверы ядра #5176..#5AA9 —
-; в DRIVERS_E8, на их место — резидентный блок. Порядок важен: блок затирает
-; драйверы.
-EXT_INSTALL_TAIL:
-        LD HL,@WDOS.DR1
-        LD DE,DRIVERS_E8
-        LD BC,DRIVERS_LENGTH
-        LDIR
-        LD HL,RESIDENT_SOURCE
-        LD DE,RESIDENT_BASE
-        LD BC,RESIDENT_LENGTH
-        LDIR
-        RET
-DRIVERS_LENGTH                EQU @WDOS.DEHR-@WDOS.DR1
-        ASSERT RESIDENT_BASE == @WDOS.DR1, резидентный блок не на месте драйверов
-
-; Резидентный блок: код, который исполняется при снятой странице расширения,
-; — в странице ядра #05 (всегда в окне #4000). Собран для RESIDENT_BASE,
-; хранится здесь; EXT_INSTALL_TAIL копирует его на место драйверов.
-;
-; CORE_MKSG, CORE_SRHFCL (Codex R29-01): MKSG и SRHFCL — поиск свободного
-; кластера, до ~2330 тактов на запись FAT, — из функций расширения (MKDIR,
-; APPEND, рост каталога DIR_GROW) шли внутри шлюза, то есть при DI: на почти
-; полном томе минуты без прерываний. Теперь на время поиска #E8 снимается: в
-; окно #C000 возвращается страница внешнего вызывающего и его IFF
-; (OUTER_PAGE/OUTER_IFF, их записывает GATE_CONTINUE при входе в шлюз не из
-; расширения), процедура ядра исполняется при его прерываниях, а её вложенные
-; вызовы шлюза подключают #E8 сами. Затем DI и снова #E8. Оба набора
-; регистров проходят насквозь.
-RESIDENT_SOURCE:
-        DISP RESIDENT_BASE
-RESIDENT_START:
-OUTER_PAGE:     DB 0                    ; страница окна #C000 внешнего вызова
-OUTER_IFF:      DB 0                    ; ≠0 — прерывания у него разрешены
-; Claude - 2026-10-01 - begin
-; Входы резидентного кода для ядра — по постоянным адресам (CORE32_EXT_API).
-; Всё, что ниже до CORE_MKSG, исполняется без шлюза: страница окна #C000 и
-; прерывания — вызывающего. Прежде чтение файла на каждом переходе к
-; следующему кластеру и на каждом вызове LOAD256/LOADNON входило в шлюз, а
-; он закрывает прерывания: кадровое прерывание TS-Conf (короткий импульс)
-; терялось, плеер TGV без VDAC2 не сменял кадры. В исходном WC чтение идёт
-; при разрешённых прерываниях.
-        ASSERT $ == STREAM_RESIDENT, вход потока сдвинулся
-        JP STREAM_RESIDENT_CODE
-        ASSERT $ == CLASSIFY_RESIDENT, вход проверки ссылки сдвинулся
-        JP CLASSIFY_IN_VOLUME
-        ASSERT $ == STREAM_LINK_RESIDENT, вход перехода потока сдвинулся
-; Переход потока по записи FAT в SECBU (HL), попадание кэша STREAM_NEXT_CACHED.
-; Ноль — свободный кластер: порча ссылки (см. STREAM_LINK расширения), учёт
-; ошибки — в расширении; иначе GIPAG.
-        PUSH HL
-        LD A,(HL):INC HL:OR (HL):INC HL:OR (HL):INC HL:OR (HL)
-        POP HL
-        JP NZ,@WDOS.GIPAG
-        CALL @WDOS.EXTENSION_GATE
-        DB ID_FAT_LINK_ERROR
-        RET
-; Нормализовать и классифицировать значение FAT32 в DE:HL.
-; Старшие четыре служебных бита отбрасываются. Обычный кластер возвращает
-; NZ/CF=0, EOC #0FFFFFF8..#0FFFFFFF — Z/CF=0, недопустимые 0, 1,
-; #0FFFFFF0..#0FFFFFF7 — NZ/CF=1.
-CLASSIFY_FAT_LINK:
-        LD A,D:AND #0F:LD D,A
-        OR E:OR H
-        JR NZ,CLASSIFY_HIGH
-
-CLASSIFY_LOW:
-        LD A,L:CP 2:JR C,CLASSIFY_INVALID
-        JR CLASSIFY_ORDINARY
-CLASSIFY_HIGH:
-        LD A,D:CP #0F:JR NZ,CLASSIFY_ORDINARY
-        LD A,E:CP #FF:JR NZ,CLASSIFY_ORDINARY
-        LD A,H:CP #FF:JR NZ,CLASSIFY_ORDINARY
-        LD A,L:CP #F0:JR C,CLASSIFY_ORDINARY
-        CP #F8:JR C,CLASSIFY_INVALID
-        XOR A
-        RET
-CLASSIFY_ORDINARY:
-; Codex - 2026-07-16 - begin
-        ; Тот же A=1, NZ и сброшенный CF одним байтом короче. Освобождённый
-        ; байт сохраняет точный физический размер после нормализации EOC.
-        XOR A:INC A
-; Codex - 2026-07-16 - end
-        RET
-CLASSIFY_INVALID:
-        LD A,1:OR A
-        SCF
-        RET
-; CLASSIFY_FAT_LINK с границей области данных тома (см. описание у прежнего
-; места в расширении): GIPAG, GIPP ядра и ID_CLASSIFY_FAT_LINK шлюза.
-CLASSIFY_IN_VOLUME:
-        CALL CLASSIFY_FAT_LINK
-        RET C                                   ; недопустимая
-        RET Z                                   ; EOC
-        PUSH HL
-        PUSH DE
-        LD BC,(FAT_DATA_CLUSTER_LIMIT):OR A:SBC HL,BC
-        EX DE,HL
-        LD BC,(FAT_DATA_CLUSTER_LIMIT+2):SBC HL,BC   ; CF — кластер ниже границы
-        POP DE
-        POP HL
-        JR C,.inside
-        PUSH HL                                 ; граница задана?
-        LD HL,(FAT_DATA_CLUSTER_LIMIT+2):LD A,H:OR L
-        LD HL,(FAT_DATA_CLUSTER_LIMIT):OR H
-        JR NZ,.set
-        LD A,L:CP 3                             ; CF — не задана
-.set:
-        POP HL
-        JP NC,CLASSIFY_INVALID                  ; за областью данных
-.inside:
-        XOR A:INC A                             ; обычный: A=1, NZ, CF=0
-        RET
-; LOAD256/LOADNON ядра: вызвать LOAD512 с временным обработчиком сектора DE и
-; вернуть прежний.
-STREAM_RESIDENT_CODE:
-        PUSH HL
-        LD HL,(@WDOS.NW0+1)
-        EX (SP),HL
-        LD (@WDOS.NW0+1),DE
-        CALL @WDOS.LOAD512
-        POP DE
-        LD (@WDOS.NW0+1),DE
-        RET
-; Claude - 2026-10-01 - end
-CORE_MKSG:
-        CALL LEAVE_EXT
-        CALL @WDOS.MKSG
-        JR ENTER_EXT
-CORE_SRHFCL:
-        CALL LEAVE_EXT
-        CALL @WDOS.SRHFCL
-ENTER_EXT:                              ; назад в расширение: DI, затем #E8
-        DI
-        PUSH AF
-        PUSH BC
-        LD A,@WC_PHYS_CORE32_EXT_PAGE
-        LD BC,#13AF
-        OUT (C),A
-        POP BC
-        POP AF
-        RET
-LEAVE_EXT:                              ; наружу: страница, затем IFF вызывающего
-        PUSH AF
-        PUSH BC
-        LD A,(OUTER_PAGE)
-        LD BC,#13AF
-        OUT (C),A
-        LD A,(OUTER_IFF)
-        OR A
-        POP BC
-        JR Z,.keep_di
-        POP AF
-        EI
-        RET
-.keep_di:
-        POP AF
-        RET
-RESIDENT_END:
-        ENT
-RESIDENT_LENGTH               EQU RESIDENT_END-RESIDENT_START
-        ASSERT RESIDENT_BASE+RESIDENT_LENGTH <= @WDOS.DEHR, резидентный блок налез на DEHR
-; Claude - 2026-09-27 - end
-
-; Геометрия FAT32 и временное состояние подсказки аллокатора. Верхняя граница
-; является исключительной: допустимы кластеры 2..limit-1.
-; Claude - 2026-09-25 - begin
-; Граница — свойство тома, а не страницы расширения: прежде одна ячейка здесь
-; служила всем панелям, и после монтирования большего тома на другом
-; устройстве аллокатор меньшего выдавал кластеры за концом его раздела. Теперь
-; она лежит в странице потока рядом с FSTFRC/SDFAT (поле RECCAT драйвера, не
-; используемое ни ядром, ни драйверами), своя у каждой панели и её клона.
-FAT_DATA_CLUSTER_LIMIT        EQU @WDOS.RECCAT
-; Claude - 2026-09-25 - end
-
-; Последняя запись, найденная FENTRY (TENTRY): поток (страница окна #0000),
-; адрес имени, по которому её искали, и копия этого имени.
-FOUND_STREAM:                 DS 1
-FOUND_NAME:                   DS 2
-FOUND_TEXT:                   DS 256
-
-; RENAME: место короткой записи прежнего имени (смещение #FFFF — неизвестно).
-; Новое имя после SVHDFL — в NXTBU ядра. ENTRY_LANDED хранит FCTS на время
-; поиска; DIR_ALIVE — кластер каталога и его родителя.
-RENAME_OLD_LBA:               DS 4
-RENAME_OLD_OFFSET:            DS 2
-LANDED_CLUSTER:               DS 4
-DIR_ALIVE_CLUSTER:            DS 4
-DIR_ALIVE_PARENT:             DS 4
-RENAME_ATTR:                  DS 1
-RENAME_OFFSET:                DS 2
-RENAME_LBA:                   DS 4
-
-; Поля часов CMOS в двоичном виде: секунды, минуты, часы, день, месяц, год;
-; второй снимок для сверки.
-RTC_VALUES:                   DS 6
-RTC_CHECK:                    DS 6
-
-; Цифры размера для строки информации, младшая первой.
-STATUS_DIGITS:                DS 10
-STATUS_NARROW:                DS 1                ; #FF — строка в 38 знаков, 0 — в 43
-        ; Последний байт таблицы — RTC_FIELDS+17: при начале с #xxEE она
-        ; кончается на #xxFF, добивка (условие > 256-18) не нужна.
-        ASSERT high RTC_FIELDS == high (RTC_FIELDS+17), конец полей ловится по младшему байту
-
-; Codex - 2026-07-17 - begin
-; Постоянный контекст APPEND хранится в выделенной странице расширения и не
-; занимает рабочие буферы CORE32. Рабочая копия меняется во время вызова и
-; становится постоянной только после успешной записи каталожной ENTRY.
-APPEND_VALID:                 DS 1
-APPEND_READY:                 DS 1
-APPEND_FOUND_POINTER:         DS 2
-APPEND_DIRECTORY_LBA:         DS 4
-APPEND_DIRECTORY_OFFSET:      DS 2
-APPEND_ENTRY:                 DS 32
-
-APPEND_CONTEXT:
-APPEND_SIZE:                  DS 4
-APPEND_FIRST_CLUSTER:         DS 4
-APPEND_CURRENT_CLUSTER:       DS 4
-APPEND_SECTOR:                DS 1
-APPEND_OFFSET:                DS 2
-APPEND_NEEDS_CLUSTER:         DS 1
-; Codex - 2026-07-28 - begin
-; Постоянный ключ и значение LBA-кэша. Ключ защищает межвызовное
-; переиспользование от смены кластера и параметров отображения FAT.
-APPEND_LBA_VALID:             DS 1
-APPEND_LBA_CLUSTER:           DS 4
-APPEND_LBA_BSECPC:            DS 1
-APPEND_LBA_SDFAT:             DS 4
-APPEND_LBA_ADDTOP:            DS 4
-APPEND_LBA:                   DS 4
-; Codex - 2026-07-28 - end
-APPEND_CONTEXT_END:
-APPEND_CONTEXT_SIZE           EQU APPEND_CONTEXT_END-APPEND_CONTEXT
-
-APPEND_WORK_CONTEXT:
-APPEND_WORK_SIZE:             DS 4
-APPEND_WORK_FIRST:            DS 4
-APPEND_WORK_CURRENT:          DS 4
-APPEND_WORK_SECTOR:           DS 1
-APPEND_WORK_OFFSET:           DS 2
-APPEND_WORK_NEEDS_CLUSTER:    DS 1
-; Codex - 2026-07-28 - begin
-APPEND_WORK_LBA_VALID:        DS 1
-APPEND_WORK_LBA_CLUSTER:      DS 4
-APPEND_WORK_LBA_BSECPC:       DS 1
-APPEND_WORK_LBA_SDFAT:        DS 4
-APPEND_WORK_LBA_ADDTOP:       DS 4
-APPEND_WORK_LBA:              DS 4
-; Codex - 2026-07-28 - end
-        ASSERT $-APPEND_WORK_CONTEXT == APPEND_CONTEXT_SIZE, различается контекст APPEND
-
-APPEND_SOURCE:                DS 2
-APPEND_REMAINING:             DS 2
-APPEND_CHUNK:                 DS 2
-; Codex - 2026-07-27 - begin
-APPEND_RUN:                   DS 1
-; Codex - 2026-07-27 - end
-APPEND_SKIP_COUNT:            DS 4
-APPEND_PENDING_NEW:           DS 1
-APPEND_LINKED_NEW:            DS 1
-; Codex - 2026-07-27 - begin
-APPEND_NEW_ACTIVE:            DS 1
-; Codex - 2026-07-27 - end
-APPEND_PENDING_OLD_TAIL:      DS 4
-APPEND_NEW_CLUSTER:           DS 4
-APPEND_OLD_LINK:              DS 4
-APPEND_FAT_POINTER:           DS 2
-APPEND_SLOT_POINTER:          DS 2
-APPEND_LAST_ERROR:            DS 1
-; Claude - 2026-09-25 - begin
-APPEND_NEW_ENTRY:             DS 32               ; запись каталога после дозаписи
-APPEND_DIR_ATTEMPTED:         DS 1                ; 1 — запись каталога начата
-; Claude - 2026-09-25 - end
-; Claude - 2026-09-26 - begin
-FREE_SCAN_IO_FAILED:          DS 1                ; ≠0 — поиск места отказал на чтении FAT
-; Claude - 2026-09-26 - end
-; Claude - 2026-09-27 - begin
-DIR_CHAIN_LEFT:               DS 2                ; DIR_CHAIN: секторов в запасе
-DIR_CHAIN_READ:               DS 1                ; ≠0 — сектор FAT в обходе уже читан
-FILE_CHAIN_LEFT:              DS 4                ; FILE_CHAIN: кластеров данных осталось
-FILE_CHAIN_CUR:               DS 4                ; FILE_CHAIN: кластер после порции
-; Claude - 2026-09-27 - end
-; Codex - 2026-07-17 - end
-
-; Служебное состояние лежит в сохранённом нулевом промежутке CORE32.
-; Секторный буфер #2000 остаётся в штатном файловом окне #0000; код расширения
-; исполняется независимо в окне #C000.
-LFN_LEADING            EQU @WDOS.EXT_LFN_LEADING
-DIR_PREVIOUS_LBA       EQU @WDOS.EXT_DIR_PREVIOUS_LBA
-DIR_OLDER_LBA          EQU @WDOS.EXT_DIR_OLDER_LBA
-DIR_OLDER_VALID        EQU @WDOS.EXT_DIR_OLDER_VALID
-DIR_PREVIOUS_DIRTY     EQU @WDOS.EXT_DIR_PREVIOUS_DIRTY
-DIR_OLDER_DIRTY        EQU @WDOS.EXT_DIR_OLDER_DIRTY
-DIR_EXPECTED_SEQUENCE  EQU @WDOS.EXT_DIR_EXPECTED_SEQUENCE
-DIR_LFN_CHECKSUM       EQU @WDOS.EXT_DIR_LFN_CHECKSUM
-DIR_OLDER_BUFFER       EQU #2000
-
-; Claude - 2026-09-27 - begin
-; Упакованные драйверы ядра (DR1..DR4): сюда их переносит EXT_INSTALL_TAIL,
-; отсюда распаковывает UNPACK_DRIVER. В потоке части 2 — одни нули.
-DRIVERS_E8:                   DS DRIVERS_LENGTH
-; Claude - 2026-09-27 - end
-
-RUNTIME_END:
-        ASSERT RUNTIME_END <= #10000, расширение вышло за пределы физической страницы
+; Claude - 2026-10-10 - begin
+OVERLAY_END:
+OVERLAY_LENGTH                EQU OVERLAY_END-OVERLAY_START
+        ASSERT OVERLAY_END >= INSTALL_IMAGE_END, оверлей короче образа WMF — BSS налезет на образ
+; Claude - 2026-10-10 - end
 ; Claude - 2026-09-27 - begin
 ; Рабочие таблицы без начальных значений — за концом распакованного
 ; расширения, в поток boot.$C не входят. Заполняются перед каждым
 ; использованием (ROOT_BUILD, DIR_CHAIN, ALIAS_RESET, ALIAS_SCAN с A=0).
 ROOT_MAX                      EQU 768
-ROOT_FAILED                   EQU RUNTIME_END          ; ≠0 — FAT корня не прочиталась
+ROOT_FAILED                   EQU OVERLAY_END          ; ≠0 — FAT корня не прочиталась
 ROOT_COUNT                    EQU ROOT_FAILED+1        ; 2 байта
 ROOT_FILTER                   EQU ROOT_COUNT+2         ; 256 байт: бит (кластер & 2047)
 ROOT_CLUSTERS                 EQU ROOT_FILTER+256      ; по 4 байта

@@ -55,13 +55,15 @@ def dir_sector(attr, name=b'WC      INI'):
 class Rename(unittest.TestCase):
 
     def rename(self, found=True, created=True, deleted=(True, True), attr=0x20,
-               cut=None, on_disk=None, old_still_there=True, old_unreadable=False, landed=True):
+               cut=None, on_disk=None, old_still_there=True, old_unreadable=False, landed=True,
+               dot=False, old_writes_fail=False, landed_unreadable=0):
         """cut — атрибут, который оставил ENTREZ; on_disk — сектор новой записи;
         old_still_there — цела ли короткая запись прежней при повторном чтении
         её сектора после отказа DELEN; old_unreadable — сектор не читается."""
         harness = h.ExtensionHarness()
         machine, memory = harness.machine, harness.memory
         self.harness = harness
+        self.landed_unreadable_left = landed_unreadable
         harness.sector_overrides[OLD_LBA] = old_sector(old_still_there)
         plain_read = harness.callouts[harness.core['RDDSE']]
 
@@ -74,6 +76,21 @@ class Rename(unittest.TestCase):
             plain_read()
 
         harness.callouts[harness.core['RDDSE']] = read
+        plain_write = harness.callouts[harness.core['SDDSE']]
+        self.old_writes = 0
+
+        def write():
+            # Claude - 2026-10-10: запись сектора прежней SFN (доведение
+            # удаления по месту) — отказ, если задан old_writes_fail.
+            if harness.position == OLD_LBA:
+                self.old_writes += 1
+                if old_writes_fail:
+                    memory[harness.core['ABT']] = 1
+                    harness._return()
+                    return
+            plain_write()
+
+        harness.callouts[harness.core['SDDSE']] = write
         memory[OLD:OLD + 8] = bytes([0]) + b'wc.new' + bytes(1)
         memory[NEW:NEW + 7] = b'wc.ini' + bytes(1)
         entry = harness.core['ENTRY']
@@ -91,6 +108,7 @@ class Rename(unittest.TestCase):
             searches.append(1)
             if len(searches) == 1:                               # прежняя: её место
                 machine.bc = harness.core['LOBU'] + OLD_SLOT
+                memory[machine.bc] = ord('.') if dot else ord('W')   # её первый байт
                 memory[harness.core['LLHL']:harness.core['LLHL'] + 4] = OLD_LBA.to_bytes(4, 'little')
             if len(searches) == 2 and on_disk is not None:   # поиск новой записи:
                 lobu = harness.core['LOBU']                     # её сектор в LOBU,
@@ -104,6 +122,13 @@ class Rename(unittest.TestCase):
             if created == 'media' and len(searches) == 2:
                 ok = landed                                       # легла ли новая
             machine.f = machine.f & ~Z if ok else machine.f | Z
+            # Claude - 2026-10-10: настоящий SRHDRN без ошибки чтения — CF=0.
+            unreadable = len(searches) == 2 and landed_unreadable > 0
+            if unreadable:
+                self.landed_unreadable_left -= 1
+            machine.f = machine.f | C if unreadable and self.landed_unreadable_left >= 0 else machine.f & ~C
+            if unreadable and self.landed_unreadable_left >= 0:
+                searches.pop()                                   # повтор — снова второй поиск
             machine.hl, machine.de = 0x1234, 0
             harness._return()
 
@@ -136,19 +161,25 @@ class Rename(unittest.TestCase):
         done, calls, _ = self.rename()
         self.assertTrue(done)
         self.assertEqual(calls, [('SRHDRN', 0, b'wc.new'), ('SVHDFL', b'wc.ini'),
-                                 ('DELEN', 0, b'wc.new'), ('SRHDRN', 0, b'wc.ini')])
+                                 ('DELEN', 0, b'wc.new')])
         self.assertEqual(self.harness.written_sectors, [], 'атрибут цел — писать нечего')
 
-    def test_attributes_come_back_after_entrez(self):
-        # «только чтение», «скрытый», «системный», «архив»: ENTREZ оставил 0
-        done, _, _ = self.rename(attr=0x27, cut=0x00, on_disk=dir_sector(0x00))
+    def test_attribute_is_not_rewritten_separately(self):
+        # Claude - 2026-10-10: полный атрибут пишет сам SVHDFL ядра вместе с
+        # новой записью (test_crash_paths.Attributes); прежде RENAME искал
+        # новую запись ещё раз и правил её сектор отдельной записью уже после
+        # удаления прежнего имени — её отказ оставлял файл без «только чтения».
+        done, calls, _ = self.rename(attr=0x27, cut=0x00, on_disk=dir_sector(0x00))
         self.assertTrue(done)
-        written = self.harness.written_sectors
-        self.assertEqual(len(written), 1, 'один сектор каталога')
-        expect = bytearray(dir_sector(0x00))
-        expect[SLOT + 11] = 0x27
-        self.assertEqual(written[0], bytes(expect), 'изменён ровно байт атрибута')
-        self.assertEqual(self.harness.memory[self.harness.core['ENTRY'] + 11], 0x27)
+        self.assertEqual(self.harness.written_sectors, [])
+        self.assertEqual([c[0] for c in calls], ['SRHDRN', 'SVHDFL', 'DELEN'])
+
+    def test_dot_entries_are_not_renamed(self):
+        # Claude - 2026-10-10: «..» → «x» создавал подкаталог, указывающий на
+        # родителя (драйвер FAT32, R9). Отказ до SVHDFL, A=8.
+        done, calls, a = self.rename(dot=True)
+        self.assertFalse(done)
+        self.assertEqual((calls, a), ([('SRHDRN', 0, b'wc.new')], 8))
 
     def test_foreign_entry_at_the_place_stays(self):
         # На диске по вычисленному месту уже не та запись — ничего не пишем.
@@ -172,8 +203,24 @@ class Rename(unittest.TestCase):
         self.assertFalse(done)
         self.assertEqual([call[0] for call in calls], ['SRHDRN', 'SVHDFL'])
 
+    def test_failed_delete_is_completed_by_place(self):
+        # Claude - 2026-10-10: DELEN прежней отказал, её короткая запись на
+        # месте — она помечается #E5 по месту (драйвер FAT32, R8-1), и
+        # переименование доводится: прежде сразу шёл откат одной попыткой.
+        done, calls, _ = self.rename(deleted=(False,))
+        self.assertTrue(done)
+        self.assertNotIn(('DELEN', 0, b'wc.ini'), calls, 'новая удалена, хотя прежнюю можно добить')
+        self.assertEqual(self.old_writes, 1)
+        (sector,) = self.harness.written_sectors
+        self.assertEqual(sector[OLD_SLOT], 0xE5)
+        expect = bytearray(old_sector(True))
+        expect[OLD_SLOT] = 0xE5
+        self.assertEqual(sector, bytes(expect), 'изменён не один байт')
+
     def test_failed_delete_removes_the_new_entry(self):
-        done, calls, a = self.rename(deleted=(False, True))
+        # Прежнюю не пометить и тремя записями — откат.
+        done, calls, a = self.rename(deleted=(False, True), old_writes_fail=True)
+        self.assertEqual(self.old_writes, 3, 'не три попытки записи')
         self.assertFalse(done)
         self.assertEqual(calls[2:], [('DELEN', 0, b'wc.new'), ('DELEN', 0, b'wc.ini')],
                          'прежняя на месте — новая удалена, двух записей на цепочке нет')
@@ -185,20 +232,50 @@ class Rename(unittest.TestCase):
 
     def test_failed_rollback_reports_unknown_state(self):
         # Новую удалить тоже не удалось: на цепочке могут остаться обе — A=#FF.
-        done, _, a = self.rename(deleted=(False, False))
+        done, _, a = self.rename(deleted=(False, False), old_writes_fail=True)
         self.assertFalse(done)
         self.assertEqual(a, 0xFF)
 
     def test_rollback_search_unreadable_reports_unknown_state(self):
         # DELEN новой: поиск не прочитал каталог и вернул A=8 с CF=1. Это не
         # «новой нет» (A=8 — «Source file is not found!»), а неизвестность.
-        done, _, a = self.rename(deleted=(False, 'unreadable'))
+        # Claude - 2026-10-10: три попытки — каталог так и не прочитался.
+        done, calls, a = self.rename(deleted=(False, 'unreadable', 'unreadable', 'unreadable'),
+                                     old_writes_fail=True)
         self.assertFalse(done)
         self.assertEqual(a, 0xFF, 'ошибка чтения при откате выдана за «записи нет»')
+        self.assertEqual(calls.count(('DELEN', 0, b'wc.ini')), 3)
+
+    # Claude - 2026-10-10 - begin
+    def test_rollback_search_retried_after_a_read_failure(self):
+        # Одиночный отказ чтения при откате: вторая попытка удаляет новую
+        # запись — не переименовано, A=0, на цепочке одна запись.
+        done, calls, a = self.rename(deleted=(False, 'unreadable', True), old_writes_fail=True)
+        self.assertFalse(done)
+        self.assertEqual(a, 0)
+        self.assertEqual(calls.count(('DELEN', 0, b'wc.ini')), 2)
+
+    def test_media_failure_then_unreadable_search_is_retried(self):
+        # Двойной отказ (Codex, круг 1): запись нового имени легла с ошибкой,
+        # первый поиск после неё не прочитал каталог. Прежде — A=#FF и две
+        # записи на одной цепочке; теперь повтор находит новую, прежняя
+        # удаляется — переименовано.
+        done, calls, _ = self.rename(created='media', landed=True, landed_unreadable=1)
+        self.assertTrue(done)
+        self.assertEqual(calls.count(('SRHDRN', 0, b'wc.ini')), 2)
+        self.assertIn(('DELEN', 0, b'wc.new'), calls)
+
+    def test_media_failure_search_never_readable_is_unknown(self):
+        done, calls, a = self.rename(created='media', landed=True, landed_unreadable=3)
+        self.assertFalse(done)
+        self.assertEqual(a, 0xFF)
+        self.assertEqual(calls.count(('SRHDRN', 0, b'wc.ini')), 3)
+        self.assertNotIn(('DELEN', 0, b'wc.new'), calls, 'прежняя удалена при неизвестном исходе')
+    # Claude - 2026-10-10 - end
 
     def test_rollback_with_new_entry_missing(self):
         # Новой при откате не нашлось: прежняя на месте — не переименовано.
-        done, _, a = self.rename(deleted=(False, 'missing'))
+        done, _, a = self.rename(deleted=(False, 'missing'), old_writes_fail=True)
         self.assertFalse(done)
         self.assertEqual(a, 0)
 
@@ -215,6 +292,8 @@ class Rename(unittest.TestCase):
         done, calls, _ = self.rename(deleted=(False, True), old_unreadable=True)
         self.assertFalse(done)
         self.assertEqual(calls[-1], ('DELEN', 0, b'wc.ini'))
+        reads = [c for c in self.harness.read_calls if c[0] == OLD_LBA]
+        self.assertEqual(len(reads), 4, 'не четыре попытки чтения')
 
     def test_media_failure_new_entry_landed_completes_the_rename(self):
         # SVHDFL: запись нового имени легла, драйвер вернул отказ (ABT≠0).
@@ -231,8 +310,32 @@ class Rename(unittest.TestCase):
         self.assertFalse(done)
         self.assertNotIn(('DELEN', 0, b'wc.new'), calls, 'прежняя удалена, хотя новой нет')
 
+    # Claude - 2026-10-10 - begin
+    def test_entry_landed_on_a_damaged_directory_says_no_entry(self):
+        # SVHDFL отказал с ABT=#FE — цепочка каталога испорчена, обнаружено до
+        # записи: записи нет, каталог не ищется (прежде поиск отказывал, исход
+        # «неизвестен», и цепочка MKFILE/MKDIR оставалась потерянной).
+        harness = h.ExtensionHarness()
+        machine, memory = harness.machine, harness.memory
+        searched = []
+
+        def srhdrn():
+            searched.append(1)
+            machine.f |= C
+            harness._return()
+
+        harness.callouts[harness.core['SRHDRN']] = srhdrn
+        machine.set_breakpoint(harness.core['SRHDRN'])
+        for abt, expect in ((0xFE, (True, False, 0)), (0x01, (False, True, 3))):
+            with self.subTest(abt=hex(abt)):
+                searched.clear()
+                memory[harness.core['ABT']] = abt
+                harness.invoke('ENTRY_LANDED')
+                self.assertEqual((bool(machine.f & Z), bool(machine.f & C), len(searched)), expect)
+    # Claude - 2026-10-10 - end
+
     def test_rollback_for_a_directory_uses_directory_type(self):
-        done, calls, _ = self.rename(deleted=(False, True), attr=0x10)
+        done, calls, _ = self.rename(deleted=(False, True), attr=0x10, old_writes_fail=True)
         self.assertFalse(done)
         self.assertEqual(calls[-1], ('DELEN', 0x10, b'wc.ini'))
 

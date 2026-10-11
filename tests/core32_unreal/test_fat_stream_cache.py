@@ -124,6 +124,9 @@ class Machine:
         m[self.core('FATFLAGS')] = self.fatflags
         put32(m, self.core('BFTSZ'), self.fat_sectors)
         m[self.core('SFAT'):self.core('SFAT') + 2] = self.sfat.to_bytes(2, 'little')
+        # Claude - 2026-10-10: резерв (BREZS), как у HDD: FSInfo читается и
+        # пишется только внутри него.
+        m[self.core('BREZS'):self.core('BREZS') + 2] = self.sfat.to_bytes(2, 'little')
         put32(m, self.core('SDFAT'), self.sdfat)
         put32(m, self.core('ADDTOP'), 0)
         put32(m, self.core('BROOTC'), 2)
@@ -304,7 +307,9 @@ class ChainModel:
         # прежде GIPAG понимал его как корень и поток шёл по корневому
         # каталогу (Codex R26-03).
         link = raw & 0x0FFFFFFF
-        if link < 2 or 0x0FFFFFF0 <= link < 0x0FFFFFF8:
+        # Claude - 2026-10-10: ссылка на первый кластер корня (BROOTC=2) —
+        # тоже порча: цепочка ушла в корень (драйвер FAT32).
+        if link < 3 or 0x0FFFFFF0 <= link < 0x0FFFFFF8:
             self.state = 0xFF
         elif link >= 0x0FFFFFF8:
             self.state = 0x0F
@@ -314,7 +319,9 @@ class ChainModel:
     def run(self, count: int) -> tuple[list[int], int, int]:
         """Вернуть LBA данных, A и CF одного вызова LOAD512/SAVE512/LOADNON."""
         if self.state:
-            return [], self.state, 0
+            # Claude - 2026-10-10: поток, остановленный ошибкой (#FF), и на
+            # следующем вызове отвечает CF=1 (прежде CF=0 — как конец).
+            return [], self.state, int(self.state == 0xFF)
         lbas = []
         for _ in range(count):
             lbas.append(self.m.cluster_lba(self.cluster) + self.sector)
@@ -405,7 +412,8 @@ class StreamTests(unittest.TestCase):
 
     def test_end_of_chain_bad_link_root_link_and_data_error(self):
         # EOC и повреждённая ссылка внутри уже кэшированного сектора FAT.
-        for last, state in ((EOC, 0x0F), (0x0FFFFFF5, 0xFF), (1, 0xFF), (0x10000000, 0xFF)):
+        for last, state in ((EOC, 0x0F), (0x0FFFFFF5, 0xFF), (1, 0xFF), (0x10000000, 0xFF),
+                            (2, 0xFF), (0x10000002, 0xFF)):
             with self.subTest(last=hex(last)):
                 m = Machine(spc=2)
                 chain = list(range(10, 20))
@@ -537,7 +545,10 @@ class StreamTests(unittest.TestCase):
         bpb[11:13] = (512).to_bytes(2, 'little')
         bpb[13], bpb[14:16], bpb[16] = 1, (32).to_bytes(2, 'little'), 1
         bpb[32:36] = (4096).to_bytes(4, 'little')
-        bpb[36:40] = (8).to_bytes(4, 'little')
+        # Claude - 2026-10-10: FAT на все номера кластеров и длина раздела —
+        # монтирование отвергает короткую FAT и том длиннее раздела.
+        bpb[36:40] = (32).to_bytes(4, 'little')
+        mbr[446 + 12:446 + 16] = (4096).to_bytes(4, 'little')
         bpb[44:48] = (2).to_bytes(4, 'little')
         bpb[48:50] = (1).to_bytes(2, 'little')
         bpb[510:512] = b'\x55\xAA'
@@ -547,6 +558,125 @@ class StreamTests(unittest.TestCase):
         a, f, _, _ = m.call(0x4009)
         self.assertTrue(f & 0x40, 'HDD не смонтировал тестовый том')
         self.assertEqual(m.generation(), generation + 1)
+
+
+# Claude - 2026-10-10 - begin
+class FileOpen(unittest.TestCase):
+    """GIPAG_FILE (GFILE — API 62, GIPAGPL — API 50): кластер 0 у файла —
+    пустой файл, а не корень; первый кластер из цепочки корня — порча. Прежде
+    GIPAG открывал по нулю корень, и SAVE512 писал в корень (драйвер FAT32)."""
+
+    def open_file(self, m, cluster):
+        put32(m.mem, CLUSTER_SLOT, cluster)
+        a, f, _, _ = m.call(m.extension('GIPAG_FILE'), hl=CLUSTER_SLOT)
+        return a, f
+
+    def test_empty_file_is_at_its_end(self):
+        m = Machine(spc=1)
+        m.set_fat(2, EOC)
+        a, f = self.open_file(m, 0)
+        self.assertEqual((a, f & 0x41), (0x0F, 0), 'NZ, CF=0, A=#0F — пустая цепочка')
+        self.assertEqual(m.mem[m.core('EOC')], 0x0F)
+        before = len(m.log)
+        m.mem[BUFFER:BUFFER + 512] = bytes([0xA5]) * 512
+        self.assertEqual(m.save(1)[:2], (0x0F, 0))
+        self.assertEqual(m.load(1)[:2], (0x0F, 0))
+        self.assertEqual([x for x in m.log[before:] if not m.is_fat(x[1])], [], 'обмен данными')
+
+    def test_file_on_a_root_cluster_is_refused(self):
+        for root in ([2], [2, 7], [2, 7, 9]):
+            with self.subTest(root=root):
+                m = Machine(spc=1)
+                m.make_chain(root)
+                a, f = self.open_file(m, root[-1])
+                self.assertEqual(f & 1, 1, 'кластер корня открыт как файл')
+                self.assertEqual(m.mem[m.core('ABT')], 0xFE)
+                self.assertEqual(m.mem[m.core('EOC')], 0xFF)
+                before = len(m.log)
+                self.assertEqual(m.save(1)[1], 1)
+                self.assertEqual([x for x in m.log[before:] if x[0] == 'W'], [], 'запись в корень')
+
+    def test_ordinary_file_opens_as_before(self):
+        # Поток — на цепочке файла: читаются её секторы. Прежде HL после шлюза
+        # нёс номер кластера, а не указатель, и GIPAG ставил поток не туда
+        # (стенд F5 2026-10-10); сверка одних A и CF этого не видела.
+        m = Machine(spc=2)
+        m.set_fat(2, EOC)
+        chain = [10, 11, 40]
+        m.make_chain(chain)
+        a, f = self.open_file(m, 10)
+        self.assertEqual(f & 0x41, 0x40, 'Z, CF=0 — как GIPAG')
+        model = ChainModel(m, 10)
+        lbas, state, error = model.run(6)
+        before = len(m.log)
+        self.assertEqual(m.load(6)[:2], (state, error))
+        self.assertEqual([lba for kind, lba in m.log[before:] if not m.is_fat(lba)], lbas)
+
+    def test_md20_file_entries_go_through_the_check(self):
+        sym = symbols(BUILD / 'boot.sym')
+        payload = (BUILD / 'boot.payload.bin').read_bytes()
+        # GFILE (L6011_228) — через проверку; GIPAGPL (L6011_155, #7F28) — нет:
+        # WC сам ставит им поток и на каталог, в том числе на корень.
+        for label, target in (('L6011_228', self.ext_symbol('GIPAG_FILE')), ('L6011_155', 0x4012)):
+            at = sym[label] + 3 - 0x6011                   # за LD HL,nn
+            self.assertEqual(payload[at], 0xC3, label)
+            self.assertEqual(int.from_bytes(payload[at + 1:at + 3], 'little'), target, label)
+
+    def ext_symbol(self, name):
+        return symbols(BUILD / 'CORE32_EXT.sym')['WDOS_EXT.' + name]
+
+
+class Load256Buffer(unittest.TestCase):
+    """LOAD256 (#4051): B секторов по 256 байт, по 1024 байта адресов на
+    сектор. Буфер ниже #4000 или с последним байтом за #FFFF — отказ без
+    обмена (A=#FF, CF=1): прежде DMA писал в SECBU/LOBU или, перейдя #FFFF, в
+    #0000.. файловой страницы."""
+
+    def machine(self):
+        m = Machine(spc=1)
+        m.make_chain(list(range(10, 60)))
+        m.open(10)
+        self.blocks = []
+
+        def rdd256():                               # A секторов, по 1024 байта адресов
+            for index in range(m.cpu.a or 256):
+                self.blocks.append((m.position + index, m.cpu.hl))
+                m.cpu.hl = (m.cpu.hl + 1024) & 0xFFFF
+            m.mem[m.core('ABT')] = 0
+            m._ret()
+
+        m.handlers[m.core('RDD256')] = rdd256
+        m.cpu.set_breakpoint(m.core('RDD256'))
+        return m
+
+    def test_buffers_inside_the_window_load(self):
+        for hl, count in ((0xC000, 16), (0xC001, 16), (0x4000, 48), (0xFD00, 1)):
+            with self.subTest(hl=hex(hl), count=count):
+                m = self.machine()
+                a, f, _, _ = m.call(0x4051, bc=count << 8, hl=hl)
+                self.assertEqual((a, f & 1), (0, 0))
+                self.assertEqual([at for _, at in self.blocks],
+                                 [(hl + 1024 * i) & 0xFFFF for i in range(count)])
+
+    def test_buffers_out_of_bounds_are_refused(self):
+        # Последний байт — HL+1024·(B−1)+767: SMUC пишет и вторую половину
+        # сектора по HL+512 (Codex, третий круг: прежде проверялось +255).
+        for hl, count in ((0xC000, 17), (0xFF01, 1), (0x3FFF, 1), (0x0000, 1),
+                          (0xC000, 0), (0x4000, 65), (0xFD01, 1), (0xFF00, 1), (0xC101, 16)):
+            with self.subTest(hl=hex(hl), count=count):
+                m = self.machine()
+                before = len(m.log)
+                a, f, _, _ = m.call(0x4051, bc=count << 8, hl=hl)
+                self.assertEqual((a, f & 1), (0xFF, 1))
+                self.assertEqual(self.blocks, [], 'обмен за границей буфера')
+                self.assertEqual(m.log[before:], [])
+                # Поток не сдвинулся: следующее чтение — с начала файла.
+                mark = len(m.log)
+                a, cf, _ = m.load(1)
+                self.assertEqual((a, cf), (0, 0))
+                data = [lba for kind, lba in m.log[mark:] if not m.is_fat(lba)]
+                self.assertEqual(data, [m.cluster_lba(10)])
+# Claude - 2026-10-10 - end
 
 
 class RefactorTests(unittest.TestCase):

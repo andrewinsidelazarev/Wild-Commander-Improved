@@ -46,10 +46,15 @@ B = symbols(ROOT / 'Build/boot.sym')
 IMAGE = WMF.read_bytes()[512:]                  # страница плагина без заголовка
 
 
-def template(name: str) -> bytes:
+def template(name: str, original: str | None = None) -> bytes:
     """Эталон перехвата из собранного плагина."""
-    start = S['ORIGINAL_' + name] & 0x3FFF
+    start = S[original or 'ORIGINAL_' + name] & 0x3FFF
     return IMAGE[start:start + S[name + '_LENGTH']]
+
+
+# Меню F10 текущего WC — вариант с полной таблицей (CP #C0 / JP Z); прежний
+# эталон менеджер тоже принимает, чтобы ставить перехват и в старом boot.$C.
+CURRENT_TEMPLATE = {'MENUBUILD': 'ORIGINAL_MENUBUILD_FULL'}
 
 
 def runtime(address: int, length: int) -> bytes:
@@ -71,8 +76,15 @@ class Hooks(unittest.TestCase):
     def test_templates_match_built_runtime(self):
         for name in HOOKS:
             with self.subTest(hook=name):
-                self.assertEqual(template(name), runtime(S[name], S[name + '_LENGTH']),
+                self.assertEqual(template(name, CURRENT_TEMPLATE.get(name)),
+                                 runtime(S[name], S[name + '_LENGTH']),
                                  f'код WC по #{S[name]:04X} разошёлся с эталоном {name}')
+
+    def test_previous_menu_template_is_still_accepted(self):
+        # Прежний WC: LD A,(PHED+1) / CP #C2 / JP C,F1E — отличается двумя байтами.
+        old, new = template('MENUBUILD'), template('MENUBUILD', 'ORIGINAL_MENUBUILD_FULL')
+        self.assertEqual(old[:4] + b'\xC2\xDA' + old[6:], old)
+        self.assertEqual(new, old[:4] + b'\xC0\xCA' + old[6:])
 
     def test_patch_fits_the_place_it_overwrites(self):
         # WALK кончается переходом, поэтому его заплата короче перекрываемого куска.
@@ -102,6 +114,8 @@ class Stand:
             self.pages[page] = bytearray(bytes([page]) * 0x4000)   # страницы различимы
         self.own = S['PLGPG'] + own
         self.pages[self.own][:len(IMAGE)] = IMAGE
+        wmf_runtime = (ROOT / 'Build/WMF_RUNTIME.bin').read_bytes()
+        self.pages[VARS_PAGE][0x1300:0x1300 + len(wmf_runtime)] = wmf_runtime
         self.records = records
         self.fill_headers(records)
 
@@ -300,7 +314,8 @@ MIXED = [
     dict(name='MaxiClock', type=0x02, pages=6),
 ]
 # Что видит пользователь в F10: то же, что WC Setup называет «F10» и «saver»,
-# по алфавиту — без учёта регистра и ведущих пробелов. Решает тип: всё, что
+# в порядке строк [PLUGINS] — таблицы заголовков WC (с 2026-10-11; порядок
+# задают F5/F6 и S в WC Setup, прежде меню сортировалось по алфавиту). Решает тип: всё, что
 # заявило F10, даже со своими расширениями (у Mounter, TRDump, TRDispatcher и
 # TXT Editor из F10 свой интерфейс); только по файлу — нет.
 F10_SET = [
@@ -319,13 +334,13 @@ F10_SET = [
     dict(name='F2 and menu', type=0x11, ext=b'ZZZ'),
     dict(name='F4 and menu', type=0x13),
 ]
-F10_SHOWN = ['ChkDsk FAT32', 'Create File', 'F2 and menu', 'F4 and menu', 'SCREEEN SAVER',
-             'setime v0.1', 'TR-DOS Mounter v1.59', 'TRDump v0.83', 'TXT Editor',
-             'WC Setup v0.1']
+F10_SHOWN = ['WC Setup v0.1', 'SCREEEN SAVER', 'TR-DOS Mounter v1.59', 'ChkDsk FAT32',
+             'Create File', 'TXT Editor', 'TRDump v0.83', 'setime v0.1', 'F2 and menu',
+             'F4 and menu']
 
 
 class Menu(unittest.TestCase):
-    """Меню F10 — группы «F10» и «saver» из WC Setup, по алфавиту."""
+    """Меню F10 — группы «F10» и «saver» из WC Setup, в порядке строк [PLUGINS]."""
 
     def setUp(self):
         self.stand = Stand(F10_SET)
@@ -341,7 +356,7 @@ class Menu(unittest.TestCase):
     def test_everything_declaring_f10_and_nothing_else(self):
         self.assertEqual(self.names(), F10_SHOWN)
 
-    def test_line_table_follows_the_sorted_names(self):
+    def test_line_table_follows_the_names(self):
         table = S['INDEX'] - 0x8000
         record = {item['name'].strip(): 0xC0 + 2 * index for index, item in enumerate(F10_SET)}
         expected = [record[name] for name in F10_SHOWN]
