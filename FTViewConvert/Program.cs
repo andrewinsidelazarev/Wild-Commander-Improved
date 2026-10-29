@@ -361,6 +361,16 @@ namespace FTViewConvert
             // sar кадра уже после поворота, который ffmpeg ставит перед -vf).
             a.AppendFormat(Inv, " -vf \"fps={0},{1}scale={2}:{3}:flags=lanczos,setsar=1,format=yuvj420p\"",
                            OutFps, crop ? CropFilter : "", size.Width, size.Height);
+            // Для AVI ffmpeg по умолчанию пропускает разрыв меток времени видео
+            // (VFR), и мультиплексор отмечает его пустыми чанками 00dc: видео
+            // позже звука на 0,5 с — 13 пустых в начале, разрыв меток или
+            // плавающий темп — пустой чанк за первым кадром. С cfr разрыв
+            // заполняется копией кадра: каждый чанк — целый JPEG. У MP3 первый
+            // пакет — с меткой −1105 (задержка LAME, 25 мс), и мультиплексор
+            // сдвигал на неё все дорожки: у видео это кадр (24 к/с), и за первым
+            // кадром шёл пустой чанк. Без сдвига видео начинается с нуля, а звук
+            // MP3 — с 25 мс тишины кодера (на PCM ключ не влияет).
+            a.Append(" -fps_mode cfr -avoid_negative_ts disabled");
             a.Append(" -c:v mjpeg").Append(vdac4 ? Vdac4Video : Vdac2Video);
             if (audio && gain.HasValue) a.Append(" -af \"").Append(LoudnessFilter(gain.Value, vdac4)).Append('"');
             if (audio && vdac4) a.Append(Mp3Codec);
@@ -502,10 +512,10 @@ namespace FTViewConvert
         const uint MaxEntries = 5460;         // AVI_INDEX_MAX плеера
         const string Magic = "FTVIEWI1";
 
-        static uint U32(byte[] b, int o) { return BitConverter.ToUInt32(b, o); }
-        static string Tag(byte[] b, int o) { return Encoding.ASCII.GetString(b, o, 4); }
+        internal static uint U32(byte[] b, int o) { return BitConverter.ToUInt32(b, o); }
+        internal static string Tag(byte[] b, int o) { return Encoding.ASCII.GetString(b, o, 4); }
 
-        static void ReadAt(FileStream f, long pos, byte[] buf)
+        internal static void ReadAt(FileStream f, long pos, byte[] buf)
         {
             f.Position = pos;
             int got = 0;
@@ -666,6 +676,99 @@ namespace FTViewConvert
                 return (int)k;
             }
         }
+    }
+
+    // nAvgBytesPerSec звука MP3 (режим VDAC4). Мультиплексор AVI ffmpeg пишет туда
+    // битрейт кодека / 8, а у LAME с переменным потоком (-q:a) битрейта нет —
+    // выходил 0. VIDEO.ELF VDAC4 по этому полю переводит байты MP3 во время:
+    // сколько звука можно выбросить, когда он отстал, и сколько выброшено при
+    // переполнении кольца; при 0 и то и другое — ноль. Сюда пишется настоящее
+    // среднее: байты чанков первой звуковой дорожки по idx1 на длительность
+    // звука из её strh (length · scale / rate).
+    static class Mp3Rate
+    {
+        // Записанное значение; 0 — не записано (звук не MP3, нет звука или idx1).
+        public static int Fix(string path)
+        {
+            using (FileStream f = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                long length = f.Length;
+                byte[] head = new byte[(int)Math.Min(length, 1 << 20)];
+                SeekIndex.ReadAt(f, 0, head);
+                if (head.Length < 12 || SeekIndex.Tag(head, 0) != "RIFF" || SeekIndex.Tag(head, 8) != "AVI ")
+                    return 0;
+                // Первая звуковая дорожка — как её берёт VIDEO.ELF (первый strf «auds»).
+                uint scale = 0, rate = 0, frames = 0, moviEnd = 0;
+                long strf = 0;
+                int stream = -1;
+                string chunk = null;
+                bool inAuds = false;
+                long[] ends = new long[4];
+                int depth = 0;
+                ends[0] = length;
+                long pos = 12;
+                while (true)
+                {
+                    while (depth > 0 && pos == ends[depth]) --depth;
+                    if (pos + 12 > head.Length) return 0;
+                    string tag = SeekIndex.Tag(head, (int)pos);
+                    uint size = SeekIndex.U32(head, (int)pos + 4);
+                    pos += 8;
+                    long end = pos + size;
+                    if (tag == "LIST")
+                    {
+                        string sub = SeekIndex.Tag(head, (int)pos);
+                        if (sub == "movi") { moviEnd = (uint)end; break; }
+                        if ((sub == "hdrl" || sub == "strl") && depth < 3) { ends[++depth] = end; pos += 4; continue; }
+                    }
+                    else if (tag == "strh" && size >= 36 && pos + 36 <= head.Length)
+                    {
+                        ++stream;
+                        inAuds = chunk == null && SeekIndex.Tag(head, (int)pos) == "auds";
+                        if (inAuds)
+                        {
+                            scale = SeekIndex.U32(head, (int)pos + 20);
+                            rate = SeekIndex.U32(head, (int)pos + 24);
+                            frames = SeekIndex.U32(head, (int)pos + 32);
+                            chunk = stream.ToString("00", Inv) + "wb";
+                        }
+                    }
+                    else if (tag == "strf" && inAuds && size >= 12 && pos + 12 <= head.Length)
+                    {
+                        if (BitConverter.ToUInt16(head, (int)pos) == 0x55) strf = pos;
+                        inAuds = false;
+                    }
+                    pos = end + (size & 1);
+                }
+                if (strf == 0 || scale == 0 || rate == 0 || frames == 0) return 0;
+                // idx1 — среди первых восьми чанков за LIST movi, как в SeekIndex.
+                long at = moviEnd + (moviEnd & 1);
+                byte[] hdr = new byte[8];
+                uint idxSize = 0;
+                int tries;
+                for (tries = 0; tries < 8; ++tries)
+                {
+                    if (at + 8 > length) return 0;
+                    SeekIndex.ReadAt(f, at, hdr);
+                    uint size = SeekIndex.U32(hdr, 4);
+                    if (SeekIndex.Tag(hdr, 0) == "idx1") { idxSize = size; break; }
+                    at += 8 + size + (size & 1);
+                }
+                if (tries == 8 || idxSize > length - at - 8) return 0;
+                byte[] idx = new byte[idxSize];
+                SeekIndex.ReadAt(f, at + 8, idx);
+                long bytes = 0;
+                for (int e = 0; e + 16 <= idx.Length; e += 16)
+                    if (SeekIndex.Tag(idx, e) == chunk) bytes += SeekIndex.U32(idx, e + 12);
+                if (bytes == 0) return 0;
+                uint avg = (uint)Math.Round((double)bytes * rate / ((double)frames * scale));
+                f.Position = strf + 8;
+                new BinaryWriter(f).Write(avg);
+                return (int)avg;
+            }
+        }
+
+        static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     }
 
     class MainForm : Form
@@ -949,7 +1052,7 @@ namespace FTViewConvert
             // ffmpeg успел его изменить.
             bool existed = File.Exists(output);
             DateTime stamp = existed ? File.GetLastWriteTimeUtc(output) : DateTime.MinValue;
-            bool isVdac4 = Vdac4;
+            bool isVdac4 = Vdac4, audio = source.HasAudio;
             ProcessStartInfo psi = new ProcessStartInfo(ffmpeg,
                 Recipe.Arguments(input, output, outSize, source.HasAudio, isVdac4, gain, crop.Checked));
             psi.UseShellExecute = false;
@@ -983,10 +1086,11 @@ namespace FTViewConvert
             {
                 Process done = worker;
                 int code = done.ExitCode;
-                // Готовая таблица перемотки — в поток завершения, до показа.
-                int entries = 0;
-                if (code == 0 && !cancelled && !isVdac4)
-                    try { entries = SeekIndex.Embed(output); }
+                // Готовая таблица перемотки (VDAC2) или средний поток MP3 в
+                // заголовке (VDAC4) — в поток завершения, до показа.
+                int entries = 0, mp3Rate = 0;
+                if (code == 0 && !cancelled)
+                    try { if (isVdac4) mp3Rate = Mp3Rate.Fix(output); else entries = SeekIndex.Embed(output); }
                     catch (Exception) { entries = -1; }
                 Ui(delegate
                 {
@@ -996,7 +1100,8 @@ namespace FTViewConvert
                     if (code == 0)
                     {
                         bar.Value = 100;
-                        status.Text = "Done: " + output + (isVdac4 ? ""
+                        status.Text = "Done: " + output + (isVdac4
+                            ? (audio && mp3Rate == 0 ? "\r\nMP3 byte rate was not written to the header." : "")
                             : entries > 0 ? string.Format("\r\nSeek table embedded: {0} entries.", entries)
                             : "\r\nSeek table not embedded: the player builds it on the first seek.") + note;
                         // Кодирование идёт минутами, окно к концу часто свёрнуто.
@@ -1107,6 +1212,7 @@ namespace FTViewConvert
                         w.WriteLine("exit={0}", p.ExitCode);
                         if (p.ExitCode != 0) { w.WriteLine(err); return 1; }
                         w.WriteLine("index={0}", vdac4 ? 0 : SeekIndex.Embed(output));
+                        if (vdac4) w.WriteLine("mp3rate={0}", Mp3Rate.Fix(output));
                         return 0;
                     }
                 }
