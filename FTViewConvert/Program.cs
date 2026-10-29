@@ -1,22 +1,24 @@
-// FTView Convert — перекодирование видео в MJPEG AVI для плагина FTView
-// (VDAC2/FT812, звук на General Sound или FT812).
+// FTView Convert — перекодирование видео в MJPEG AVI для VDAC2 (плагин
+// FTView, FT812) и VDAC4.
 //
-// Выход: MJPEG baseline 4:2:0 со стандартными таблицами Хаффмана и своей
-// матрицей квантования (меньше квадратиков, см. IntraMatrix), 24 кадра/с,
-// ~2 Мбит/с (как у проверенного образца Muse, около 250 КБ/с с SD), звук на
-// выбор: PCM 8 бит без знака (araw) моно 22 050 или 32 000 Гц — его выводит
+// Видео в обоих режимах: MJPEG baseline 4:2:0, 24 кадра/с.
+// Режим VDAC2 — стандартные таблицы Хаффмана и своя матрица квантования
+// (меньше квадратиков, см. IntraMatrix), ~2 Мбит/с (как у проверенного образца
+// Muse, около 250 КБ/с с SD); звук PCM 8 бит без знака (araw) моно 32 000 Гц: его выводит
 // ЦАП GS (до 37,5 кГц — частота его прерываний), а без GS — звуковой блок
-// FT812; или MP3 44,1 кГц 16 бит стерео с переменным потоком около
-// 192 кбит/с (LAME V2) — его FTView сам не играет (GS и FT812 MP3 не
-// декодируют), он для другого тракта звука.
-// Индекс idx1 и готовая таблица перемотки плеера (см. SeekIndex): первая
-// перемотка не разбирает idx1 целиком. Таблица — только при звуке PCM 8 бит.
-// Разрешение — с точными пропорциями исходника (см. OutputSize): стороны кратны
-// 16 (блок JPEG 4:2:0), площадь не больше 512×384 = 196 608 точек — предел
-// плеера, при котором работают и звук FT812, и таблица перемотки в RAM_G;
-// ширина до 1024, высота до 768 (кадр вписывается во весь экран), не больше
-// исходника. Галочка «Crop 4:3» симметрично обрезает боковые стороны кадра
-// шире 4:3 (см. Crop43): картинка занимает весь экран FT812 без полос.
+// FT812. Индекс idx1 и готовая таблица перемотки плеера (см. SeekIndex):
+// первая перемотка не разбирает idx1 целиком. Разрешение — с точными
+// пропорциями исходника (см. OutputSize): стороны кратны 16 (блок JPEG 4:2:0),
+// площадь не больше 512×384 = 196 608 точек — предел плеера, при котором
+// работают и звук FT812, и таблица перемотки в RAM_G; ширина до 1024, высота
+// до 768 (кадр вписывается во весь экран), не больше исходника.
+// Режим VDAC4 — кадр вписан в 640×480 (16:9 — 640×360, 4:3 — 640×480, см.
+// OutputSizeVdac4), ~2,8 Мбит/с, матрица и таблицы Хаффмана — под деблокер
+// ядра видео VDAC4 (см. Vdac4Video), звук MP3 44,1 кГц 16 бит стерео с
+// переменным потоком около 192 кбит/с (LAME V2). Таблица перемотки FTView в
+// такой файл не встраивается: она считает звуковые байты сэмплами PCM.
+// Галочка «Crop 4:3» симметрично обрезает боковые стороны кадра шире 4:3 (см.
+// Crop43): картинка занимает весь экран без полос.
 //
 // ffmpeg.exe вшит ресурсом и при первом запуске распаковывается в
 // %LOCALAPPDATA%\FTViewConvert. Сборка — build.ps1 рядом, иконка —
@@ -27,8 +29,9 @@
 // Windows не даёт, объясняет причину: права папки, «Контролируемый доступ к
 // папкам» Защитника Windows, файл открыт в другой программе.
 //
-// Пакетный режим без окна: FTViewConvert.exe --batch <вход> <журнал> [22050|32000|mp3] [nonorm] [crop43]
-// (код выхода 0 — успех); --probe <вход> <журнал> [crop43] — только расчёт размера.
+// Пакетный режим без окна: FTViewConvert.exe --batch <вход> <журнал> [vdac4] [nonorm] [crop43]
+// (код выхода 0 — успех; без vdac4 — режим VDAC2); --probe <вход> <журнал>
+// [vdac4] [crop43] — только расчёт размера.
 using System;
 using System.Diagnostics;
 using System.Drawing;
@@ -64,9 +67,10 @@ namespace FTViewConvert
         public const int MaxArea = 512 * 384;
         public const int MaxWidth = 1024;
         public const int MaxHeight = 768;
-        public const int AudioRate = 22050;       // по умолчанию; можно и 32000
-        // MP3: 44,1 кГц, 16 бит стерео, переменный поток LAME V2 (~190 кбит/с).
+        public const int AudioRate = 32000;       // VDAC2: PCM 8 бит моно
+        // VDAC4: MP3 44,1 кГц, 16 бит стерео, переменный поток LAME V2 (~190 кбит/с).
         public const int Mp3Rate = 44100;
+        public const int Vdac4Width = 640, Vdac4Height = 480, Vdac4WideHeight = 360;
         const string Mp3Codec = " -c:a libmp3lame -q:a 2 -ar 44100 -ac 2 -sample_fmt s16p";
         const string FfmpegResource = "FTViewConvert.ffmpeg.exe";
         public const string FfmpegVersion = "9.0.2";
@@ -156,7 +160,37 @@ namespace FTViewConvert
         // приходится больше бит.
         const double AspectTolerance = 0.005, MinAreaShare = 0.6;
 
-        public static Size OutputSize(SourceInfo s)
+        public static Size OutputSize(SourceInfo s, bool vdac4)
+        {
+            return vdac4 ? OutputSizeVdac4(s) : OutputSizeVdac2(s);
+        }
+
+        // VDAC4: кадр с пропорциями исходника, вписанный в 640×480: 16:9 —
+        // 640×360, 4:3 (и «Crop 4:3» у 16:9) — 640×480, 9:16 — 270×480. Стороны
+        // чётные (4:2:0); кратность 16 нужна только декодеру FT812 (VDAC2).
+        // Маленькое видео не растягивается, как и в VDAC2. Ядро видео кладёт
+        // кадр с 9·ширина ≥ 14·высота на холст 16:9, наименьший из 512×288,
+        // 640×360 и 1024×576, куда он входит: такой кадр выше 360 строк (16:10 —
+        // 640×400) ушёл бы на 1024×576 и на экране был бы мельче, поэтому он
+        // вписывается в 640×360 (16:10 — 576×360).
+        public static Size OutputSizeVdac4(SourceInfo s)
+        {
+            Size size = FitVdac4(s, Vdac4Height);
+            if (9 * size.Width >= 14 * size.Height && size.Height > Vdac4WideHeight)
+                size = FitVdac4(s, Vdac4WideHeight);
+            return size;
+        }
+
+        static Size FitVdac4(SourceInfo s, int boxHeight)
+        {
+            double w = Vdac4Width, h = w / s.Aspect;
+            if (h > boxHeight) { h = boxHeight; w = h * s.Aspect; }
+            double scale = Math.Min(1.0, Math.Min(s.Height / h, s.Height * s.Aspect / w));
+            Func<double, int> even = v => Math.Max(16, (int)Math.Round(v * scale / 2) * 2);
+            return new Size(even(w), even(h));
+        }
+
+        static Size OutputSizeVdac2(SourceInfo s)
         {
             int capW = Math.Max(16, (int)Math.Ceiling(s.Height * s.Aspect / 16.0) * 16);
             int capH = Math.Max(16, (int)Math.Ceiling(s.Height / 16.0) * 16);
@@ -208,13 +242,13 @@ namespace FTViewConvert
             return c;
         }
 
-        public static string OutputPath(string input, Size size, int rate, bool mp3)
+        public static string OutputPath(string input, Size size, bool vdac4)
         {
             string dir = Path.GetDirectoryName(Path.GetFullPath(input));
             string name = Path.GetFileNameWithoutExtension(input);
-            return Path.Combine(dir, string.Format(Inv, "{0} - FTView {1}x{2} 24p {3}{4} kHz.avi",
-                                                   name, size.Width, size.Height, mp3 ? "MP3 " : "",
-                                                   (mp3 ? Mp3Rate : rate) / 1000));
+            return Path.Combine(dir, string.Format(Inv, vdac4 ? "{0} - VDAC4 {1}x{2} 24p MP3.avi"
+                                                              : "{0} - FTView {1}x{2} 24p 32 kHz.avi",
+                                                   name, size.Width, size.Height));
         }
 
         // Нормализация до 0 дБ: весь файл усиливается одним множителем так, что
@@ -229,15 +263,15 @@ namespace FTViewConvert
         // в плавающей точке без среза (сведение стерео в моно — до +3 дБ).
         const string Prepare = "aformat=sample_fmts=flt:channel_layouts={1},aresample={0}";
         const double TargetLufs = -12, MaxLimitDb = 2;
-        // MP3: пик — до −1 дБ, а не до полной шкалы: декодер MP3 восстанавливает
-        // волну с выбросами выше исходных пиков, и при 0 дБ они срезались бы.
-        // Подъёма тихой записи с лимитером нет: он нужен 8-битному PCM (48 дБ),
-        // у 16 бит тихий звук в шуме квантования не тонет.
+        // VDAC4 (MP3): пик — до −1 дБ, а не до полной шкалы: декодер MP3
+        // восстанавливает волну с выбросами выше исходных пиков, и при 0 дБ они
+        // срезались бы. Подъёма тихой записи с лимитером нет: он нужен 8-битному
+        // PCM (48 дБ), у 16 бит тихий звук в шуме квантования не тонет.
         const double Mp3CeilingDb = -1;
 
-        static string PrepareFor(int rate, bool mp3)
+        static string PrepareFor(bool mp3)
         {
-            return string.Format(Inv, Prepare, mp3 ? Mp3Rate : rate, mp3 ? "stereo" : "mono");
+            return string.Format(Inv, Prepare, mp3 ? Mp3Rate : AudioRate, mp3 ? "stereo" : "mono");
         }
 
         // Усиление в дБ по отчётам astats (пик) и ebur128 (громкость); null —
@@ -255,19 +289,19 @@ namespace FTViewConvert
 
         // Второй проход: тот же звук, усиление и лимитер с потолком 0 дБ (у MP3
         // −1 дБ) — он срабатывает только на пиках выше потолка.
-        public static string LoudnessFilter(double gain, int rate, bool mp3)
+        public static string LoudnessFilter(double gain, bool mp3)
         {
-            return PrepareFor(rate, mp3) + string.Format(Inv,
+            return PrepareFor(mp3) + string.Format(Inv,
                 ",volume={0:0.0000}dB,alimiter=limit={1:0.0000}:attack=50:release=1000:level=0:latency=1",
                 gain, mp3 ? Math.Pow(10, Mp3CeilingDb / 20) : 1);
         }
 
         // Первый проход: только звук, без записи файла. started получает
         // процесс, чтобы его можно было остановить.
-        public static double? MeasureLoudness(string ffmpeg, string input, int rate, bool mp3, Action<Process> started)
+        public static double? MeasureLoudness(string ffmpeg, string input, bool mp3, Action<Process> started)
         {
             ProcessStartInfo psi = new ProcessStartInfo(ffmpeg, "-hide_banner -nostdin -nostats -i " + Quote(input) +
-                " -map 0:a:0 -vn -af \"" + PrepareFor(rate, mp3) +
+                " -map 0:a:0 -vn -af \"" + PrepareFor(mp3) +
                 ",astats=measure_perchannel=none:measure_overall=Peak_level,ebur128=framelog=quiet\" -f null -");
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
@@ -294,8 +328,29 @@ namespace FTViewConvert
             "8,10,11,20,23,24,46,54,10,10,20,22,24,46,54,59,11,20,23,24,46,54,54,61," +
             "20,20,23,43,46,54,59,96,20,23,43,46,51,56,96,115,23,43,46,51,56,96,115,139," +
             "42,43,46,54,91,110,134,166,43,46,56,91,110,134,166,199";
+        const string Vdac2Video = " -huffman default -intra_matrix " + IntraMatrix +
+                                  " -b:v 2000k -maxrate 2600k -bufsize 2000k";
 
-        public static string Arguments(string input, string output, Size size, bool audio, int rate, bool mp3,
+        // VDAC4: кадр декодирует ПЛИС (ядро видео 1.43) со своим деблокером: окно
+        // края блока сглаживается, если размах зелёной в нём меньше 2·QP, а QP —
+        // половина большего из шагов DC и первого AC таблицы яркости. Поэтому
+        // матрица — стандартная MPEG-1 (её ffmpeg берёт по умолчанию), а не
+        // IntraMatrix: у той первый AC мельче, и деблокер сглаживал бы меньше.
+        // Таблица одна: вторую ядро не держит (она затирает первую). Таблицы
+        // Хаффмана — оптимальные для каждого кадра: ядро берёт DHT из кадра, а
+        // файл при том же качестве на 9–14% меньше. Поток 2,8 Мбит/с: кадр в 1,56
+        // раза больше, чем в VDAC2 (640×360 против 512×288), а файл со звуком MP3
+        // читается в среднем ~370 КиБ/с, в пике до ~540 за секунду — как «Кино»
+        // (371 и 564 КиБ/с), которое ядро на плате проигрывало ровно. На модели показа
+        // (декодер ядра, размножение цветности, деблокер) против параметров VDAC2:
+        // Muse 640×480 — PSNR 39,6 → 44,3 дБ, ступенька яркости на краях блоков
+        // 0,89 → 0,65; «Кино» 512×384 — 45,1 → 52,9 дБ; куры 854×480 → 640×360 —
+        // 30,6 → 32,5 дБ (2 Мбит/с там недостижимы вовсе). Фильтры перед сжатием
+        // (hqdn3d, gblur) квадратов почти не убирали, а картинку мылили.
+        const string Vdac4Video = " -huffman optimal -b:v 2800k -maxrate 3600k -bufsize 2800k";
+
+        // vdac4: звук MP3 стерео, иначе (VDAC2) — PCM 8 бит моно 32 000 Гц.
+        public static string Arguments(string input, string output, Size size, bool audio, bool vdac4,
                                        double? gain, bool crop)
         {
             StringBuilder a = new StringBuilder();
@@ -306,11 +361,10 @@ namespace FTViewConvert
             // sar кадра уже после поворота, который ffmpeg ставит перед -vf).
             a.AppendFormat(Inv, " -vf \"fps={0},{1}scale={2}:{3}:flags=lanczos,setsar=1,format=yuvj420p\"",
                            OutFps, crop ? CropFilter : "", size.Width, size.Height);
-            a.Append(" -c:v mjpeg -huffman default -intra_matrix ").Append(IntraMatrix);
-            a.Append(" -b:v 2000k -maxrate 2600k -bufsize 2000k");
-            if (audio && gain.HasValue) a.Append(" -af \"").Append(LoudnessFilter(gain.Value, rate, mp3)).Append('"');
-            if (audio && mp3) a.Append(Mp3Codec);
-            else if (audio) a.AppendFormat(Inv, " -c:a pcm_u8 -ar {0} -ac 1", rate);
+            a.Append(" -c:v mjpeg").Append(vdac4 ? Vdac4Video : Vdac2Video);
+            if (audio && gain.HasValue) a.Append(" -af \"").Append(LoudnessFilter(gain.Value, vdac4)).Append('"');
+            if (audio && vdac4) a.Append(Mp3Codec);
+            else if (audio) a.AppendFormat(Inv, " -c:a pcm_u8 -ar {0} -ac 1", AudioRate);
             a.Append(" -f avi ").Append(Quote(output));
             return a.ToString();
         }
@@ -413,11 +467,11 @@ namespace FTViewConvert
                    " or choose another folder.";
         }
 
-        public static string Describe(SourceInfo s, Size size, int rate, bool mp3, bool crop)
+        public static string Describe(SourceInfo s, Size size, bool vdac4, bool crop)
         {
             return string.Format(Inv,
                 "Source: {0}×{1}, {2:0.###}:1{3}{4}, sound: {5}\r\n" +
-                "Result: {6}×{7}{8}, {9} fps, MJPEG ~2 Mbit/s{10}",
+                "Result: {6}×{7}{8}, {9} fps, MJPEG ~{11} Mbit/s{10}",
                 s.Width, s.Height, s.Aspect,
                 s.Fps.Length > 0 ? ", " + s.Fps + " fps" : "",
                 s.Rotation != 0 ? string.Format(Inv, ", rotated {0}°", s.Rotation) : "",
@@ -426,8 +480,9 @@ namespace FTViewConvert
                 !crop ? "" : Crops(s) ? " (sides cropped to 4:3)" : " (not wider than 4:3: not cropped)",
                 OutFps,
                 !s.HasAudio ? ", no sound" :
-                mp3 ? ", MP3 44.1 kHz 16-bit stereo, VBR ~192 kbit/s (not played by FTView)" :
-                string.Format(Inv, ", PCM 8-bit mono {0} Hz", rate));
+                vdac4 ? ", MP3 44.1 kHz 16-bit stereo, VBR ~192 kbit/s" :
+                string.Format(Inv, ", PCM 8-bit mono {0} Hz", AudioRate),
+                vdac4 ? "2.8" : "2");
         }
     }
 
@@ -622,9 +677,8 @@ namespace FTViewConvert
         readonly Button openDir = new Button();
         readonly Label info = new Label();
         readonly CheckBox crop = new CheckBox();
-        readonly RadioButton rate22 = new RadioButton();
-        readonly RadioButton rate32 = new RadioButton();
-        readonly RadioButton mp3 = new RadioButton();
+        readonly RadioButton vdac2 = new RadioButton();
+        readonly RadioButton vdac4 = new RadioButton();
         readonly CheckBox normalize = new CheckBox();
         readonly Button run = new Button();
         readonly ProgressBar bar = new ProgressBar();
@@ -685,24 +739,18 @@ namespace FTViewConvert
             crop.SetBounds(124, 142, 200, 24);
             crop.CheckedChanged += delegate { Retarget(); };
 
-            // PCM 8 бит: 22 050 Гц — проверенный поток; 32 000 Гц — звонче на
-            // 10 КБ/с больше (GS играет до 37,5 кГц, FT812 — до 48 кГц). MP3
-            // 44,1 кГц стерео — для тракта, который декодирует MP3 сам: FTView
-            // такой звук не играет.
-            Label rateLabel = new Label();
-            rateLabel.Text = "Sound:";
-            rateLabel.SetBounds(12, 175, 110, 20);
-            rate22.Text = "PCM 8-bit 22,050 Hz";
-            rate22.SetBounds(124, 172, 150, 24);
-            rate22.Checked = true;
-            rate32.Text = "PCM 8-bit 32,000 Hz";
-            rate32.SetBounds(280, 172, 150, 24);
-            mp3.Text = "MP3 44.1 kHz stereo";
-            mp3.SetBounds(436, 172, 212, 24);
-            rate22.CheckedChanged += delegate { ShowTarget(); };
-            rate32.CheckedChanged += delegate { ShowTarget(); };
-            mp3.CheckedChanged += delegate { ShowTarget(); };
-            normalize.Text = "Normalize audio level (PCM to 0 dB, MP3 to -1 dB)";
+            // Режим: VDAC2 (FTView, FT812) — кадр до 512×384, PCM 8 бит 32 000 Гц;
+            // VDAC4 — кадр в 640×480, MP3 стерео. Размер у режимов разный.
+            Label modeLabel = new Label();
+            modeLabel.Text = "Mode:";
+            modeLabel.SetBounds(12, 175, 110, 20);
+            vdac2.Text = "VDAC2: 512×288 (512×384), PCM 32 kHz";
+            vdac2.SetBounds(124, 172, 262, 24);
+            vdac2.Checked = true;
+            vdac4.Text = "VDAC4: 640×360 (640×480), MP3 stereo";
+            vdac4.SetBounds(392, 172, 256, 24);
+            vdac2.CheckedChanged += delegate { Retarget(); };
+            normalize.Text = "Normalize audio level (VDAC2 to 0 dB, VDAC4 to -1 dB)";
             normalize.SetBounds(124, 200, 524, 24);
             normalize.Checked = true;
 
@@ -715,7 +763,7 @@ namespace FTViewConvert
             status.SetBounds(12, 275, 636, 66);
 
             Controls.AddRange(new Control[] { fileLabel, fileBox, browse, outLabel, outBox, outChange, openDir, info,
-                                              pictureLabel, crop, rateLabel, rate22, rate32, mp3, normalize, run,
+                                              pictureLabel, crop, modeLabel, vdac2, vdac4, normalize, run,
                                               bar, status });
             AllowDrop = true;
             DragEnter += delegate(object s, DragEventArgs e)
@@ -785,14 +833,13 @@ namespace FTViewConvert
             });
         }
 
-        int Rate { get { return mp3.Checked ? Recipe.Mp3Rate : rate32.Checked ? 32000 : Recipe.AudioRate; } }
-        bool Mp3 { get { return mp3.Checked; } }
+        bool Vdac4 { get { return vdac4.Checked; } }
 
         // Файл результата: имя по шаблону (или выбранное), папка — выбранная
         // или папка исходника.
         string OutputFile()
         {
-            string auto = Recipe.OutputPath(fileBox.Text, outSize, Rate, Mp3);
+            string auto = Recipe.OutputPath(fileBox.Text, outSize, Vdac4);
             return Path.Combine(outDir ?? Path.GetDirectoryName(auto), outName ?? Path.GetFileName(auto));
         }
 
@@ -807,7 +854,7 @@ namespace FTViewConvert
                 dlg.InitialDirectory = Path.GetDirectoryName(current);
                 dlg.FileName = Path.GetFileName(current);
                 if (dlg.ShowDialog(this) != DialogResult.OK) return false;
-                string auto = Path.GetFileName(Recipe.OutputPath(fileBox.Text, outSize, Rate, Mp3));
+                string auto = Path.GetFileName(Recipe.OutputPath(fileBox.Text, outSize, Vdac4));
                 string chosen = Path.GetFileName(dlg.FileName);
                 outDir = Path.GetDirectoryName(dlg.FileName);
                 outName = string.Equals(chosen, auto, StringComparison.OrdinalIgnoreCase) ? null : chosen;
@@ -816,18 +863,18 @@ namespace FTViewConvert
             }
         }
 
-        // Разрешение — по кадру после обрезки «Crop 4:3», если она включена.
+        // Разрешение — по режиму и кадру после обрезки «Crop 4:3», если она включена.
         void Retarget()
         {
             if (source == null || worker != null) return;
-            outSize = Recipe.OutputSize(crop.Checked ? Recipe.Crop43(source) : source);
+            outSize = Recipe.OutputSize(crop.Checked ? Recipe.Crop43(source) : source, Vdac4);
             ShowTarget();
         }
 
         void ShowTarget()
         {
             if (source == null || worker != null) return;
-            info.Text = Recipe.Describe(source, outSize, Rate, Mp3, crop.Checked);
+            info.Text = Recipe.Describe(source, outSize, Vdac4, crop.Checked);
             string output = OutputFile();
             ShowEnd(outBox, output);
             string problem = Recipe.CheckWritable(output);
@@ -839,7 +886,7 @@ namespace FTViewConvert
         {
             busy = on;
             run.Text = on ? "Stop" : "Convert";
-            browse.Enabled = outChange.Enabled = crop.Enabled = rate22.Enabled = rate32.Enabled = mp3.Enabled =
+            browse.Enabled = outChange.Enabled = crop.Enabled = vdac2.Enabled = vdac4.Enabled =
                 normalize.Enabled = !on;
         }
 
@@ -877,15 +924,14 @@ namespace FTViewConvert
                 Encode(input, output, null, "");
                 return;
             }
-            // Первый проход — замер уровня, в фоне: окно не замирает. Частоту
+            // Первый проход — замер уровня, в фоне: окно не замирает. Режим
             // берём здесь: переключатели заблокированы до конца работы.
             status.Text = "Measuring audio level…";
-            int rate = Rate;
-            bool isMp3 = Mp3;
+            bool mp3 = Vdac4;
             ThreadPool.QueueUserWorkItem(delegate
             {
                 double? gain = null;
-                try { gain = Recipe.MeasureLoudness(ffmpeg, input, rate, isMp3, delegate(Process p) { measure = p; }); }
+                try { gain = Recipe.MeasureLoudness(ffmpeg, input, mp3, delegate(Process p) { measure = p; }); }
                 catch (Exception) { }
                 measure = null;
                 Ui(delegate
@@ -903,9 +949,9 @@ namespace FTViewConvert
             // ffmpeg успел его изменить.
             bool existed = File.Exists(output);
             DateTime stamp = existed ? File.GetLastWriteTimeUtc(output) : DateTime.MinValue;
-            bool isMp3 = Mp3 && source.HasAudio;
+            bool isVdac4 = Vdac4;
             ProcessStartInfo psi = new ProcessStartInfo(ffmpeg,
-                Recipe.Arguments(input, output, outSize, source.HasAudio, Rate, Mp3, gain, crop.Checked));
+                Recipe.Arguments(input, output, outSize, source.HasAudio, isVdac4, gain, crop.Checked));
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
             psi.RedirectStandardOutput = true;
@@ -939,7 +985,7 @@ namespace FTViewConvert
                 int code = done.ExitCode;
                 // Готовая таблица перемотки — в поток завершения, до показа.
                 int entries = 0;
-                if (code == 0 && !cancelled)
+                if (code == 0 && !cancelled && !isVdac4)
                     try { entries = SeekIndex.Embed(output); }
                     catch (Exception) { entries = -1; }
                 Ui(delegate
@@ -950,9 +996,8 @@ namespace FTViewConvert
                     if (code == 0)
                     {
                         bar.Value = 100;
-                        status.Text = "Done: " + output + (entries > 0
-                            ? string.Format("\r\nSeek table embedded: {0} entries.", entries)
-                            : isMp3 ? "\r\nMP3 sound: FTView plays PCM 8-bit only, no seek table embedded."
+                        status.Text = "Done: " + output + (isVdac4 ? ""
+                            : entries > 0 ? string.Format("\r\nSeek table embedded: {0} entries.", entries)
                             : "\r\nSeek table not embedded: the player builds it on the first seek.") + note;
                         // Кодирование идёт минутами, окно к концу часто свёрнуто.
                         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
@@ -1007,16 +1052,14 @@ namespace FTViewConvert
         {
             if (args.Length >= 3 && args.Length <= 6 && (args[0] == "--batch" || args[0] == "--probe"))
             {
-                int rate = Recipe.AudioRate;
-                bool norm = true, crop = false, mp3 = false;
+                bool norm = true, crop = false, vdac4 = false;
                 for (int i = 3; i < args.Length; ++i)
                 {
-                    if (args[i].StartsWith("32")) rate = 32000;
-                    else if (args[i] == "mp3") { mp3 = true; rate = Recipe.Mp3Rate; }
+                    if (args[i] == "vdac4") vdac4 = true;
                     else if (args[i] == "nonorm") norm = false;
                     else if (args[i] == "crop43") crop = true;
                 }
-                return Batch(args[0], args[1], args[2], rate, mp3, norm, crop);
+                return Batch(args[0], args[1], args[2], vdac4, norm, crop);
             }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -1028,7 +1071,7 @@ namespace FTViewConvert
         }
 
         // Пакетный режим для проверок и сценариев: журнал в UTF-8.
-        static int Batch(string mode, string input, string log, int rate, bool mp3, bool norm, bool crop)
+        static int Batch(string mode, string input, string log, bool vdac4, bool norm, bool crop)
         {
             using (StreamWriter w = new StreamWriter(log, false, new UTF8Encoding(false)))
             {
@@ -1036,20 +1079,20 @@ namespace FTViewConvert
                 {
                     string ffmpeg = Recipe.Ffmpeg();
                     SourceInfo s = Recipe.Probe(ffmpeg, input);
-                    Size size = Recipe.OutputSize(crop ? Recipe.Crop43(s) : s);
-                    string output = Recipe.OutputPath(input, size, rate, mp3);
+                    Size size = Recipe.OutputSize(crop ? Recipe.Crop43(s) : s, vdac4);
+                    string output = Recipe.OutputPath(input, size, vdac4);
                     w.WriteLine("size={0}x{1}", size.Width, size.Height);
                     w.WriteLine("output={0}", output);
-                    w.WriteLine(Recipe.Describe(s, size, rate, mp3, crop));
+                    w.WriteLine(Recipe.Describe(s, size, vdac4, crop));
                     string problem = Recipe.CheckWritable(output);
                     w.WriteLine("write={0}", problem ?? "ok");
                     if (mode == "--probe") return 0;
                     if (problem != null) return 2;
-                    double? gain = s.HasAudio && norm ? Recipe.MeasureLoudness(ffmpeg, input, rate, mp3, null) : null;
+                    double? gain = s.HasAudio && norm ? Recipe.MeasureLoudness(ffmpeg, input, vdac4, null) : null;
                     w.WriteLine("gain={0}", gain.HasValue ? gain.Value.ToString("0.00", CultureInfo.InvariantCulture) + " dB"
                                                           : s.HasAudio && norm ? "failed" : "off");
                     ProcessStartInfo psi = new ProcessStartInfo(ffmpeg,
-                        Recipe.Arguments(input, output, size, s.HasAudio, rate, mp3, gain, crop));
+                        Recipe.Arguments(input, output, size, s.HasAudio, vdac4, gain, crop));
                     psi.UseShellExecute = false;
                     psi.CreateNoWindow = true;
                     psi.RedirectStandardOutput = true;
@@ -1063,7 +1106,7 @@ namespace FTViewConvert
                         p.WaitForExit();
                         w.WriteLine("exit={0}", p.ExitCode);
                         if (p.ExitCode != 0) { w.WriteLine(err); return 1; }
-                        w.WriteLine("index={0}", SeekIndex.Embed(output));
+                        w.WriteLine("index={0}", vdac4 ? 0 : SeekIndex.Embed(output));
                         return 0;
                     }
                 }
