@@ -153,6 +153,9 @@ PROZ    LD A,H,H,D,D,E,E,A
         RET
 
 REREG   PUSH HL,DE
+        IFDEF IDE_CHS
+        LD A,(CHS_SPT):OR A:JP NZ,CHS_REREG     ; диск без LBA (IDE_CHS.INC)
+        ENDIF
         LD HL,(BLKNUM)
         LD DE,(BLKNUM+2)
 
@@ -252,7 +255,11 @@ REINI   RET
 
 
 ; Проверить наличие IDE-команды IDENTIFY и корректность адресных регистров.
-SMUCini CALL SET_CHA
+SMUCini
+        IFDEF IDE_CHS
+        CALL CHS_RESET
+        ENDIF
+        CALL SET_CHA
         LD A,#08:CALL COMM
 
         LD HL,256:CALL YDET:JR NZ,RU
@@ -274,7 +281,11 @@ SMUCini CALL SET_CHA
 RU      LD A,1:OR A
         RET
 
-KRU     XOR A
+KRU
+        IFDEF IDE_CHS
+        CALL CHS_SETUP:JR NZ,RU
+        ENDIF
+        XOR A
         RET
 
 
@@ -338,6 +349,10 @@ HUD
         DEC A:JP NZ,HUD
         INC H
         RET
+
+        IFDEF IDE_CHS
+        INCLUDE "IDE_CHS.INC"
+        ENDIF
 
 STS     EQU #27AF
 

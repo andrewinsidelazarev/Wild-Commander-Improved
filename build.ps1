@@ -155,6 +155,44 @@ foreach ($driver in $DriverChecks) {
     }
 }
 
+# Claude - 2026-11-17 - begin
+# Драйверы IDE с адресацией CHS (диски без LBA): те же исходники с ключом
+# IDE_CHS (source/IDE_CHS.INC). Штатные образы выше остаются побайтно
+# прежними; эти упаковываются HR-потоками и едут в FILEX.WMF, а DOS_SWP после
+# установки FILEX распаковывает Nemo и SMUC оттуда (docs/03, раздел 2).
+foreach ($driverName in 'DIDENEMO', 'DIDESMUC') {
+    $chsName = "${driverName}_CHS"
+    $chsRaw = Join-Path $DriverBuildDir "$chsName.bin"
+    $chsPacked = Join-Path $DriverBuildDir "$chsName.CPD"
+    $chsVerify = Join-Path $DriverBuildDir "$chsName.verify.bin"
+    Remove-Item -LiteralPath $chsRaw, $chsPacked, $chsVerify -Force -ErrorAction SilentlyContinue
+    & $SjasmPlus '--nologo' '--msg=err' '-DIDE_CHS' `
+        "--raw=$ProjectRootAscii/Build/driver-runtime/$chsName.bin" `
+        "--sym=$ProjectRootAscii/Build/driver-runtime/$chsName.sym" `
+        "--lst=$ProjectRootAscii/Build/driver-runtime/$chsName.lst" `
+        "$ProjectRootAscii/source/$driverName.ASM"
+    if ($LASTEXITCODE -ne 0) { throw "$chsName assembly failed." }
+    if ((Get-Item -LiteralPath $chsRaw).Length -gt 0x800) { throw "$chsName exceeds the #3800..#3FFF driver window." }
+    Push-Location -LiteralPath $ProjectRootAlias
+    try {
+        & $Mhmt '-hst' '-zxh' "$ProjectRootAscii/Build/driver-runtime/$chsName.bin" `
+            "$ProjectRootAscii/Build/driver-runtime/$chsName.CPD"
+        if ($LASTEXITCODE -ne 0) { throw "$chsName packing failed." }
+        Set-HrustPackedLength -Path $chsPacked
+        & $Mhmt '-hst' '-zxh' '-d' "$ProjectRootAscii/Build/driver-runtime/$chsName.CPD" `
+            "$ProjectRootAscii/Build/driver-runtime/$chsName.verify.bin"
+        if ($LASTEXITCODE -ne 0) { throw "$chsName unpack check failed." }
+    } finally {
+        Pop-Location
+    }
+    if ((Get-FileHash -LiteralPath $chsRaw -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $chsVerify -Algorithm SHA256).Hash) {
+        throw "$chsName packed runtime does not unpack byte-for-byte."
+    }
+    Remove-Item -LiteralPath $chsVerify -Force
+}
+$global:LASTEXITCODE = 0
+# Claude - 2026-11-17 - end
 # Codex - 2026-07-16 - begin
 # Codex - 2026-07-17 - begin
 # После аппаратно выявленного отказа записи боевой CORE32 снова использует

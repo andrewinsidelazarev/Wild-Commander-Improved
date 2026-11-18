@@ -191,6 +191,17 @@ RESIDENT_BASE                 EQU #5176
 ; при значении ≠1 выводит сообщение и останавливает машину.
 OVERLAY_STATE                 EQU RESIDENT_BASE
 FILEX_REQUIRED                EQU RESIDENT_BASE+1
+; Claude - 2026-11-17 - begin
+; Драйверы IDE Nemo и SMUC с адресацией CHS (build.ps1, ключ IDE_CHS) едут
+; HR-потоками в FILEX.WMF. Каталог — в его странице сразу за установщиком
+; (#C009 окна FILEX): байт-метка и два слова — смещения потоков от начала
+; страницы. UNPACK_DRIVER (CORE32_EXT) при OVERLAY_STATE=1 распаковывает
+; Nemo и SMUC оттуда (docs/03, 8.1).
+FILEX_CHS_DIR_OFFSET          EQU #0009
+FILEX_CHS_MAGIC               EQU #C5
+FILEX_CHS_NEMO                EQU 1            ; смещение слова в каталоге
+FILEX_CHS_SMUC                EQU 3
+; Claude - 2026-11-17 - end
 ; Второй резидентный блок: страница #05 от #56C0 до DEHR (#5AAA), за кодом
 ; WMF #11 (#5300..#567F, запас до #56BF на его рост; с 2026-10-11 блок начат
 ; на 64 байта раньше — под проверку вынутой карты).

@@ -68,6 +68,17 @@ FILEX_INSTALL:
 ; Claude - 2026-10-10 - begin
         JP FILEX_OVERLAY_INSTALL-#4000          ; та же страница по #8000
 ; Claude - 2026-10-10 - end
+; Claude - 2026-11-17 - begin
+; Каталог драйверов IDE с CHS (CORE32_EXT_API.ASM, FILEX_CHS_*): метка и
+; смещения потоков от начала страницы. Не исполняется.
+FILEX_CHS_DIR:
+        ASSERT $ == #C000+FILEX_CHS_DIR_OFFSET, сдвинулся каталог драйверов CHS
+        DB FILEX_CHS_MAGIC
+        ASSERT $ == FILEX_CHS_DIR+FILEX_CHS_NEMO
+        DW FILEX_CHS_NEMO_STREAM-#C000
+        ASSERT $ == FILEX_CHS_DIR+FILEX_CHS_SMUC
+        DW FILEX_CHS_SMUC_STREAM-#C000
+; Claude - 2026-11-17 - end
         DS #C010-$,0
         ASSERT $ == #C010, изменился фиксированный вход FILEX
 
@@ -136,6 +147,14 @@ FILEX_OVERLAY_IMAGE:
         INCBIN "../../../Build/CORE32_EXT_OVL.bin"
         ASSERT $-FILEX_OVERLAY_IMAGE == EXT_OVERLAY_LENGTH, оверлей не той длины
 ; Claude - 2026-10-10 - end
+; Claude - 2026-11-17 - begin
+; Драйверы IDE Nemo и SMUC с адресацией CHS (build.ps1, ключ IDE_CHS): их
+; распаковывает отсюда UNPACK_DRIVER ядра, страница — в окне #8000.
+FILEX_CHS_NEMO_STREAM:
+        INCBIN "../../../Build/driver-runtime/DIDENEMO_CHS.CPD"
+FILEX_CHS_SMUC_STREAM:
+        INCBIN "../../../Build/driver-runtime/DIDESMUC_CHS.CPD"
+; Claude - 2026-11-17 - end
 
 MAIN_RUNTIME_END:
         ASSERT MAIN_RUNTIME_END-#C000 <= #4000, FILEX вышел за одну страницу

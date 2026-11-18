@@ -368,5 +368,95 @@ class DriverSwap(unittest.TestCase):
         self.assertEqual(self.e8[drivers:drivers + count], core[start - 0x4000:start - 0x4000 + count])
 
 
+class Machine8(Machine):
+    """Machine и окно #8000 по страницам (порт #12AF)."""
+
+    def __init__(self):
+        super().__init__()
+        self.banks8 = {2: bytes(self.cpu.memory[0x8000:0xC000])}
+        self.mapped8 = 2
+
+    def inp(self, port):
+        if port == 0x12AF:
+            return self.mapped8
+        return super().inp(port)
+
+    def out(self, port, value):
+        if port == 0x12AF:
+            self.ports.append((port, value))
+            self.banks8[self.mapped8] = bytes(self.cpu.memory[0x8000:0xC000])
+            self.cpu.set_memory_block(0x8000, self.banks8[value])
+            self.mapped8 = value
+            return
+        super().out(port, value)
+
+
+class DriverSwapChs(DriverSwap):
+    """Claude - 2026-11-17: после установки FILEX (OVERLAY_STATE=1) DOS_SWP
+    распаковывает Nemo и SMUC в варианте с адресацией CHS (source/IDE_CHS.INC)
+    из страницы FILEX — каталог FILEX_CHS_* сразу за его установщиком. На время
+    DEHR страница FILEX стоит в окне #8000, потом окно получает прежнюю. SD-ZC
+    и NGS — прежние. Чужая метка каталога — штатные потоки."""
+
+    FILEX_PAGE = 0x70
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = Machine8()
+        m = cls.m
+        m.call(m.sym['WDOS.INSTALL_WILDDOS'])
+        cls.e8 = m.page(0xE8)
+        ext = ext_symbols()
+        cls.filex = (ROOT / 'Build/FILEX.WMF').read_bytes()[512:]
+        m.banks8[cls.FILEX_PAGE] = cls.filex + bytes(0x4000 - len(cls.filex))
+        m.banks8[0x33] = bytes([0x77]) * 0x4000
+        m.cpu.memory[0x6A48] = cls.FILEX_PAGE                  # операнд шлюза API 77
+        m.cpu.memory[ext['WDOS_EXT.RESIDENT_START']] = 1       # OVERLAY_STATE: FILEX поставлен
+        cls.chs = {name: (ROOT / f'Build/driver-runtime/{name}_CHS.bin').read_bytes()
+                   for name in ('DIDENEMO', 'DIDESMUC')}
+
+    def swap_from(self, a, page8=0x33):
+        m = self.m
+        m.out(0x12AF, page8)
+        m.ports.clear()
+        selected, driver = self.swap(a)
+        return selected, driver
+
+    def test_every_device_gets_the_same_driver(self):
+        cases = ((0, 'DIDENEMO', 0), (5, 'DIDENEMO', 1), (3, 'DIDESMUC', 0), (4, 'DIDESMUC', 1))
+        for a, name, slave in cases:
+            with self.subTest(a=a, driver=name):
+                selected, driver = self.swap_from(a)
+                self.assertEqual(selected, [(slave, 3)], 'SELDEV: A и страница #C000')
+                image = self.chs[name]
+                expected = image + bytes([self.FILL]) * (0x800 - len(image))
+                self.assertEqual(driver, expected, 'драйвер с CHS по #3800')
+                self.assertEqual((self.m.mapped8, self.m.mapped), (0x33, 3), 'окна #8000 и #C000 не возвращены')
+                self.assertEqual([p for p in self.m.ports if p[0] == 0x12AF],
+                                 [(0x12AF, self.FILEX_PAGE), (0x12AF, 0x33)])
+                self.assertEqual(self.m.page(0xE8), self.e8, 'страница #E8 изменилась')
+        for a, name in ((1, 'DR2'), (2, 'DR3'), (6, 'DR2')):
+            with self.subTest(a=a, driver=name):
+                selected, driver = self.swap_from(a)
+                reference = self.reference(name)
+                self.assertEqual(driver[0x80:], reference[0x80:], 'не IDE — штатный драйвер')
+                self.assertEqual([p for p in self.m.ports if p[0] == 0x12AF], [], 'окно #8000 не трогается')
+
+    def test_foreign_directory(self):
+        m = self.m
+        page = bytearray(m.banks8[self.FILEX_PAGE])
+        page[0x0009] ^= 0xFF                                     # не та метка
+        m.banks8[self.FILEX_PAGE] = bytes(page)
+        try:
+            selected, driver = self.swap_from(0)
+            self.assertEqual(driver, self.reference('DR1'), 'Nemo — штатный поток')
+            self.assertEqual(m.mapped8, 0x33)
+        finally:
+            page[0x0009] ^= 0xFF
+            m.banks8[self.FILEX_PAGE] = bytes(page)
+
+    test_drivers_moved_whole = None                         # проверено в DriverSwap
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

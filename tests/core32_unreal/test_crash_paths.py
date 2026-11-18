@@ -1143,9 +1143,10 @@ class RootChain(unittest.TestCase):
 
     def test_long_root(self):
         # Codex 33: корень длиннее прежних 128 кластеров терял хвост. Теперь в
-        # таблице до ROOT_MAX=768 — корень FAT32 при кластере от 4 КиБ целиком.
-        # Защищены и 129-й, и 768-й; за 768-м — не в таблице (docs/04).
-        for length, target, protected in ((300, 290, True), (768, 767, True), (769, 768, False)):
+        # таблице до ROOT_MAX=744 (до 2026-11-17 — 768) — корень FAT32 при
+        # кластере от 4 КиБ целиком. Защищены и 129-й, и 744-й; за 744-м — не в
+        # таблице (docs/04).
+        for length, target, protected in ((300, 290, True), (744, 743, True), (745, 744, False)):
             with self.subTest(length=length, target=target):
                 root = [DIR_CLUSTER] + list(range(40, 40 + length - 1))
                 volume = self.volume(root, fat_sectors=16)

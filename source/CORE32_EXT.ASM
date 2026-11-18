@@ -601,10 +601,10 @@ IS_ROOT_CLUSTER:
 
 ; ROOT_BUILD: кластеры цепочки корня (от BROOTC) — в ROOT_CLUSTERS, их число —
 ; в ROOT_COUNT, бит каждого (младшие 11 бит номера) — в ROOT_FILTER. Дальше
-; ROOT_MAX (768) не записываются: корень FAT32 — до 4096 секторов, и при
+; ROOT_MAX (744) не записываются: корень FAT32 — до 4096 секторов, и при
 ; кластере от 4 КиБ (SPC ≥ 8, до 512 кластеров) таблица держит его целиком;
-; длиннее бывает только при SPC 1..4 и корне больше 768 кластеров (больше
-; 12288 записей при SPC=1) — дальние кластеры такого корня не защищены
+; длиннее бывает только при SPC 1..4 и корне больше 744 кластеров (больше
+; 11904 записей при SPC=1) — дальние кластеры такого корня не защищены
 ; (docs/04). Обход — до конца цепочки, недопустимой ссылки (свободный, за
 ; томом) или до ROOT_MAX. Отказ чтения FAT — CF=1 и ROOT_FAILED≠0: ROOT_MEMBER
 ; тогда считает корнем любой кластер. Таблица одна на все тома и панели,
@@ -1367,7 +1367,10 @@ UNPACK_DRIVER:
         LD BC,DRIVERS_E8-@WDOS.DR1
         ADD HL,BC
 ; Claude - 2026-09-27 - end
-        CALL @WDOS.DEHR
+; Claude - 2026-11-17 - begin
+        CALL IDE_CHS_UNPACK                     ; Nemo/SMUC с CHS из FILEX — Z
+        CALL NZ,@WDOS.DEHR                      ; иначе штатный поток
+; Claude - 2026-11-17 - end
 ; Claude - 2026-10-11 - begin
         CALL ZC_GUARD_PATCH
 ; Claude - 2026-10-11 - end
@@ -1375,6 +1378,64 @@ UNPACK_DRIVER:
         LD A,B
         RET
 ; Codex - 2026-07-17 - end
+
+; Claude - 2026-11-17 - begin
+; IDE_CHS_UNPACK: HL — штатный поток в DRIVERS_E8, DE — DRVR. Nemo (DR1) и
+; SMUC (DR4) при поставленном FILEX (OVERLAY_STATE=1, та же сборка) берутся
+; в варианте с адресацией CHS для дисков без LBA (source/IDE_CHS.INC) из
+; страницы FILEX: она на время DEHR стоит в окне #8000 (шлюз расширения
+; держит DI), потом окно получает прежнюю страницу. До установки FILEX
+; (поток wc.ini загрузочного устройства) — штатные драйверы. Выход: Z —
+; распакован; NZ — нет (HL, DE прежние). Разрушает AF, BC.
+IDE_CHS_UNPACK:
+        LD A,(OVERLAY_STATE)
+        DEC A
+        RET NZ                                  ; FILEX не поставлен
+        PUSH HL
+        LD BC,DRIVERS_E8
+        OR A
+        SBC HL,BC
+        LD A,FILEX_CHS_NEMO
+        JR Z,.found
+        POP HL
+        PUSH HL
+        LD BC,DRIVERS_E8+@WDOS.DR4-@WDOS.DR1
+        OR A
+        SBC HL,BC
+        LD A,FILEX_CHS_SMUC
+        JR Z,.found
+        POP HL
+        RET                                     ; NZ от SBC
+.found:
+        LD BC,#12AF
+        IN L,(C)
+        PUSH HL                                 ; страница окна #8000
+        LD HL,(FILEX_PAGE_OPERAND-1)
+        OUT (C),H                               ; FILEX — в #8000
+        LD H,#80+high FILEX_CHS_DIR_OFFSET
+        ADD A,low FILEX_CHS_DIR_OFFSET
+        LD L,A                                  ; слово потока в каталоге
+        LD A,(#8000+FILEX_CHS_DIR_OFFSET)
+        CP FILEX_CHS_MAGIC
+        JR NZ,.restore                          ; NZ — штатный поток
+        LD A,(HL)
+        INC HL
+        LD H,(HL)
+        LD L,A
+        SET 7,H                                 ; смещение в странице — в окно #8000
+        CALL @WDOS.DEHR
+        XOR A
+.restore:
+        POP HL
+        LD BC,#12AF
+        OUT (C),L
+        POP HL
+        RET
+
+; Операнд LD A,#page резидентного шлюза API 77 — страница FILEX (пишет
+; установщик FILEX.WMF; адрес сверяет MD20 — FILEX_PROVIDER_PAGE_PATCH).
+FILEX_PAGE_OPERAND            EQU #6A48
+; Claude - 2026-11-17 - end
 
 ; Claude - 2026-10-11 - begin
 ; Точный штатный SD-ZC (DOSpSDZC35, адреса его распакованного образа) ждёт
@@ -5311,7 +5372,9 @@ OVERLAY_LENGTH                EQU OVERLAY_END-OVERLAY_START
 ; Рабочие таблицы без начальных значений — за концом распакованного
 ; расширения, в поток boot.$C не входят. Заполняются перед каждым
 ; использованием (ROOT_BUILD, DIR_CHAIN, ALIAS_RESET, ALIAS_SCAN с A=0).
-ROOT_MAX                      EQU 768
+; Claude - 2026-11-17: 768 -> 744 — место в #E8 под выбор драйверов IDE с
+; CHS (IDE_CHS_UNPACK); корень при кластере от 4 КиБ по-прежнему целиком.
+ROOT_MAX                      EQU 744
 ROOT_FAILED                   EQU OVERLAY_END          ; ≠0 — FAT корня не прочиталась
 ROOT_COUNT                    EQU ROOT_FAILED+1        ; 2 байта
 ROOT_FILTER                   EQU ROOT_COUNT+2         ; 256 байт: бит (кластер & 2047)

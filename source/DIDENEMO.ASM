@@ -153,6 +153,9 @@ PROZ    LD A,H,H,D,D,E,E,A
 REINI   RET
 
 REREG   PUSH HL,DE
+        IFDEF IDE_CHS
+        LD A,(CHS_SPT):OR A:JP NZ,CHS_REREG     ; диск без LBA (IDE_CHS.INC)
+        ENDIF
         LD HL,(BLKNUM)
         LD DE,(BLKNUM+2)
 
@@ -250,7 +253,11 @@ SET_CHA LD A,(DRVRE)
 
 
 ; Проверить наличие IDE-команды IDENTIFY и корректность адресных регистров.
-NEMOini CALL SET_CHA
+NEMOini
+        IFDEF IDE_CHS
+        CALL CHS_RESET
+        ENDIF
+        CALL SET_CHA
         LD A,#08:CALL COMM
 
         LD HL,256:CALL YDET:JR NZ,RU
@@ -272,7 +279,11 @@ NEMOini CALL SET_CHA
 RU      LD A,1:OR A
         RET
 
-KRU     XOR A
+KRU
+        IFDEF IDE_CHS
+        CALL CHS_SETUP:JR NZ,RU
+        ENDIF
+        XOR A
         RET
 
 
@@ -411,6 +422,10 @@ HUD
         INC H
         DEC D:JR NZ,HU2
         JR ENDR256
+
+        IFDEF IDE_CHS
+        INCLUDE "IDE_CHS.INC"
+        ENDIF
 
 STS     EQU #27AF
 
