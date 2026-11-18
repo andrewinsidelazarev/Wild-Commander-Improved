@@ -13,9 +13,10 @@ SPG и WMF. Плагины добавляют работу с архивами, 
 В репозитории находятся исходники, готовый комплект для запуска,
 скрипт сборки, тесты и документация.
 
-**Текущий выпуск:** [v1.11i от 11 октября 2026 года](https://github.com/andrewinsidelazarev/Wild-Commander-Improved/releases/tag/v1.11i-2026-10-11).
+**Текущий выпуск:** [v1.11i от 18 ноября 2026 года](https://github.com/andrewinsidelazarev/Wild-Commander-Improved/releases/tag/v1.11i-2026-11-18).
 
 **Быстрые ссылки:** [готовый `boot.$C`](exe/boot.$C) ·
+[FORMAT — разметка дисков в FAT32](source/plugins/format/README.md) ·
 [FDI2FDD — запись FDI на дискету](source/plugins/FDI2FDD/README.md) ·
 [TXTEDIT.WMF](exe/WC/TXTEDIT.WMF) ·
 [Text/HEX Viewer](source/plugins/txthex_viewer/README.md) ·
@@ -26,6 +27,24 @@ SPG и WMF. Плагины добавляют работу с архивами, 
 [аудит и ограничения](source/CORE32_audit.md).
 
 ## Зачем обновляться
+
+В выпуске **v1.11i от 2026-11-18**:
+
+- новый плагин **FORMAT** (`FORMAT.WMF`, «FAT32 format»): MBR и один раздел
+  FAT32 на всё устройство — SD-карта Z-Controller (слоты 1 и 2), IDE Nemo и
+  SMUC (master и slave), SD-карта на NeoGS; кластер по таблице Microsoft или
+  вручную, метка тома; устройство, с которого загружен WC, форматировать
+  нельзя;
+- **FORMAT не рекомендуется добавлять в `[PLUGINS]` `wc.ini`** (в меню F10),
+  чтобы случайно не стереть диск: Enter на `FORMAT.WMF` в каталоге `/WC`
+  загружает плагин, после этого он есть в F10 до перезапуска WC;
+- драйверы IDE Nemo и SMUC работают с дисками без LBA (только CHS);
+- FTViewConvert: режимы VDAC2 и VDAC4 (кадр до 640×480, звук MP3 44,1 кГц
+  стерео для плагина FTVIEW4).
+
+**Обязательно обновить** `boot.$C` вместе с `WC/FILEX.WMF` (общий штамп
+сборки) и добавить `WC/FORMAT.WMF`. `wc.ini` и остальные файлы — как в
+выпуске от 2026-10-11. [Изменения выпуска](docs/releases/v1.11i-2026-11-18.md).
 
 В выпуске **v1.11i от 2026-10-11**:
 
@@ -224,7 +243,10 @@ Up/Down собирают только новую строку; на `nedoos.txt`
    [wc.ini](exe/WC/wc.ini) эта строка уже стоит после `UNZIP.WMF`.
    Для записи образов FDI на настоящую дискету — так же
    [FDI2FDD.WMF](exe/WC/FDI2FDD.WMF) и строка `FDI2FDD.WMF` (в комплектном
-   `wc.ini` — после `TRDUMP.WMF`).
+   `wc.ini` — после `TRDUMP.WMF`). Для разметки дисков в FAT32 скопируйте
+   [FORMAT.WMF](exe/WC/FORMAT.WMF) в каталог `WC`, но в `[PLUGINS]` его не
+   добавляйте: Enter на `FORMAT.WMF` загружает плагин, после этого он есть в
+   меню F10 до перезапуска WC.
 6. После запуска убедитесь, что заголовок показывает `Wild Commander v1.11i`,
    затем проверьте копирование и удаление ненужного тестового файла.
 7. Для отката запишите сохранённые старые `boot.$C` и каталог `WC`: миграции
@@ -234,8 +256,8 @@ Up/Down собирают только новую строку; на `nedoos.txt`
 Намеренно отличаются `boot.$C`, `Help.txt`, `WC/wc.ini`, `WC/FTVIEW.WMF`,
 `WC/TXTEDIT.WMF`, `WC/VIDEO_PL.WMF`, `WC_History.txt`, `WC_todo.txt`; новые —
 `WC/FILEX.WMF`, `WC/PLM.WMF`, `WC/SETUP.WMF`, `WC/UNZIP.WMF`, `WC/CHKDSK.WMF`,
-`WC/FDI2FDD.WMF`, `WC/TXTVIEW.WMF`, `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`; прежний `WC/RE.WMF`
-заменён на `WC/TXTVIEW.WMF`. `Build/CORE32_EXT.bin`,
+`WC/FDI2FDD.WMF`, `WC/FORMAT.WMF`, `WC/TXTVIEW.WMF`, `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`;
+прежний `WC/RE.WMF` заменён на `WC/TXTVIEW.WMF`. `Build/CORE32_EXT.bin`,
 `Build/CORE32_EXT.CPD`, `CORE32T.WMF`, `FILEXT.WMF` и `FILEXNST.WMF` на носитель
 копировать не нужно: это встроенные части или тестовые артефакты.
 
@@ -402,8 +424,8 @@ F7. После выхода тестового плагина с кодом `3` 
 - намеренно изменены `boot.$C`, `Help.txt`, `WC/wc.ini`, `WC/FTVIEW.WMF`,
   `WC/TXTEDIT.WMF`, `WC/VIDEO_PL.WMF`, `WC_History.txt`, `WC_todo.txt`;
 - новые `WC/FILEX.WMF`, `WC/PLM.WMF`, `WC/SETUP.WMF`, `WC/TXTVIEW.WMF`,
-  `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`, `WC/UNZIP.WMF`, `WC/CHKDSK.WMF` и
-  `WC/FDI2FDD.WMF` отмечены как `EXTRA_ACTUAL`; прежний `WC/RE.WMF` — как `MISSING_ACTUAL` после
+  `WC/TXTVIEW2.WMF`, `WC/TXTVIEW2.LIC`, `WC/UNZIP.WMF`, `WC/CHKDSK.WMF`,
+  `WC/FDI2FDD.WMF` и `WC/FORMAT.WMF` отмечены как `EXTRA_ACTUAL`; прежний `WC/RE.WMF` — как `MISSING_ACTUAL` после
   переименования.
 
 Рабочие исследованные файлы имеют синтаксис SJASMPlus, кодировку UTF-8 без BOM
