@@ -193,6 +193,7 @@ foreach ($driverName in 'DIDENEMO', 'DIDESMUC') {
 }
 $global:LASTEXITCODE = 0
 # Claude - 2026-11-17 - end
+
 # Codex - 2026-07-16 - begin
 # Codex - 2026-07-17 - begin
 # После аппаратно выявленного отказа записи боевой CORE32 снова использует
@@ -727,6 +728,24 @@ if ($env:WC_SKIP_FDI2FDD_TESTS -eq '1') {
 }
 # Claude - 2026-10-01 - end
 
+# Claude - 2026-11-18 - begin
+# FORMAT.WMF — пункт F10 «FAT32 format»: MBR и один раздел FAT32 на всё
+# устройство. Набор плагина сверяет расчёт разметки и собранные сектора
+# собранного кода (настоящий Z80) с эталоном fat32_layout.py.
+$FormatProject = Join-Path $ProjectRoot 'source\plugins\format'
+$FormatOutput = Join-Path $FormatProject 'build\FORMAT.WMF'
+Remove-Item -LiteralPath $FormatOutput -Force -ErrorAction SilentlyContinue
+& (Join-Path $FormatProject 'build.ps1') -SjasmPlus $SjasmPlus
+if (-not (Test-Path -LiteralPath $FormatOutput -PathType Leaf)) {
+    throw 'FORMAT.WMF was not created.'
+}
+Push-Location (Join-Path $FormatProject 'tests')
+try {
+    & python -B -m unittest test_layout test_sectors
+    if ($LASTEXITCODE -ne 0) { throw 'FORMAT plugin tests failed.' }
+} finally { Pop-Location }
+# Claude - 2026-11-18 - end
+
 # Codex - 2026-07-16 - begin
 $MainSourceAscii = "$ProjectRootAscii/source/BOOT.ASM"
 $PayloadAscii = "$ProjectRootAscii/Build/boot.payload.bin"
@@ -1117,6 +1136,13 @@ if ($LASTEXITCODE -ne 0) { throw 'SETUP runtime installation failed.' }
     --plugin $Fdi2FddOutput `
     --wc-dir (Join-Path $ExeDir 'WC')
 if ($LASTEXITCODE -ne 0) { throw 'FDI2FDD runtime installation failed.' }
+# Разметка дисков в FAT32 — только файл в WC: в [PLUGINS] её не добавляем,
+# чтобы случайным выбором в F10 не стереть диск; загружают её Enter'ом на
+# FORMAT.WMF в /WC, после этого она есть в F10 до конца сеанса.
+& python (Join-Path $ProjectRoot 'tools\install_format_runtime.py') `
+    --plugin $FormatOutput `
+    --wc-dir (Join-Path $ExeDir 'WC')
+if ($LASTEXITCODE -ne 0) { throw 'FORMAT runtime installation failed.' }
 # Эталоны перехватов сверяются с собранным boot.$C, а рабочие подпрограммы
 # исполняются настоящим Z80 на модели страниц TS-Conf.
 & python (Join-Path $ProjectRoot 'tests\core32_unreal\test_plugin_manager.py')
@@ -1153,7 +1179,7 @@ if ($HashExitCode -ne 0) {
         'WC/FILEX.WMF', 'WC/TXTEDIT.WMF', 'WC/RE.WMF', 'WC/TXTVIEW.WMF',
         'WC/TXTVIEW2.WMF', 'WC/TXTVIEW2.LIC', 'WC/UNZIP.WMF',
         'WC/CHKDSK.WMF', 'WC/FTVIEW.WMF', 'WC/VIDEO_PL.WMF', 'WC/PLM.WMF', 'WC/SETUP.WMF',
-        'WC/FDI2FDD.WMF', 'WC/wc.ini'
+        'WC/FDI2FDD.WMF', 'WC/FORMAT.WMF', 'WC/wc.ini'
     )
     $MismatchPaths = @($Mismatches | ForEach-Object { $_.path })
     $Unexpected = @($MismatchPaths | Where-Object { $ExpectedMismatchPaths -inotcontains $_ })
@@ -1174,13 +1200,14 @@ if ($HashExitCode -ne 0) {
             'WC/PLM.WMF' { 'EXTRA_ACTUAL' }
             'WC/SETUP.WMF' { 'EXTRA_ACTUAL' }
             'WC/FDI2FDD.WMF' { 'EXTRA_ACTUAL' }
+            'WC/FORMAT.WMF' { 'EXTRA_ACTUAL' }
             default { $null }
         }
         if ($ExpectedStatus -and $Mismatch.status -ne $ExpectedStatus) {
             throw "Unexpected audit status for $($Mismatch.path): $($Mismatch.status)"
         }
     }
-    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, VIDEO_PL, PLM plugin manager, SETUP settings plugin, FDI2FDD floppy writer, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
+    Write-Warning 'boot.$C, FILEX, TXTEDIT, TXTVIEW (renamed from RE), TXTVIEW2 with font license, UNZIP, CHKDSK, FTVIEW, VIDEO_PL, PLM plugin manager, SETUP settings plugin, FDI2FDD floppy writer, FORMAT disk formatter, runtime config and Improved history intentionally differ from the reference; all other runtime files match.'
     # Ожидаемые отличия уже строго проверены. Не оставлять код 1
     # verify_hashes.py в $LASTEXITCODE: вызывающий автономный цикл иначе
     # ошибочно принимает успешно завершённую сборку за провал.
